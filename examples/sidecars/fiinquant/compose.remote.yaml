@@ -1,0 +1,4 @@
+services:
+  fiinquant-sidecar:
+    ports:
+      - "${SIDECAR_BIND_ADDRESS:?Set SIDECAR_BIND_ADDRESS to a private LAN or Tailscale IP}:8720:8720"

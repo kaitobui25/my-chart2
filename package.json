@@ -1,0 +1,80 @@
+{
+  "name": "lamlong-chart",
+  "version": "0.1.0",
+  "description": "L2Chart is a fast, lightweight, extensible financial charting library with a browser-native Canvas 2D engine",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "pviet85",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pviet85/lamlong-charts.git"
+  },
+  "homepage": "https://github.com/pviet85/lamlong-charts#readme",
+  "bugs": {
+    "url": "https://github.com/pviet85/lamlong-charts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./lib-dist/lamlong-chart.js",
+  "module": "./lib-dist/lamlong-chart.js",
+  "types": "./lib-dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib-dist/types/index.d.ts",
+      "import": "./lib-dist/lamlong-chart.js"
+    },
+    "./style.css": "./lib-dist/lamlong-chart.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib-dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "keywords": [
+    "chart",
+    "financial-chart",
+    "candlestick",
+    "technical-analysis",
+    "canvas"
+  ],
+  "scripts": {
+    "dev": "vite --config examples/workstation/vite.config.ts",
+    "build": "npm run build:demo",
+    "build:demo": "vite build --config examples/workstation/vite.config.ts",
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
+    "preview": "vite preview --config examples/workstation/vite.config.ts",
+    "preview:lan": "npm run build:demo && vite preview --config examples/workstation/vite.config.ts --host 0.0.0.0 --port 53175 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:package && npm run test:sidecar",
+    "test:unit": "vitest run",
+    "test:browser": "playwright test",
+    "test:browser:serve": "vite --config tests/browser/vite.config.ts",
+    "test:package": "node scripts/verify-package.mjs",
+    "test:sidecar": "python3.11 -m unittest discover -s examples/sidecars/fiinquant",
+    "verify": "npm run typecheck && npm run build:demo && npm test && npm run test:browser",
+    "verify:release": "node scripts/verify-release.mjs",
+    "prepublishOnly": "npm run verify:release && npm run typecheck && npm run test:unit && npm run test:package",
+    "prepack": "npm run build:lib"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^20.19.43",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "lucide": "^1.25.0"
+  }
+}

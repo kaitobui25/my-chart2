@@ -1,0 +1,222 @@
+import { createHmac, randomUUID } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { fileURLToPath } from 'node:url';
+import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
+
+const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
+const WORKSTATION_ROOT = fileURLToPath(new URL('.', import.meta.url));
+
+interface DnseProxyCredentials {
+  apiKey: string;
+  apiSecret: string;
+}
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function formatDateHeader(date: Date): string {
+  return `${DAY_NAMES[date.getUTCDay()]}, ${pad2(date.getUTCDate())} ${
+    MONTH_NAMES[date.getUTCMonth()]
+  } ${date.getUTCFullYear()} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(
+    date.getUTCSeconds(),
+  )} +0000`;
+}
+
+function dnseSignatureHeaders(apiKey: string, apiSecret: string, method: string, path: string): HeadersInit {
+  const dateValue = formatDateHeader(new Date());
+  const nonce = randomUUID().replace(/-/g, '');
+  const signingString = `(request-target): ${method.toLowerCase()} ${path}\ndate: ${dateValue}\nnonce: ${nonce}`;
+  const signature = encodeURIComponent(createHmac('sha256', apiSecret).update(signingString, 'utf8').digest('base64'));
+  return {
+    Date: dateValue,
+    'X-Signature': `Signature keyId="${apiKey}",algorithm="hmac-sha256",headers="(request-target) date",signature="${signature}",nonce="${nonce}"`,
+    'x-api-key': apiKey,
+  };
+}
+
+async function readBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
+}
+
+function isLoopbackClient(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress?.replace(/^::ffff:/, '') ?? '';
+  return address === '127.0.0.1' || address === '::1';
+}
+
+function isAllowedBrowserRequest(req: IncomingMessage): boolean {
+  if (req.headers['sec-fetch-site'] === 'cross-site') return false;
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  const host = req.headers.host;
+  if (!host) return false;
+  try {
+    const url = new URL(origin);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.host === host;
+  } catch {
+    return false;
+  }
+}
+
+function dnseCredentialsFromRequest(req: IncomingMessage, credentials: DnseProxyCredentials): DnseProxyCredentials | null {
+  if (isLoopbackClient(req) && credentials.apiKey && credentials.apiSecret) {
+    return credentials;
+  }
+  const values = [req.headers['x-dnse-api-key'], req.headers['x-dnse-api-secret']];
+  if (!values.every((value) => typeof value === 'string' && value.length > 0)) return null;
+  const [apiKey, apiSecret] = values as [string, string];
+  return { apiKey, apiSecret };
+}
+
+function installDnseRestProxy(middlewares: {
+  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
+}, credentials: DnseProxyCredentials): void {
+  middlewares.use('/dnse-auth', (req, res) => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { message: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { message: 'Method not allowed' });
+      return;
+    }
+
+    const resolved = dnseCredentialsFromRequest(req, credentials);
+    if (!resolved) {
+      sendJson(res, 401, { message: 'Missing DNSE API Key/Secret in request headers or workstation .env' });
+      return;
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = String(Date.now() * 1000);
+    const message = `${resolved.apiKey}:${timestamp}:${nonce}`;
+    res.setHeader('cache-control', 'no-store');
+    sendJson(res, 200, {
+      action: 'auth',
+      api_key: resolved.apiKey,
+      signature: createHmac('sha256', resolved.apiSecret).update(message, 'utf8').digest('hex'),
+      timestamp,
+      nonce,
+    });
+  });
+
+  middlewares.use('/dnse-api', async (req, res) => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { message: 'Cross-site requests are not allowed' });
+      return;
+    }
+    try {
+      const resolved = dnseCredentialsFromRequest(req, credentials);
+      if (!resolved) {
+        sendJson(res, 401, { message: 'Missing DNSE API Key/Secret in request headers or workstation .env' });
+        return;
+      }
+
+      const rawUrl = req.url || '/';
+      const localUrl = new URL(rawUrl, 'http://127.0.0.1');
+      const dnsePath = localUrl.pathname;
+      const dnseUrl = `${DNSE_REST_TARGET}${dnsePath}${localUrl.search}`;
+      const body = await readBody(req);
+      const headers: HeadersInit = {
+        ...dnseSignatureHeaders(resolved.apiKey, resolved.apiSecret, req.method || 'GET', dnsePath),
+      };
+      if (body && body.length > 0) headers['Content-Type'] = req.headers['content-type'] || 'application/json';
+
+      const upstream = await fetch(dnseUrl, {
+        method: req.method,
+        headers,
+        body,
+      });
+      res.statusCode = upstream.status;
+      upstream.headers.forEach((value, key) => {
+        if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+          res.setHeader(key, value);
+        }
+      });
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (err) {
+      sendJson(res, 502, { message: err instanceof Error ? err.message : 'DNSE proxy error' });
+    }
+  });
+}
+
+function dnseRestProxy(credentials: DnseProxyCredentials): Plugin {
+  return {
+    name: 'l2chart-dnse-rest-proxy',
+    configureServer(server) {
+      installDnseRestProxy(server.middlewares, credentials);
+    },
+    configurePreviewServer(server) {
+      installDnseRestProxy(server.middlewares, credentials);
+    },
+  };
+}
+
+function providerProxy(fiinQuantSidecarToken: string): Record<string, string | ProxyOptions> {
+  return {
+    '/fiinquant-api': {
+      target: 'http://127.0.0.1:8720',
+      changeOrigin: true,
+      ws: true,
+      rewrite: (path) => path.replace(/^\/fiinquant-api/, ''),
+      bypass(request, response) {
+        if (isAllowedBrowserRequest(request)) return;
+        sendJson(response, 403, { message: 'Cross-site requests are not allowed' });
+        return false;
+      },
+      configure(proxy) {
+        const addServerToken = (proxyRequest: { setHeader(name: string, value: string): void }, request: IncomingMessage) => {
+          if (fiinQuantSidecarToken && isLoopbackClient(request) && isAllowedBrowserRequest(request)) {
+            proxyRequest.setHeader('X-L2Chart-Sidecar-Token', fiinQuantSidecarToken);
+          }
+        };
+        proxy.on('proxyReq', addServerToken);
+        proxy.on('proxyReqWs', addServerToken);
+      },
+    },
+    '/dnse-ws': {
+      target: 'wss://ws-openapi.dnse.com.vn',
+      changeOrigin: true,
+      ws: true,
+      rewrite: (path) => path.replace(/^\/dnse-ws/, ''),
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, WORKSTATION_ROOT, '');
+  const credentials = {
+    apiKey: env.DNSE_API_KEY?.trim() ?? '',
+    apiSecret: env.DNSE_API_SECRET?.trim() ?? '',
+  };
+  const proxies = providerProxy(env.FIINQUANT_SIDECAR_TOKEN?.trim() ?? '');
+  return {
+    root: WORKSTATION_ROOT,
+    plugins: [dnseRestProxy(credentials)],
+    build: {
+      outDir: '../../dist',
+      emptyOutDir: true,
+    },
+    server: {
+      host: '127.0.0.1',
+      port: 53173,
+      strictPort: true,
+      proxy: proxies,
+    },
+    preview: {
+      proxy: proxies,
+    },
+  };
+});

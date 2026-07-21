@@ -1,0 +1,23 @@
+node_modules/
+dist/
+lib-dist/
+coverage/
+output/
+*.tgz
+.env
+.env.*
+!.env.example
+*.local
+.DS_Store
+.playwright-cli/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local indicators are private by default.
+src/indicators/custom/*
+!src/indicators/custom/README.md
+
+# Credentials for the optional reference sidecar
+examples/sidecars/fiinquant/.env
+examples/sidecars/fiinquant/.venv/

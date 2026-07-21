@@ -1,0 +1,382 @@
+.l2chart-legend {
+  max-width: calc(100% - 106px);
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 5%);
+  border-radius: 5px;
+  background: rgb(8 12 15 / 18%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 4%);
+  color: var(--text, #edf1f3);
+  font-family: var(--sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+}
+
+.l2chart-legend-main {
+  padding-right: 32px;
+}
+
+.l2chart-legend-main.l2chart-legend-collapsed {
+  max-width: calc(100% - 8px);
+}
+
+.l2chart-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  min-height: 26px;
+  pointer-events: none;
+}
+
+.l2chart-legend-primary {
+  max-width: 100%;
+  gap: 6px;
+}
+
+.l2chart-legend-primary-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.l2chart-legend-primary.collapsed {
+  min-width: 96px;
+}
+
+.l2chart-legend-toggle {
+  flex: 0 0 auto;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  background: rgb(16 27 36 / 70%);
+}
+
+.l2chart-legend-toggle svg {
+  width: 15px;
+  height: 15px;
+}
+
+.l2chart-legend-row[data-indicator-row] {
+  margin-left: -4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.l2chart-legend-row[data-indicator-row]:hover,
+.l2chart-legend-row.selected {
+  color: var(--text, #edf1f3) !important;
+  background: rgb(59 130 246 / 12%);
+  box-shadow: inset 2px 0 0 var(--accent, #4aa8ff);
+}
+
+.l2chart-legend-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  pointer-events: auto;
+}
+
+.l2chart-legend-action {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: rgb(18 25 31 / 62%);
+  color: var(--text-dim, #8a969d);
+  opacity: 0.9;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.l2chart-legend-action svg {
+  width: 18px;
+  height: 18px;
+}
+
+.l2chart-legend-settings:hover,
+.l2chart-legend-settings:focus-visible,
+.l2chart-legend-toggle:hover,
+.l2chart-legend-toggle:focus-visible {
+  border-color: rgb(120 169 230 / 38%);
+  background: rgb(120 169 230 / 14%);
+  color: var(--accent, #4aa8ff);
+  opacity: 1;
+  outline: 0;
+}
+
+.l2chart-legend-remove:hover,
+.l2chart-legend-remove:focus-visible {
+  border-color: rgb(239 98 98 / 35%);
+  background: rgb(239 98 98 / 13%);
+  color: var(--down, #ef6262);
+  opacity: 1;
+  outline: 0;
+}
+
+.l2chart-price-scale-menu {
+  position: absolute;
+  z-index: 80;
+  width: 270px;
+  padding: 7px;
+  color: #dfe7ef;
+  background: #171b20;
+  border: 1px solid #303842;
+  border-radius: 6px;
+  box-shadow: 0 18px 44px rgb(0 0 0 / 42%);
+  font: 500 13px/1.25 var(--sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+}
+
+.l2chart-price-scale-menu[hidden],
+.l2chart-indicator-context[hidden] {
+  display: none;
+}
+
+.l2chart-price-scale-menu button {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px 0 5px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.l2chart-price-scale-menu button:hover,
+.l2chart-price-scale-menu button:focus-visible {
+  color: #fff;
+  background: #27303a;
+  outline: none;
+}
+
+.l2chart-price-scale-check {
+  color: #70b7ff;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.l2chart-price-scale-menu kbd {
+  color: #7e8a96;
+  font: inherit;
+  font-size: 11px;
+}
+
+.l2chart-price-scale-divider {
+  display: block;
+  height: 1px;
+  margin: 6px -7px;
+  background: #303842;
+}
+
+.l2chart-indicator-context {
+  position: absolute;
+  z-index: 75;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 5px;
+  border: 1px solid #36434f;
+  border-radius: 6px;
+  background: rgb(18 23 28 / 96%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 36%);
+  color: var(--text, #edf1f3);
+  font-family: var(--sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+}
+
+.l2chart-indicator-context strong {
+  max-width: 180px;
+  padding: 0 8px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.l2chart-indicator-context button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #8a969d);
+  cursor: pointer;
+}
+
+.l2chart-indicator-context button:hover,
+.l2chart-indicator-context button:focus-visible {
+  border-color: rgb(59 130 246 / 40%);
+  background: rgb(59 130 246 / 14%);
+  color: #78aef0;
+  outline: 0;
+}
+
+.l2chart-indicator-context button.danger:hover,
+.l2chart-indicator-context button.danger:focus-visible {
+  border-color: rgb(239 98 98 / 38%);
+  background: rgb(239 98 98 / 13%);
+  color: var(--down, #ef6262);
+}
+
+body.light .l2chart-legend {
+  border-color: rgb(35 50 60 / 7%);
+  background: rgb(255 255 255 / 28%);
+  box-shadow: 0 2px 8px rgb(30 45 55 / 4%);
+}
+
+body.light .l2chart-legend-action {
+  color: #64737d;
+  background: rgb(255 255 255 / 82%);
+  border-color: #d9e0e5;
+}
+
+body.light .l2chart-legend-toggle {
+  background: rgb(245 249 252 / 86%);
+}
+
+body.light .l2chart-price-scale-menu {
+  color: #27313b;
+  background: #fff;
+  border-color: #cbd4dd;
+  box-shadow: 0 18px 44px rgb(31 42 52 / 18%);
+}
+
+body.light .l2chart-price-scale-menu button:hover,
+body.light .l2chart-price-scale-menu button:focus-visible {
+  background: #edf3f8;
+}
+
+body.light .l2chart-indicator-context {
+  border-color: #cbd5df;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 12px 30px rgb(31 42 52 / 18%);
+}
+
+.l2chart-pane-resizer {
+  position: relative;
+  z-index: 12;
+  flex: 0 0 10px;
+  height: 10px;
+  margin: -5px 0;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: 0;
+}
+
+.l2chart-pane-resizer::before {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  left: 18px;
+  height: 1px;
+  background: #45515c;
+  content: '';
+  opacity: 0.58;
+  transform: translateY(-50%);
+  transition: background 120ms ease, opacity 120ms ease;
+}
+
+.l2chart-pane-resizer::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 28px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid rgb(74 168 255 / 32%);
+  border-radius: 999px;
+  background: rgb(13 19 24 / 84%);
+  color: var(--accent, #4aa8ff);
+  content: '↕';
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.l2chart-pane-resizer:hover::before,
+.l2chart-pane-resizer:focus-visible::before,
+.l2chart-pane-resizer.dragging::before {
+  background: #38bdf8;
+  opacity: 0.8;
+}
+
+.l2chart-pane-resizer:hover::after,
+.l2chart-pane-resizer:focus-visible::after,
+.l2chart-pane-resizer.dragging::after {
+  border-color: rgb(56 189 248 / 75%);
+  background: rgb(11 23 31 / 96%);
+  color: #7dd3fc;
+  opacity: 1;
+}
+
+body.light .l2chart-pane-resizer::before {
+  background: #a6b1ba;
+}
+
+body.light .l2chart-pane-resizer::after {
+  border-color: rgb(22 137 216 / 32%);
+  background: rgb(255 255 255 / 92%);
+  color: #1689d8;
+}
+
+body.light .l2chart-pane-resizer:hover::before,
+body.light .l2chart-pane-resizer:focus-visible::before,
+body.light .l2chart-pane-resizer.dragging::before {
+  background: #1689d8;
+  opacity: 0.85;
+}
+
+body.light .l2chart-pane-resizer:hover::after,
+body.light .l2chart-pane-resizer:focus-visible::after,
+body.light .l2chart-pane-resizer.dragging::after {
+  border-color: rgb(22 137 216 / 70%);
+  background: #fff;
+  color: #0969b8;
+  opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .l2chart-legend-row {
+    min-height: 24px;
+  }
+
+  .l2chart-legend-action {
+    width: 24px;
+    height: 24px;
+  }
+
+  .l2chart-legend-toggle {
+    width: 22px;
+    height: 22px;
+  }
+
+  .l2chart-legend-action svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .l2chart-legend-toggle svg {
+    width: 15px;
+    height: 15px;
+  }
+}

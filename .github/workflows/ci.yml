@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting and types
+        run: |
+          git diff --check
+          npm run typecheck
+
+      - name: Test chart behavior
+        run: npm run test:unit
+
+      - name: Build workstation
+        run: npm run build:demo
+
+      - name: Verify npm package
+        run: npm run test:package
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test browser rendering and interaction
+        run: npm run test:browser
+
+  sidecar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            examples/sidecars/fiinquant/requirements.txt
+            examples/sidecars/fiinquant/requirements-provider.txt
+
+      - name: Install sidecar test dependency
+        run: python -m pip install aiohttp
+
+      - name: Test sidecar
+        run: python -m unittest discover -s examples/sidecars/fiinquant
+
+      - name: Audit runtime and provider dependencies
+        run: python scripts/audit-provider.py
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Scan tracked files
+        run: |
+          python -m pip install detect-secrets
+          detect-secrets-hook $(git ls-files)

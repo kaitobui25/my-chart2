@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>L2Chart — demo</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230b0d10'/%3E%3Cpath d='M13 2 3 14h7l-1 8 10-12h-7l1-8z' fill='%23a9c1ce'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar">
+        <span id="brand">
+          <span id="brand-bolt"><svg width="12" height="12" viewBox="0 0 24 24" fill="#ffffff"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg></span>
+          <span id="brand-name">L2<b>Chart</b></span>
+          <span id="brand-tag">v0.1</span>
+        </span>
+        <span class="divider"></span>
+        <div id="active-tile-controls" aria-label="Chart đang chọn"></div>
+        <span class="divider active-tile-divider"></span>
+        <div id="chart-type-wrap">
+          <button id="chart-type-btn" type="button" title="Loại biểu đồ" aria-label="Chọn loại biểu đồ" aria-expanded="false">
+            <span id="chart-type-icon" aria-hidden="true"></span>
+            <svg class="header-chevron" width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg>
+          </button>
+          <div id="chart-type-menu" hidden></div>
+        </div>
+        <div id="ind-wrap">
+          <button id="ind-btn" type="button" aria-haspopup="dialog">
+            <svg class="header-control-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-7 5 14 2-7h5"/></svg>
+            Chỉ báo<span id="ind-count"></span>
+          </button>
+        </div>
+        <div id="replay-wrap">
+          <button id="replay-btn" title="Mở Bar Replay cho chart đang chọn" aria-label="Mở Bar Replay cho chart đang chọn">
+            <span id="replay-icon" aria-hidden="true"></span>
+            <span id="replay-label">Replay</span>
+          </button>
+          <div id="replay-controls" hidden>
+            <span id="replay-status"></span>
+            <button id="replay-play" class="replay-icon-button" title="Phát hoặc dừng replay" aria-label="Phát hoặc dừng replay"></button>
+            <button id="replay-step" class="replay-icon-button" title="Tiến một nến" aria-label="Tiến một nến">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 5 7 7-7 7z"/><path d="M18 5v14"/></svg>
+            </button>
+            <button id="replay-speed" title="Đổi tốc độ replay">1×</button>
+            <button id="replay-stop" class="replay-icon-button danger" title="Quay lại dữ liệu thời gian thực" aria-label="Quay lại dữ liệu thời gian thực">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15-3L3 11"/><path d="M3 4v7h7"/><path d="M12 8v4l3 2"/></svg>
+            </button>
+          </div>
+        </div>
+        <span class="spacer"></span>
+        <button id="source-btn" class="pill" title="Cấu hình nguồn giá">
+          <span id="source-name"><span id="source-prefix"></span><span id="source-provider">DNSE</span></span>
+          <span id="source-state"></span>
+        </button>
+        <button id="sync-toggle" class="pill active" title="Đồng bộ crosshair giữa các chart">Đồng bộ</button>
+        <div class="seg" id="layouts" aria-label="Bố cục chart"></div>
+        <div id="template-wrap">
+          <button id="template-btn" title="Chart templates">
+            <span id="template-icon" aria-hidden="true"></span>
+            <span class="template-label">Mẫu</span>
+          </button>
+          <div id="template-menu" hidden></div>
+        </div>
+        <button id="theme-toggle" class="icon-btn" title="Chuyển sang giao diện sáng" aria-label="Chuyển sang giao diện sáng">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <div id="locale-switch" class="seg" role="group" aria-label="Language">
+          <button type="button" data-locale="en" title="English">EN</button>
+          <button type="button" data-locale="vi" title="Tiếng Việt">VI</button>
+        </div>
+      </header>
+      <div id="workspace">
+        <aside id="watchlist-panel" aria-label="Watchlist">
+          <div class="panel-title-row">
+            <strong>Watchlist</strong>
+            <span id="watchlist-source"></span>
+            <button id="watchlist-close" class="panel-close-button" title="Ẩn watchlist" aria-label="Ẩn watchlist">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <div id="watchlist-add-row">
+            <input id="watchlist-symbol" placeholder="Thêm mã" spellcheck="false" autocomplete="off" autocapitalize="characters" autocorrect="off" />
+            <button id="watchlist-add" class="panel-icon-button" title="Thêm mã" aria-label="Thêm mã">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <div id="watchlist-head"><span>Mã</span><span>Giá</span><span>%</span></div>
+          <div id="watchlist-rows"></div>
+        </aside>
+
+        <div id="center-workspace">
+          <div id="global-drawing-toolbar-host"></div>
+          <main id="charts" class="layout-1"></main>
+          <div id="range-bar">
+            <div id="range-presets" aria-label="Khoảng thời gian nhanh">
+              <button data-range-days="1">1D</button>
+              <button data-range-days="5">5D</button>
+              <button data-range-days="30">1M</button>
+              <button data-range-days="90">3M</button>
+              <button data-range-preset="ytd">YTD</button>
+              <button data-range-years="1">1Y</button>
+              <button data-range-years="3">3Y</button>
+              <button data-range-years="5">5Y</button>
+            </div>
+            <span class="range-divider"></span>
+            <label><span>Từ ngày</span><input id="range-from" type="text" inputmode="none" readonly aria-label="Từ ngày" /></label>
+            <span class="range-arrow" aria-hidden="true">→</span>
+            <label><span>Đến ngày</span><input id="range-to" type="text" inputmode="none" readonly aria-label="Đến ngày" /></label>
+            <button id="range-live" class="range-command active" title="Quay về dữ liệu mới nhất">Mới nhất</button>
+            <span id="range-status"></span>
+          </div>
+          <section id="trade-blotter">
+            <div id="account-strip">
+              <span><small>Equity</small><strong id="account-equity">--</strong></span>
+              <span><small>Balance</small><strong id="account-balance">--</strong></span>
+              <span><small>Used margin</small><strong id="account-margin">--</strong></span>
+              <span><small>Free margin</small><strong id="account-free">--</strong></span>
+              <span><small>P&amp;L</small><strong id="account-pnl">--</strong></span>
+            </div>
+            <div id="blotter-tabs" class="workspace-tabs">
+              <button class="active" data-blotter-tab="positions">Vị thế <span id="positions-count"></span></button>
+              <button data-blotter-tab="orders">Lệnh <span id="orders-count"></span></button>
+              <button data-blotter-tab="history">Lịch sử</button>
+              <span class="spacer"></span>
+              <button id="close-all" class="danger-command">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                Đóng tất cả
+              </button>
+            </div>
+            <div id="blotter-table"></div>
+          </section>
+        </div>
+
+        <aside id="right-panel">
+          <div id="right-tabs" class="workspace-tabs">
+            <button class="active" data-right-tab="order">Đặt lệnh</button>
+            <button data-right-tab="dom">DOM</button>
+            <button data-right-tab="objects">Đối tượng</button>
+            <span class="spacer"></span>
+            <button id="right-panel-close" class="panel-close-button" title="Ẩn bảng giao dịch" aria-label="Ẩn bảng giao dịch">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <section id="order-view" class="right-view">
+            <div id="order-symbol-row">
+              <div><small>Mã</small><strong id="order-symbol">--</strong></div>
+              <div><small>Bid / Ask</small><strong id="order-quote">-- / --</strong></div>
+            </div>
+            <div id="order-side" class="order-segment">
+              <button class="buy active" data-order-side="buy">Mua</button>
+              <button class="sell" data-order-side="sell">Bán</button>
+            </div>
+            <div id="order-type" class="order-segment neutral">
+              <button class="active" data-order-type="market">Market</button>
+              <button data-order-type="limit">Limit</button>
+              <button data-order-type="stop">Stop</button>
+            </div>
+            <label class="trade-field"><span>Khối lượng</span><input id="order-volume" type="number" min="1" step="100" value="100" /></label>
+            <div id="volume-presets">
+              <button data-volume="100">100</button><button data-volume="500">500</button><button data-volume="1000">1K</button><button data-volume="5000">5K</button>
+            </div>
+            <label class="trade-field" id="order-price-row" hidden><span>Giá</span><input id="order-price" type="number" min="0" step="0.01" /></label>
+            <div class="trade-field-grid">
+              <label class="trade-field"><span>Take profit</span><input id="order-tp" type="number" min="0" step="0.01" placeholder="Tùy chọn" /></label>
+              <label class="trade-field"><span>Stop loss</span><input id="order-sl" type="number" min="0" step="0.01" placeholder="Tùy chọn" /></label>
+            </div>
+            <label id="one-click-row"><input id="one-click" type="checkbox" /><span>Giao dịch một chạm</span></label>
+            <button id="submit-order" class="submit-order buy">Mua market</button>
+            <div id="order-message" aria-live="polite"></div>
+          </section>
+          <section id="dom-view" class="right-view" hidden>
+            <div class="panel-title-row"><strong id="dom-symbol">DOM</strong><span>Khối lượng</span></div>
+            <div id="dom-ladder"></div>
+          </section>
+          <section id="objects-view" class="right-view" hidden>
+            <div class="panel-title-row"><strong>Cây đối tượng</strong></div>
+            <div id="object-tree"></div>
+            <div id="object-editor" hidden>
+              <label class="trade-field"><span>Màu</span><input id="object-color" type="color" value="#91b8cb" /></label>
+              <label class="trade-field"><span>Độ dày</span><input id="object-width" type="range" min="1" max="5" step="0.5" value="1.5" /></label>
+              <label class="trade-field"><span>Kiểu nét</span><select id="object-line-style"><option value="solid">Liền</option><option value="dashed">Gạch</option><option value="dotted">Chấm</option></select></label>
+              <label class="trade-field"><span>Nhãn</span><input id="object-label" type="text" /></label>
+              <label class="trade-field"><span>Nội dung</span><input id="object-text" type="text" /></label>
+            </div>
+          </section>
+        </aside>
+        <nav id="workspace-dock" aria-label="Bảng điều khiển">
+          <button id="watchlist-toggle" class="workspace-dock-button active" data-label="Theo dõi" title="Bật hoặc tắt watchlist" aria-label="Bật hoặc tắt watchlist" aria-pressed="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+          </button>
+          <button id="right-panel-toggle" class="workspace-dock-button active" data-label="Giao dịch" title="Bật hoặc tắt bảng giao dịch" aria-label="Bật hoặc tắt bảng giao dịch" aria-pressed="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M14 4v16M17 8h1M17 12h1M17 16h1"/></svg>
+          </button>
+        </nav>
+      </div>
+    </div>
+    <div id="indicator-overlay" hidden>
+      <section id="indicator-library" role="dialog" aria-modal="true" aria-labelledby="indicator-library-title">
+        <header id="indicator-library-head">
+          <div>
+            <small>Thư viện phân tích kỹ thuật</small>
+            <h2 id="indicator-library-title">Chỉ báo</h2>
+          </div>
+          <button id="indicator-library-close" class="icon-btn" type="button" title="Đóng" aria-label="Đóng thư viện chỉ báo"></button>
+        </header>
+        <div id="indicator-library-search">
+          <span id="indicator-search-icon" aria-hidden="true"></span>
+          <input id="indicator-search" type="search" placeholder="Tìm theo tên hoặc nhóm chỉ báo" aria-label="Tìm chỉ báo" autocomplete="off" />
+          <kbd>/</kbd>
+        </div>
+        <div id="indicator-library-body">
+          <nav id="indicator-categories" aria-label="Nhóm chỉ báo">
+            <button type="button" class="active" data-indicator-filter="all">Tất cả <span>50</span></button>
+            <button type="button" data-indicator-filter="favorites">Yêu thích <span id="indicator-favorite-count">0</span></button>
+            <span class="indicator-category-divider"></span>
+            <button type="button" data-indicator-filter="overlay">Biểu đồ giá</button>
+            <button type="button" data-indicator-filter="oscillator">Dao động</button>
+            <button type="button" data-indicator-filter="volume">Khối lượng</button>
+            <button type="button" data-indicator-filter="custom">Tùy chỉnh</button>
+          </nav>
+          <div id="ind-menu" role="listbox" aria-label="Danh sách chỉ báo"></div>
+          <aside id="indicator-detail" aria-live="polite">
+            <div id="indicator-detail-category"></div>
+            <h3 id="indicator-detail-name"></h3>
+            <p id="indicator-detail-description"></p>
+            <div id="indicator-detail-params"></div>
+            <div id="indicator-detail-actions">
+              <button id="indicator-detail-favorite" type="button"></button>
+              <button id="indicator-detail-settings" type="button">Cấu hình</button>
+              <button id="indicator-detail-toggle" type="button"></button>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+    <div id="provider-overlay" hidden>
+      <div id="provider-box">
+        <div id="provider-head">
+          <span>Nguồn giá</span>
+          <button id="provider-close" class="icon-btn" title="Đóng">✕</button>
+        </div>
+        <div id="provider-tabs" hidden>
+          <button class="active" data-provider-tab="demo">Demo</button>
+          <button data-provider-tab="dnse">DNSE</button>
+          <button data-provider-tab="fiinquant">FiinQuant</button>
+        </div>
+        <div id="provider-source-summary" aria-live="polite"></div>
+        <div id="provider-status"></div>
+        <section class="provider-panel" data-provider-panel="demo">
+          <span class="provider-note">Dữ liệu mô phỏng chạy offline. Không cần tài khoản hoặc thông tin đăng nhập.</span>
+          <div class="provider-actions">
+            <span class="spacer"></span>
+            <button id="demo-use">Dùng dữ liệu demo</button>
+          </div>
+        </section>
+        <form id="dnse-credential-form" class="provider-panel" data-provider-panel="dnse" autocomplete="on">
+          <div class="provider-credential-modes" role="group" aria-label="Cách cung cấp credential DNSE">
+            <button type="button" data-credential-provider="dnse" data-credential-mode="session">Phiên trình duyệt</button>
+            <button type="button" data-credential-provider="dnse" data-credential-mode="server">Server .env</button>
+          </div>
+          <div class="provider-credential-fields" data-credential-fields="dnse:session">
+            <label class="param-row">
+              <span>API Key</span>
+              <input id="dnse-api-key" name="dnse-api-key" autocomplete="section-dnse username" spellcheck="false" placeholder="eyJ..." />
+            </label>
+            <label class="param-row">
+              <span>API Secret</span>
+              <input id="dnse-api-secret" name="dnse-api-secret" type="password" autocomplete="section-dnse current-password" spellcheck="false" placeholder="API secret" />
+            </label>
+            <span class="provider-note">Ứng dụng không lưu credential; trình quản lý mật khẩu của trình duyệt có thể tự điền lần sau.</span>
+          </div>
+          <div class="provider-server-config" data-credential-fields="dnse:server" hidden>
+            <strong>Cấu hình phía server</strong>
+            <span>Đọc DNSE_API_KEY và DNSE_API_SECRET từ examples/workstation/.env. Chế độ này chỉ dùng được trên chính máy chạy server.</span>
+          </div>
+          <label class="param-row">
+            <span>REST URL</span>
+            <input id="dnse-rest-base" spellcheck="false" />
+          </label>
+          <label class="param-row">
+            <span>WS URL</span>
+            <input id="dnse-ws-base" spellcheck="false" />
+          </label>
+          <div class="provider-actions">
+            <button id="dnse-disconnect" type="button">Ngắt</button>
+            <span class="spacer"></span>
+            <button id="dnse-save" type="submit">Dùng cho phiên này</button>
+          </div>
+        </form>
+        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>
+          <div class="provider-credential-modes" role="group" aria-label="Cách cung cấp credential FiinQuant">
+            <button type="button" data-credential-provider="fiinquant" data-credential-mode="session">Phiên trình duyệt</button>
+            <button type="button" data-credential-provider="fiinquant" data-credential-mode="server">Server .env</button>
+          </div>
+          <div class="provider-credential-fields" data-credential-fields="fiinquant:session">
+            <label class="param-row">
+              <span>Tên đăng nhập</span>
+              <input id="fiinquant-username" name="fiinquant-username" autocomplete="section-fiinquant username" spellcheck="false" />
+            </label>
+            <label class="param-row">
+              <span>Mật khẩu</span>
+              <input id="fiinquant-password" name="fiinquant-password" type="password" autocomplete="section-fiinquant current-password" spellcheck="false" />
+            </label>
+            <span class="provider-note">Ứng dụng không lưu mật khẩu; trình quản lý mật khẩu của trình duyệt có thể tự điền lần sau.</span>
+          </div>
+          <div class="provider-server-config" data-credential-fields="fiinquant:server" hidden>
+            <strong>Cấu hình phía server</strong>
+            <span>Sidecar đọc FIINQUANT_USERNAME/FIINQUANT_PASSWORD từ sidecar .env; workstation proxy đọc FIINQUANT_SIDECAR_TOKEN từ workstation .env. Hai file dùng cùng một sidecar token.</span>
+          </div>
+          <details id="fiinquant-advanced" class="provider-advanced">
+            <summary>Cài đặt nâng cao</summary>
+          <label class="param-row" data-session-only="fiinquant">
+            <span>Sidecar token</span>
+            <input id="fiinquant-token" type="password" autocomplete="off" spellcheck="false" />
+          </label>
+          <label class="param-row">
+            <span>Sidecar URL</span>
+            <input id="fiinquant-base" spellcheck="false" placeholder="http://sidecar-host:8720" />
+          </label>
+          </details>
+          <span id="fiinquant-connection-note" class="provider-note">Phiên trình duyệt chỉ giữ thông tin đăng nhập và sidecar token trong bộ nhớ tab. Khi truy cập qua LAN/Tailscale, cần nhập SIDECAR_TOKEN trong Cài đặt nâng cao.</span>
+          <div class="provider-actions fiinquant-actions">
+            <button id="fiinquant-test" type="button">Kiểm tra kết nối</button>
+            <button id="fiinquant-use" type="button" hidden>Dùng cấu hình server</button>
+            <button id="fiinquant-login" type="submit">Đăng nhập &amp; dùng FiinQuant</button>
+          </div>
+        </form>
+        <div class="provider-actions provider-footer">
+          <span class="provider-note">Chỉ URL/cấu hình không nhạy cảm được lưu trong trình duyệt.</span>
+          <span class="spacer"></span>
+          <button id="provider-done">Xong</button>
+        </div>
+      </div>
+    </div>
+    <div id="param-overlay" hidden>
+      <div id="param-box">
+        <div id="param-head">
+          <span id="param-title"></span>
+          <button id="param-close" class="icon-btn" title="Đóng">✕</button>
+        </div>
+        <div id="param-fields"></div>
+        <div id="param-actions">
+          <button id="param-reset">Mặc định</button>
+          <span class="spacer"></span>
+          <button id="param-cancel">Hủy</button>
+          <button id="param-ok">OK</button>
+        </div>
+      </div>
+    </div>
+    <div id="cmd-overlay" hidden>
+      <div id="cmd-box" role="dialog" aria-labelledby="cmd-title" aria-modal="true">
+        <div id="cmd-head">
+          <span id="cmd-title">Lệnh nhanh</span>
+          <span id="cmd-dismiss"><kbd>Esc</kbd> Đóng</span>
+        </div>
+        <div id="cmd-input">
+          <span id="cmd-prompt" aria-hidden="true">›</span>
+          <input id="cmd-text" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off"
+            spellcheck="false" lang="en" aria-label="Quick command" />
+        </div>
+        <div id="cmd-action" aria-live="polite">
+          <span id="cmd-action-label"></span>
+          <strong id="cmd-action-value"></strong>
+        </div>
+        <div id="cmd-suggestions" role="listbox" aria-label="Mã phù hợp" hidden></div>
+        <div id="cmd-hint">
+          <span><b>VNM · VNINDEX</b><small>Đổi mã chứng khoán</small></span>
+          <span><b>1 · 4 · 15 · 1H · 1D</b><small>Đổi khung thời gian</small></span>
+          <span><b>Enter</b><small>Áp dụng lệnh</small></span>
+        </div>
+      </div>
+    </div>
+    <div id="order-confirm-overlay" hidden>
+      <div id="order-confirm-box" role="dialog" aria-modal="true" aria-labelledby="order-confirm-title">
+        <div class="panel-title-row"><strong id="order-confirm-title">Xác nhận lệnh paper</strong></div>
+        <div id="order-confirm-summary"></div>
+        <div class="confirm-actions"><button id="order-confirm-cancel">Hủy</button><button id="order-confirm-submit">Xác nhận</button></div>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
