@@ -596,13 +596,18 @@ class TickHub:
 
         key = (symbol, interval)
         bar = self.bars.get(key)
+        if bar is not None and bucket < bar["time"]:
+            return None
+        seed = self.cache.peek_last(symbol, interval)
         if bar is None or bar["time"] != bucket:
-            seed = self.cache.peek_last(symbol, interval)
             if bar is None and seed is not None and seed["time"] == bucket:
                 bar = dict(seed)  # Continue the open bar returned by history.
             else:
                 bar = {"time": bucket, "open": close, "high": close,
                        "low": close, "close": close, "volume": 0.0}
+            self.bars[key] = bar
+        elif seed is not None and seed["time"] == bucket:
+            bar = self._merge_seed_bar(seed, bar)
             self.bars[key] = bar
         bar["close"] = close
         bar["high"] = max(bar["high"], close)
@@ -617,6 +622,17 @@ class TickHub:
         else:
             bar["volume"] = float(bar.get("volume") or 0) + match_volume
         return dict(bar)
+
+    @staticmethod
+    def _merge_seed_bar(seed: dict, bar: dict) -> dict:
+        return {
+            "time": seed["time"],
+            "open": seed["open"],
+            "high": max(seed["high"], bar["high"], bar["open"], bar["close"]),
+            "low": min(seed["low"], bar["low"], bar["open"], bar["close"]),
+            "close": bar["close"],
+            "volume": max(float(seed.get("volume") or 0), float(bar.get("volume") or 0)),
+        }
 
     @staticmethod
     def _tick_row(data) -> dict | None:

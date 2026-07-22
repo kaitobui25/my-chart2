@@ -114,6 +114,23 @@ const DEFAULT_SYMBOLS = ['HPG', 'SSI', 'VNM', 'VN30F1M'];
 function pricePrecisionForSymbol(symbol: string): number | null {
   return /^VN30F/i.test(symbol.trim()) ? 1 : null;
 }
+
+function mergeRealtimeCandle(base: Candle, update: Candle): Candle {
+  const baseVolume = base.volume;
+  const updateVolume = update.volume;
+  const volume = baseVolume === undefined && updateVolume === undefined
+    ? undefined
+    : Math.max(baseVolume ?? 0, updateVolume ?? 0);
+  return {
+    time: base.time,
+    open: base.open,
+    high: Math.max(base.high, update.high, update.open, update.close),
+    low: Math.min(base.low, update.low, update.open, update.close),
+    close: update.close,
+    volume,
+  };
+}
+
 const LEGACY_DNSE_STORAGE_KEY = 'l2chart.dnse.credentials';
 const DNSE_STORAGE_KEY = 'l2chart.dnse.settings.v1';
 const LEGACY_FIINQUANT_STORAGE_KEY = 'l2chart.fiinquant.credentials';
@@ -2338,10 +2355,19 @@ class Tile {
     refreshReplayUi();
   }
 
-  private updateHistory(candle: Candle): void {
+  private updateHistory(candle: Candle): Candle | null {
     const last = this.history[this.history.length - 1];
-    if (last && candle.time === last.time) this.history[this.history.length - 1] = { ...candle };
-    else if (!last || candle.time > last.time) this.history.push({ ...candle });
+    if (last && candle.time === last.time) {
+      const merged = mergeRealtimeCandle(last, candle);
+      this.history[this.history.length - 1] = merged;
+      return merged;
+    }
+    if (!last || candle.time > last.time) {
+      const next = { ...candle };
+      this.history.push(next);
+      return next;
+    }
+    return null;
   }
 
   async recoverRealtimeGap(): Promise<void> {
@@ -2375,8 +2401,10 @@ class Tile {
 
       const byTime = new Map<number, Candle>();
       for (const candle of missing) byTime.set(candle.time, { ...candle });
-      // Realtime candles win when a historical response overlaps the active bar.
-      for (const candle of this.history) byTime.set(candle.time, { ...candle });
+      for (const candle of this.history) {
+        const existing = byTime.get(candle.time);
+        byTime.set(candle.time, existing ? mergeRealtimeCandle(existing, candle) : { ...candle });
+      }
       const merged = [...byTime.values()].sort((a, b) => a.time - b.time);
       const changed = merged.length !== this.history.length || merged.some((candle, index) => {
         const previous = this.history[index];
@@ -2476,10 +2504,11 @@ class Tile {
         const last = this.history[this.history.length - 1];
         const step = INTERVAL_SECONDS[this.interval] ?? 60;
         if (last && c.time > last.time + step) void this.recoverRealtimeGap();
-        this.updateHistory(c);
-        this.chart.updateCandle(c);
-        this.publishCandle(c, provider.label);
-        this.setFeedStatus('live', `${provider.label} · ${new Date(c.time * 1000).toLocaleTimeString()}`);
+        const candle = this.updateHistory(c);
+        if (!candle) return;
+        this.chart.updateCandle(candle);
+        this.publishCandle(candle, provider.label);
+        this.setFeedStatus('live', `${provider.label} · ${new Date(candle.time * 1000).toLocaleTimeString()}`);
       });
       this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([this.symbol], (quote) => {
         if (token !== this.loadToken || this.replay) return;
