@@ -23,13 +23,21 @@ describe('BinanceDatafeed helpers', () => {
     ]);
   });
 
-  it('requests only history outside the cached coverage', () => {
+  it('finds leading, interior, and trailing cache gaps', () => {
+    const cached: Candle[] = [120, 180, 300].map((time) => ({
+      time,
+      open: 1,
+      high: 1,
+      low: 1,
+      close: 1,
+    }));
     expect(missingBinanceHistoryRanges(
-      { from: 120, to: 300 },
+      cached,
       { from: 60, to: 360 },
       60,
     )).toEqual([
       { from: 60, to: 60 },
+      { from: 240, to: 240 },
       { from: 360, to: 360 },
     ]);
   });
