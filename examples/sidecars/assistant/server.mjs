@@ -2,7 +2,7 @@ import http from 'node:http'
 import { mkdir } from 'node:fs/promises'
 import { HOST, MAX_BODY_BYTES, PORT, REQUEST_TIMEOUT_MS, RUNTIME_ROOT } from './config.mjs'
 import { buildPrompt } from './prompt-builder.mjs'
-import { codexAvailable, runCodex } from './codex-provider.mjs'
+import { codexAvailable, getCodexStatus, runCodex } from './codex-provider.mjs'
 
 await mkdir(RUNTIME_ROOT, { recursive: true })
 const activeRequests = new Map()
@@ -97,6 +97,14 @@ const server = http.createServer(async (request, response) => {
         codexAvailable: available,
         detail: available ? 'Codex CLI is ready.' : 'Install Codex CLI and sign in with ChatGPT.'
       })
+    }
+    if (request.method === 'POST' && url.pathname === '/status') {
+      const body = await readJson(request)
+      return sendJson(response, 200, await getCodexStatus({
+        runtimeRoot: RUNTIME_ROOT,
+        model: body.model,
+        reasoningEffort: body.reasoningEffort
+      }))
     }
     if (request.method === 'POST' && url.pathname === '/chat') return await handleChat(request, response)
     if (request.method === 'POST' && url.pathname === '/cancel') {
