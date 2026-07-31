@@ -26,7 +26,6 @@
 
 .assistant-head button,
 .assistant-actions button,
-.assistant-settings input,
 .assistant-settings select,
 .assistant-form textarea {
   box-sizing: border-box;
@@ -58,26 +57,27 @@ body.light .assistant-settings select { color-scheme: light; }
 
 .assistant-settings {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: 8px;
 }
 
 .assistant-settings label {
   display: grid;
   gap: 4px;
+  min-width: 0;
   font-size: 10px;
   color: var(--text-dim);
 }
 
-.assistant-settings input,
 .assistant-settings select {
   width: 100%;
   height: 32px;
   padding: 0 8px;
   font-size: 12px;
+  text-overflow: ellipsis;
 }
 
-.assistant-model-field { grid-column: 1 / -1; }
+.assistant-mode-field { grid-column: 1 / -1; }
 
 .assistant-context {
   border: 1px solid var(--border);
@@ -187,7 +187,6 @@ body.light .assistant-settings select { color-scheme: light; }
 }
 
 .assistant-form textarea:focus,
-.assistant-settings input:focus,
 .assistant-settings select:focus {
   outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
   outline-offset: 0;
