@@ -4,6 +4,8 @@ import type {
   AssistantChartContext,
   AssistantConversationMessage,
   AssistantMode,
+  CodexRateLimitBucket,
+  CodexStatusResponse,
   ReasoningEffort,
   TradePlan,
 } from './types';
@@ -109,6 +111,59 @@ function planSummary(plan: TradePlan): string {
   return lines.join('\n');
 }
 
+function formatResetTime(timestamp: number | null): string | null {
+  if (timestamp === null || !Number.isFinite(timestamp)) return null;
+  const milliseconds = timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
+  return new Date(milliseconds).toLocaleString();
+}
+
+function formatWindowName(bucket: CodexRateLimitBucket): string {
+  const minutes = bucket.windowDurationMins;
+  if (minutes === 1440) return 'Ngày';
+  if (minutes === 10080) return '7 ngày';
+  if (minutes === 300) return '5 giờ';
+  if (minutes !== null && Number.isFinite(minutes)) {
+    if (minutes % 1440 === 0) return `${minutes / 1440} ngày`;
+    if (minutes % 60 === 0) return `${minutes / 60} giờ`;
+    return `${minutes} phút`;
+  }
+  return bucket.slot === 'secondary' ? 'Giới hạn phụ' : 'Giới hạn chính';
+}
+
+function formatRateLimit(bucket: CodexRateLimitBucket | null): string | null {
+  if (!bucket) return null;
+  const used = bucket.usedPercent !== null && Number.isFinite(bucket.usedPercent)
+    ? `${bucket.usedPercent}% đã dùng`
+    : 'đã dùng: không rõ';
+  const remaining = bucket.remainingPercent !== null && Number.isFinite(bucket.remainingPercent)
+    ? `còn ${bucket.remainingPercent}%`
+    : null;
+  const reset = formatResetTime(bucket.resetsAt);
+  return `${formatWindowName(bucket)}: ${[used, remaining, reset ? `reset ${reset}` : null].filter(Boolean).join(' · ')}`;
+}
+
+function formatCodexStatus(payload: CodexStatusResponse): string {
+  const lines = ['Codex quota'];
+  if (payload.account) {
+    const identity = payload.account.email || payload.account.type || 'đã đăng nhập';
+    lines.push(`Tài khoản: ${identity}${payload.account.planType ? ` · ${payload.account.planType}` : ''}`);
+  } else {
+    lines.push('Tài khoản: không có thông tin');
+  }
+  lines.push(`Model: ${payload.selected.model || 'Codex default'}`);
+  lines.push(`Reasoning: ${payload.selected.reasoningEffort}`);
+
+  const limits = [payload.rateLimits.primary, payload.rateLimits.secondary]
+    .map(formatRateLimit)
+    .filter((value): value is string => Boolean(value));
+  lines.push(...(limits.length > 0 ? limits : ['Quota: Codex không trả về dữ liệu giới hạn.']));
+
+  if (payload.rateLimits.reachedType) lines.push(`Limit reached: ${payload.rateLimits.reachedType}`);
+  if (payload.rateLimits.spendControlReached === true) lines.push('Spend control: đã chạm giới hạn');
+  if (payload.resetCredits) lines.push(`Reset credits: ${payload.resetCredits.availableCount}`);
+  return lines.join('\n');
+}
+
 function mountAssistant(): void {
   const tabs = document.getElementById('right-tabs');
   const rightPanel = document.getElementById('right-panel');
@@ -169,7 +224,7 @@ function mountAssistant(): void {
         <button id="assistant-send" type="submit">Send</button>
       </div>
     </form>
-    <small class="assistant-hint">Enter để gửi · Shift+Enter xuống dòng · AI chỉ phân tích, không gửi lệnh.</small>
+    <small class="assistant-hint">Enter để gửi · Shift+Enter xuống dòng · /status xem quota · AI không gửi lệnh.</small>
   `;
   rightPanel.appendChild(view);
 
@@ -200,6 +255,18 @@ function mountAssistant(): void {
     messages.scrollTop = messages.scrollHeight;
   };
 
+  const appendThinking = (): HTMLElement => {
+    const item = createElement('article', 'assistant-message assistant-message-assistant assistant-message-thinking');
+    item.setAttribute('aria-label', 'AI đang suy nghĩ');
+    item.appendChild(createElement('small', 'assistant-role', 'AI'));
+    const dots = createElement('div', 'assistant-thinking-dots');
+    dots.append(createElement('span'), createElement('span'), createElement('span'));
+    item.appendChild(dots);
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+    return item;
+  };
+
   const setBusy = (value: boolean) => {
     busy = value;
     input.disabled = value;
@@ -207,7 +274,7 @@ function mountAssistant(): void {
     modeSelect.disabled = value;
     reasoningSelect.disabled = value;
     modelInput.disabled = value;
-    cancel.disabled = !value;
+    cancel.disabled = !value || requestId === null;
   };
 
   const currentContext = (): AssistantChartContext | null => {
@@ -265,9 +332,38 @@ function mountAssistant(): void {
     appendMessage('assistant', 'Đã bắt đầu cuộc trò chuyện mới cho chart hiện tại.');
   });
 
+  async function showStatus(command: string): Promise<void> {
+    appendMessage('user', command);
+    input.value = '';
+    requestId = null;
+    setBusy(true);
+    const thinking = appendThinking();
+    try {
+      const response = await client.status({ model: model || null, reasoningEffort });
+      thinking.remove();
+      appendMessage('assistant', formatCodexStatus(response));
+      status.textContent = 'Codex connected';
+      status.classList.remove('error');
+    } catch (error) {
+      thinking.remove();
+      const text = error instanceof Error ? error.message : String(error);
+      appendMessage('assistant', `Lỗi: ${text}`);
+      status.textContent = text;
+      status.classList.add('error');
+    } finally {
+      setBusy(false);
+      input.focus({ preventScroll: true });
+    }
+  }
+
   async function submitMessage(rawMessage: string): Promise<void> {
     const message = rawMessage.trim();
     if (!message || busy) return;
+    if (message.toLowerCase() === '/status') {
+      await showStatus(message);
+      return;
+    }
+
     const context = currentContext();
     if (!context) {
       appendMessage('assistant', 'Không lấy được dữ liệu chart đang chọn. Hãy tải chart xong rồi thử lại.');
@@ -278,6 +374,7 @@ function mountAssistant(): void {
     input.value = '';
     requestId = crypto.randomUUID();
     setBusy(true);
+    const thinking = appendThinking();
     try {
       const response = await client.chat({
         requestId,
@@ -289,6 +386,7 @@ function mountAssistant(): void {
         context,
         screenshotDataUrl: captureActiveChart(),
       });
+      thinking.remove();
       appendMessage('assistant', response.message, response.tradePlan);
       const nextConversation: AssistantConversationMessage[] = [
         ...conversation,
@@ -299,11 +397,13 @@ function mountAssistant(): void {
       status.textContent = 'Codex connected';
       status.classList.remove('error');
     } catch (error) {
+      thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
       appendMessage('assistant', `Lỗi: ${text}`);
       status.textContent = text;
       status.classList.add('error');
     } finally {
+      thinking.remove();
       requestId = null;
       setBusy(false);
       input.focus({ preventScroll: true });
@@ -343,7 +443,7 @@ function mountAssistant(): void {
 
   modeSelect.dispatchEvent(new Event('change'));
   currentContext();
-  appendMessage('assistant', 'Sẵn sàng. Chọn chart rồi hỏi trực tiếp; chế độ Phân tích lệnh sẽ trả WAIT/LONG/SHORT cùng entry, SL và TP.');
+  appendMessage('assistant', 'Sẵn sàng. Chọn chart rồi hỏi trực tiếp; dùng /status để xem quota Codex.');
 }
 
 if (document.readyState === 'loading') {
