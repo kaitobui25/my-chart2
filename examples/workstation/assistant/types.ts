@@ -52,6 +52,39 @@ export interface AssistantResponse {
   tradePlan: TradePlan | null;
 }
 
+export interface CodexRateLimitBucket {
+  slot: string;
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+  limitId: string | null;
+}
+
+export interface CodexStatusResponse {
+  account: {
+    type: string | null;
+    email: string | null;
+    planType: string | null;
+  } | null;
+  requiresOpenaiAuth: boolean | null;
+  selected: {
+    model: string | null;
+    reasoningEffort: ReasoningEffort;
+  };
+  rateLimits: {
+    primary: CodexRateLimitBucket | null;
+    secondary: CodexRateLimitBucket | null;
+    reachedType: string | null;
+    individualLimit: unknown;
+    spendControlReached: boolean | null;
+  };
+  resetCredits: {
+    availableCount: number;
+    credits: unknown[] | null;
+  } | null;
+}
+
 export interface AssistantBridge {
   getContext(): AssistantChartContext | null;
 }
