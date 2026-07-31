@@ -4,6 +4,7 @@ import type {
   AssistantChartContext,
   AssistantConversationMessage,
   AssistantMode,
+  CodexModelOption,
   CodexRateLimitBucket,
   CodexStatusResponse,
   ReasoningEffort,
@@ -12,6 +13,13 @@ import type {
 
 const STORAGE_KEY = 'l2chart.assistant.settings.v1';
 const MAX_CONVERSATION_MESSAGES = 10;
+const ALL_REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const REASONING_LABELS: Record<ReasoningEffort, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+};
 
 interface StoredSettings {
   mode?: AssistantMode;
@@ -171,12 +179,14 @@ function mountAssistant(): void {
 
   const saved = readSettings();
   let mode: AssistantMode = saved.mode === 'analyze' ? 'analyze' : 'chat';
-  let reasoningEffort: ReasoningEffort = ['low', 'medium', 'high', 'xhigh'].includes(saved.reasoningEffort ?? '')
+  let reasoningEffort: ReasoningEffort = ALL_REASONING_EFFORTS.includes(saved.reasoningEffort ?? 'medium')
     ? saved.reasoningEffort as ReasoningEffort
     : 'medium';
   let model = saved.model?.trim() ?? '';
   let requestId: string | null = null;
   let busy = false;
+  let modelsLoading = true;
+  let modelOptions: CodexModelOption[] = [];
   let conversation: AssistantConversationMessage[] = [];
 
   const tab = createElement('button', '', 'AI');
@@ -197,10 +207,15 @@ function mountAssistant(): void {
       <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
     </div>
     <div class="assistant-settings">
-      <label>Chế độ
+      <label class="assistant-mode-field">Chế độ
         <select id="assistant-mode">
           <option value="chat">Chat chart</option>
           <option value="analyze">Phân tích lệnh</option>
+        </select>
+      </label>
+      <label>Model
+        <select id="assistant-model">
+          <option value="">Đang tải model…</option>
         </select>
       </label>
       <label>Reasoning
@@ -210,9 +225,6 @@ function mountAssistant(): void {
           <option value="high">High</option>
           <option value="xhigh">Extra high</option>
         </select>
-      </label>
-      <label class="assistant-model-field">Model
-        <input id="assistant-model" type="text" placeholder="Codex default" spellcheck="false" />
       </label>
     </div>
     <div id="assistant-context" class="assistant-context">Chưa có chart context</div>
@@ -235,14 +247,13 @@ function mountAssistant(): void {
   const send = view.querySelector<HTMLButtonElement>('#assistant-send')!;
   const cancel = view.querySelector<HTMLButtonElement>('#assistant-cancel')!;
   const modeSelect = view.querySelector<HTMLSelectElement>('#assistant-mode')!;
+  const modelSelect = view.querySelector<HTMLSelectElement>('#assistant-model')!;
   const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
-  const modelInput = view.querySelector<HTMLInputElement>('#assistant-model')!;
   const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
   const client = new AssistantApiClient();
 
   modeSelect.value = mode;
   reasoningSelect.value = reasoningEffort;
-  modelInput.value = model;
 
   const persist = () => writeSettings({ mode, model, reasoningEffort });
 
@@ -272,9 +283,86 @@ function mountAssistant(): void {
     input.disabled = value;
     send.disabled = value;
     modeSelect.disabled = value;
+    modelSelect.disabled = value || modelsLoading;
     reasoningSelect.disabled = value;
-    modelInput.disabled = value;
     cancel.disabled = !value || requestId === null;
+  };
+
+  const renderReasoningOptions = (
+    allowed: ReasoningEffort[] = ALL_REASONING_EFFORTS,
+    preferred: ReasoningEffort = reasoningEffort,
+  ) => {
+    const available = allowed.length > 0 ? allowed : ALL_REASONING_EFFORTS;
+    const next = available.includes(reasoningEffort)
+      ? reasoningEffort
+      : available.includes(preferred)
+        ? preferred
+        : available[0];
+    reasoningSelect.replaceChildren(...available.map((effort) => {
+      const option = document.createElement('option');
+      option.value = effort;
+      option.textContent = REASONING_LABELS[effort];
+      return option;
+    }));
+    reasoningEffort = next;
+    reasoningSelect.value = reasoningEffort;
+  };
+
+  const selectedModelOption = (): CodexModelOption | undefined => (
+    modelOptions.find((option) => option.id === model)
+  );
+
+  const applyModelSelection = () => {
+    model = modelSelect.value;
+    const selected = selectedModelOption();
+    renderReasoningOptions(
+      selected?.supportedReasoningEfforts ?? ALL_REASONING_EFFORTS,
+      selected?.defaultReasoningEffort ?? reasoningEffort,
+    );
+    persist();
+  };
+
+  const renderModelOptions = () => {
+    const options: HTMLOptionElement[] = [];
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Codex default';
+    options.push(defaultOption);
+
+    for (const item of modelOptions) {
+      const option = document.createElement('option');
+      option.value = item.id;
+      option.textContent = item.label === item.id ? item.id : `${item.label} (${item.id})`;
+      options.push(option);
+    }
+
+    if (model && !modelOptions.some((item) => item.id === model)) {
+      const savedOption = document.createElement('option');
+      savedOption.value = model;
+      savedOption.textContent = `${model} (saved)`;
+      options.push(savedOption);
+    }
+
+    modelSelect.replaceChildren(...options);
+    modelSelect.value = model;
+    applyModelSelection();
+  };
+
+  const loadModelOptions = async () => {
+    modelsLoading = true;
+    setBusy(busy);
+    try {
+      const response = await client.options();
+      modelOptions = Array.isArray(response.models) ? response.models : [];
+      modelSelect.title = `${modelOptions.length} model từ Codex`;
+    } catch (error) {
+      modelOptions = [];
+      modelSelect.title = error instanceof Error ? error.message : String(error);
+    } finally {
+      modelsLoading = false;
+      renderModelOptions();
+      setBusy(busy);
+    }
   };
 
   const currentContext = (): AssistantChartContext | null => {
@@ -317,12 +405,9 @@ function mountAssistant(): void {
       : 'Hỏi về chart đang chọn…';
     persist();
   });
+  modelSelect.addEventListener('change', applyModelSelection);
   reasoningSelect.addEventListener('change', () => {
     reasoningEffort = reasoningSelect.value as ReasoningEffort;
-    persist();
-  });
-  modelInput.addEventListener('change', () => {
-    model = modelInput.value.trim();
     persist();
   });
 
@@ -440,10 +525,11 @@ function mountAssistant(): void {
     status.textContent = error instanceof Error ? error.message : String(error);
     status.classList.add('error');
   });
+  void loadModelOptions();
 
   modeSelect.dispatchEvent(new Event('change'));
   currentContext();
-  appendMessage('assistant', 'Sẵn sàng. Chọn chart rồi hỏi trực tiếp; dùng /status để xem quota Codex.');
+  appendMessage('assistant', 'Sẵn sàng. Chọn model và reasoning rồi hỏi trực tiếp; dùng /status để xem quota Codex.');
 }
 
 if (document.readyState === 'loading') {
