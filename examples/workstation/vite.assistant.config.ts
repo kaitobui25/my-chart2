@@ -27,13 +27,8 @@ function assistantIntegration(): Plugin {
       }
 
       const bridge = `
-const assistantWindow = window as Window & {
-  __L2CHART_ASSISTANT__?: {
-    getContext(): Record<string, unknown> | null;
-  };
-};
-assistantWindow.__L2CHART_ASSISTANT__ = Object.freeze({
-  getContext(): Record<string, unknown> | null {
+window.__L2CHART_ASSISTANT__ = Object.freeze({
+  getContext() {
     const tile = activeTile;
     if (!tile) return null;
     const candles = tile.chart.getCandles().slice(-240).map((candle) => ({
