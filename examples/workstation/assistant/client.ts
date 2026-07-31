@@ -3,6 +3,7 @@ import type {
   AssistantConversationMessage,
   AssistantMode,
   AssistantResponse,
+  CodexOptionsResponse,
   CodexStatusResponse,
   ReasoningEffort,
 } from './types';
@@ -60,6 +61,10 @@ export class AssistantApiClient {
 
   health(): Promise<{ ok: boolean; codexAvailable: boolean; detail: string }> {
     return this.request('/health');
+  }
+
+  options(): Promise<CodexOptionsResponse> {
+    return this.request('/options');
   }
 
   status(payload: { model: string | null; reasoningEffort: ReasoningEffort }): Promise<CodexStatusResponse> {
