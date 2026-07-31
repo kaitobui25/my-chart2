@@ -8,7 +8,6 @@ import {
 } from '../../src/datafeed';
 import {
   BinanceHistoryCache,
-  type BinanceCacheCoverage,
   type BinanceMarket,
 } from './binance-cache';
 
@@ -124,25 +123,30 @@ export function mergeBinanceCandles(...groups: Candle[][]): Candle[] {
   return [...byTime.values()].sort((left, right) => left.time - right.time);
 }
 
+/** Find gaps from actual cached timestamps so disjoint cache segments are not treated as fully covered. */
 export function missingBinanceHistoryRanges(
-  coverage: BinanceCacheCoverage | null,
+  candles: Candle[],
   requested: HistoryRange,
   step: number,
 ): HistoryRange[] {
-  if (!coverage) return [requested];
+  const from = Math.ceil(requested.from / step) * step;
+  const to = Math.floor(requested.to / step) * step;
+  if (from > to) return [];
+
+  const times = [...new Set(candles
+    .map((candle) => candle.time)
+    .filter((time) => time >= from && time <= to))]
+    .sort((left, right) => left - right);
+
   const gaps: HistoryRange[] = [];
-  if (requested.from < coverage.from) {
-    gaps.push({
-      from: requested.from,
-      to: Math.min(requested.to, coverage.from - step),
-    });
+  let cursor = from;
+  for (const time of times) {
+    if (time < cursor) continue;
+    if (time > cursor) gaps.push({ from: cursor, to: Math.min(to, time - step) });
+    cursor = time + step;
+    if (cursor > to) break;
   }
-  if (requested.to > coverage.to) {
-    gaps.push({
-      from: Math.max(requested.from, coverage.to + step),
-      to: requested.to,
-    });
-  }
+  if (cursor <= to) gaps.push({ from: cursor, to });
   return gaps.filter((gap) => gap.from <= gap.to);
 }
 
@@ -258,13 +262,12 @@ export class BinanceDatafeed implements Datafeed {
       }
     }
 
-    const requested = {
-      from: Math.min(range.from, range.to),
-      to: Math.max(range.from, range.to),
-    };
-    const coverage = await this.cache.coverage(this.market, normalized, interval);
-    let gaps = missingBinanceHistoryRanges(coverage, requested, step);
-    let cached = await this.cache.readRange(
+    const rangeFrom = Math.ceil(Math.min(range.from, range.to) / step) * step;
+    const rangeTo = Math.floor(Math.max(range.from, range.to) / step) * step;
+    if (rangeFrom > rangeTo) return [];
+    const effectiveFrom = Math.max(rangeFrom, rangeTo - (requestedLimit - 1) * step);
+    const requested = { from: effectiveFrom, to: rangeTo };
+    const cached = await this.cache.readRange(
       this.market,
       normalized,
       interval,
@@ -272,14 +275,22 @@ export class BinanceDatafeed implements Datafeed {
       requested.to,
       requestedLimit,
     );
-    if (gaps.length === 0 && cached.length === 0) gaps = [requested];
+    const gaps = missingBinanceHistoryRanges(cached, requested, step);
+    let fetched: Candle[] = [];
 
     try {
       for (const gap of gaps) {
-        const remote = await this.fetchRange(normalized, interval, gap, requestedLimit);
+        const gapBars = Math.floor((gap.to - gap.from) / step) + 1;
+        const remote = await this.fetchRange(
+          normalized,
+          interval,
+          gap,
+          Math.min(requestedLimit, Math.max(1, gapBars)),
+        );
+        fetched = mergeBinanceCandles(fetched, remote);
         await this.writeClosedCandles(normalized, interval, remote);
-        cached = mergeBinanceCandles(cached, remote).slice(0, requestedLimit);
       }
+
       const complete = await this.cache.readRange(
         this.market,
         normalized,
@@ -288,15 +299,19 @@ export class BinanceDatafeed implements Datafeed {
         requested.to,
         requestedLimit,
       );
-      return complete.length > 0 ? complete : cached;
+      return mergeBinanceCandles(cached, complete, fetched)
+        .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
+        .slice(-requestedLimit);
     } catch (error) {
-      if (cached.length > 0) return cached;
+      const fallback = mergeBinanceCandles(cached, fetched).slice(-requestedLimit);
+      if (fallback.length > 0) return fallback;
       throw error;
     }
   }
 
   subscribe(symbol: string, interval: string, onCandle: (candle: Candle) => void): () => void {
     const normalized = normalizedSymbol(symbol);
+    if (!normalized) return () => undefined;
     const stream = `${normalized.toLowerCase()}@kline_${interval}`;
     return this.openReconnectableSocket(`${this.endpoints.websocketBase}/${stream}`, (payload) => {
       const kline = payload?.k as BinanceKlinePayload | undefined;
@@ -414,26 +429,28 @@ export class BinanceDatafeed implements Datafeed {
     return result.slice(-limit);
   }
 
+  /** Fetch the most recent `limit` candles ending at range.to, then page backwards. */
   private async fetchRange(
     symbol: string,
     interval: string,
     range: HistoryRange,
     limit: number,
   ): Promise<Candle[]> {
-    const stepMilliseconds = (INTERVAL_SECONDS[interval] ?? 60) * 1000;
-    let cursor = range.from * 1000;
-    const end = range.to * 1000;
+    let endTime = range.to * 1000;
     let result: Candle[] = [];
-    while (cursor <= end && result.length < limit) {
+    while (result.length < limit) {
       const pageLimit = Math.min(MAX_PAGE_SIZE, limit - result.length);
-      const page = await this.fetchKlines(symbol, interval, pageLimit, cursor, end);
+      const page = await this.fetchKlines(symbol, interval, pageLimit, undefined, endTime);
       if (page.length === 0) break;
-      result = mergeBinanceCandles(result, page);
-      const next = page[page.length - 1].time * 1000 + stepMilliseconds;
-      if (next <= cursor || page.length < pageLimit) break;
-      cursor = next;
+      const inRange = page.filter((candle) => candle.time >= range.from && candle.time <= range.to);
+      result = mergeBinanceCandles(inRange, result);
+      const earliest = page[0].time;
+      if (earliest <= range.from || page.length < pageLimit) break;
+      const nextEndTime = earliest * 1000 - 1;
+      if (nextEndTime >= endTime) break;
+      endTime = nextEndTime;
     }
-    return result.slice(0, limit);
+    return result.slice(-limit);
   }
 
   private async fetchKlines(
