@@ -52,6 +52,18 @@ export interface AssistantResponse {
   tradePlan: TradePlan | null;
 }
 
+export interface CodexModelOption {
+  id: string;
+  label: string;
+  defaultReasoningEffort: ReasoningEffort;
+  supportedReasoningEfforts: ReasoningEffort[];
+}
+
+export interface CodexOptionsResponse {
+  models: CodexModelOption[];
+  reasoningEfforts: ReasoningEffort[];
+}
+
 export interface CodexRateLimitBucket {
   slot: string;
   usedPercent: number | null;
