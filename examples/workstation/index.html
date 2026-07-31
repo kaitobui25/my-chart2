@@ -248,6 +248,8 @@
         </div>
         <div id="provider-tabs" hidden>
           <button class="active" data-provider-tab="demo">Demo</button>
+          <button data-provider-tab="binance-spot">Binance Spot</button>
+          <button data-provider-tab="binance-usdm">Binance Futures</button>
           <button data-provider-tab="dnse">DNSE</button>
           <button data-provider-tab="fiinquant">FiinQuant</button>
         </div>
@@ -258,6 +260,22 @@
           <div class="provider-actions">
             <span class="spacer"></span>
             <button id="demo-use">Dùng dữ liệu demo</button>
+          </div>
+        </section>
+        <section class="provider-panel" data-provider-panel="binance-spot" hidden>
+          <span class="provider-note">Dữ liệu Binance Spot công khai qua REST và WebSocket. Không cần API key. Lịch sử được cache riêng trong IndexedDB của trình duyệt.</span>
+          <div class="provider-actions">
+            <button type="button" data-binance-cache-clear="spot">Xóa cache Spot</button>
+            <span class="spacer"></span>
+            <button id="binance-spot-use" type="button">Dùng Binance Spot</button>
+          </div>
+        </section>
+        <section class="provider-panel" data-provider-panel="binance-usdm" hidden>
+          <span class="provider-note">Dữ liệu hợp đồng vĩnh viễn Binance USD-M Futures công khai qua REST và WebSocket. Không cần API key. Cache Futures tách biệt hoàn toàn với Spot.</span>
+          <div class="provider-actions">
+            <button type="button" data-binance-cache-clear="usdm">Xóa cache Futures</button>
+            <span class="spacer"></span>
+            <button id="binance-usdm-use" type="button">Dùng Binance Futures</button>
           </div>
         </section>
         <form id="dnse-credential-form" class="provider-panel" data-provider-panel="dnse" autocomplete="on">

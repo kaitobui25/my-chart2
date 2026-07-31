@@ -131,6 +131,12 @@ export class TradingWorkspace {
     return [...this.watchlist];
   }
 
+  replaceWatchlist(symbols: string[]): void {
+    const normalized = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
+    this.watchlist = normalized.length > 0 ? normalized : [...DEFAULT_WATCHLIST];
+    this.saveWatchlist();
+  }
+
   setSourceLabel(label: string): void {
     this.watchlistSource.textContent = label;
   }

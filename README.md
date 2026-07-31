@@ -153,7 +153,7 @@ Provider adapters in [`examples/providers/`](examples/providers/) exist only to
 demonstrate the `Datafeed` boundary used by the workstation example:
 
 - `sample.ts`: deterministic offline data;
-- `binance.ts`: a small public-market example;
+- `binance.ts` and `binance-cache.ts`: public Binance Spot and USD-M Futures adapters with realtime streams, symbol search, gap recovery, and browser-local IndexedDB history cache;
 - `dnse.ts`: an example broker adapter;
 - `fiinquant.ts` and [`examples/sidecars/fiinquant/`](examples/sidecars/fiinquant/):
   an example browser-to-sidecar/backend adapter.
