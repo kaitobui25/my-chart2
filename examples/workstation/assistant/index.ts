@@ -1,0 +1,353 @@
+import './style.css';
+import { AssistantApiClient } from './client';
+import type {
+  AssistantChartContext,
+  AssistantConversationMessage,
+  AssistantMode,
+  ReasoningEffort,
+  TradePlan,
+} from './types';
+
+const STORAGE_KEY = 'l2chart.assistant.settings.v1';
+const MAX_CONVERSATION_MESSAGES = 10;
+
+interface StoredSettings {
+  mode?: AssistantMode;
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
+}
+
+function readSettings(): StoredSettings {
+  try {
+    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    return value && typeof value === 'object' ? value as StoredSettings : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(settings: StoredSettings): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // The assistant still works when browser storage is unavailable.
+  }
+}
+
+function createElement<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className = '',
+  text = '',
+): HTMLElementTagNameMap[K] {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function visibleTiles(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('#charts > .tile')]
+    .filter((tile) => !tile.hidden && getComputedStyle(tile).display !== 'none');
+}
+
+function activeTileElement(): HTMLElement | null {
+  const tiles = visibleTiles();
+  return tiles.find((tile) => tile.classList.contains('active')) ?? tiles[0] ?? null;
+}
+
+function captureActiveChart(): string | null {
+  const tile = activeTileElement();
+  const shell = tile?.querySelector<HTMLElement>('.tile-chart-shell');
+  if (!tile || !shell) return null;
+
+  const shellRect = shell.getBoundingClientRect();
+  if (shellRect.width < 2 || shellRect.height < 2) return null;
+  const canvases = [...shell.querySelectorAll<HTMLCanvasElement>('canvas')]
+    .filter((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      return rect.width > 1 && rect.height > 1;
+    });
+  if (canvases.length === 0) return null;
+
+  const scale = Math.min(2, window.devicePixelRatio || 1);
+  const output = document.createElement('canvas');
+  output.width = Math.max(1, Math.round(shellRect.width * scale));
+  output.height = Math.max(1, Math.round(shellRect.height * scale));
+  const context = output.getContext('2d');
+  if (!context) return null;
+
+  const background = getComputedStyle(shell).backgroundColor || getComputedStyle(document.body).backgroundColor;
+  context.fillStyle = background === 'rgba(0, 0, 0, 0)' ? '#0b0d10' : background;
+  context.fillRect(0, 0, output.width, output.height);
+  context.scale(scale, scale);
+
+  for (const canvas of canvases) {
+    const rect = canvas.getBoundingClientRect();
+    context.drawImage(
+      canvas,
+      rect.left - shellRect.left,
+      rect.top - shellRect.top,
+      rect.width,
+      rect.height,
+    );
+  }
+
+  try {
+    return output.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
+function planSummary(plan: TradePlan): string {
+  const lines = [`${plan.decision} · ${plan.marketRegime} · ${Math.round(plan.confidence)}%`];
+  if (plan.entryZone) lines.push(`Entry: ${plan.entryZone.from} – ${plan.entryZone.to}`);
+  if (plan.stopLoss !== null) lines.push(`SL: ${plan.stopLoss}`);
+  if (plan.targets.length > 0) lines.push(`TP: ${plan.targets.join(' · ')}`);
+  if (plan.riskReward !== null) lines.push(`R:R: ${plan.riskReward}`);
+  if (plan.invalidation) lines.push(`Invalidation: ${plan.invalidation}`);
+  return lines.join('\n');
+}
+
+function mountAssistant(): void {
+  const tabs = document.getElementById('right-tabs');
+  const rightPanel = document.getElementById('right-panel');
+  if (!tabs || !rightPanel || document.getElementById('assistant-view')) return;
+
+  const saved = readSettings();
+  let mode: AssistantMode = saved.mode === 'analyze' ? 'analyze' : 'chat';
+  let reasoningEffort: ReasoningEffort = ['low', 'medium', 'high', 'xhigh'].includes(saved.reasoningEffort ?? '')
+    ? saved.reasoningEffort as ReasoningEffort
+    : 'medium';
+  let model = saved.model?.trim() ?? '';
+  let requestId: string | null = null;
+  let busy = false;
+  let conversation: AssistantConversationMessage[] = [];
+
+  const tab = createElement('button', '', 'AI');
+  tab.type = 'button';
+  tab.dataset.rightTab = 'assistant';
+  const spacer = tabs.querySelector('.spacer');
+  tabs.insertBefore(tab, spacer);
+
+  const view = createElement('section', 'right-view assistant-view');
+  view.id = 'assistant-view';
+  view.hidden = true;
+  view.innerHTML = `
+    <div class="assistant-head">
+      <div>
+        <strong>AI Chart Assistant</strong>
+        <span id="assistant-status">Đang kiểm tra Codex…</span>
+      </div>
+      <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
+    </div>
+    <div class="assistant-settings">
+      <label>Chế độ
+        <select id="assistant-mode">
+          <option value="chat">Chat chart</option>
+          <option value="analyze">Phân tích lệnh</option>
+        </select>
+      </label>
+      <label>Reasoning
+        <select id="assistant-reasoning">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="xhigh">Extra high</option>
+        </select>
+      </label>
+      <label class="assistant-model-field">Model
+        <input id="assistant-model" type="text" placeholder="Codex default" spellcheck="false" />
+      </label>
+    </div>
+    <div id="assistant-context" class="assistant-context">Chưa có chart context</div>
+    <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
+    <form id="assistant-form" class="assistant-form">
+      <textarea id="assistant-input" rows="4" placeholder="Hỏi về chart đang chọn…"></textarea>
+      <div class="assistant-actions">
+        <button id="assistant-cancel" type="button" disabled>Cancel</button>
+        <button id="assistant-send" type="submit">Send</button>
+      </div>
+    </form>
+    <small class="assistant-hint">Enter để gửi · Shift+Enter xuống dòng · AI chỉ phân tích, không gửi lệnh.</small>
+  `;
+  rightPanel.appendChild(view);
+
+  const status = view.querySelector<HTMLElement>('#assistant-status')!;
+  const contextBadge = view.querySelector<HTMLElement>('#assistant-context')!;
+  const messages = view.querySelector<HTMLElement>('#assistant-messages')!;
+  const input = view.querySelector<HTMLTextAreaElement>('#assistant-input')!;
+  const send = view.querySelector<HTMLButtonElement>('#assistant-send')!;
+  const cancel = view.querySelector<HTMLButtonElement>('#assistant-cancel')!;
+  const modeSelect = view.querySelector<HTMLSelectElement>('#assistant-mode')!;
+  const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
+  const modelInput = view.querySelector<HTMLInputElement>('#assistant-model')!;
+  const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
+  const client = new AssistantApiClient();
+
+  modeSelect.value = mode;
+  reasoningSelect.value = reasoningEffort;
+  modelInput.value = model;
+
+  const persist = () => writeSettings({ mode, model, reasoningEffort });
+
+  const appendMessage = (role: 'user' | 'assistant', text: string, plan: TradePlan | null = null) => {
+    const item = createElement('article', `assistant-message assistant-message-${role}`);
+    item.appendChild(createElement('small', 'assistant-role', role === 'user' ? 'Bạn' : 'AI'));
+    item.appendChild(createElement('div', 'assistant-message-text', text));
+    if (plan) item.appendChild(createElement('pre', `assistant-plan assistant-plan-${plan.decision.toLowerCase()}`, planSummary(plan)));
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+  };
+
+  const setBusy = (value: boolean) => {
+    busy = value;
+    input.disabled = value;
+    send.disabled = value;
+    modeSelect.disabled = value;
+    reasoningSelect.disabled = value;
+    modelInput.disabled = value;
+    cancel.disabled = !value;
+  };
+
+  const currentContext = (): AssistantChartContext | null => {
+    const context = window.__L2CHART_ASSISTANT__?.getContext() ?? null;
+    contextBadge.textContent = context
+      ? `${context.symbol} · ${context.timeframe} · ${context.candleCount} nến${String(context.replay.phase ?? 'idle') !== 'idle' ? ' · REPLAY' : ''}`
+      : 'Không lấy được chart context';
+    return context;
+  };
+
+  const openAssistant = () => {
+    if (rightPanel.hidden) document.getElementById('right-panel-toggle')?.click();
+    tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]').forEach((button) => {
+      button.classList.toggle('active', button === tab);
+    });
+    rightPanel.querySelectorAll<HTMLElement>('.right-view').forEach((section) => {
+      section.hidden = section !== view;
+    });
+    currentContext();
+    input.focus({ preventScroll: true });
+  };
+
+  tab.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openAssistant();
+  });
+
+  tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]:not([data-right-tab="assistant"])')
+    .forEach((button) => button.addEventListener('click', () => {
+      view.hidden = true;
+      tab.classList.remove('active');
+    }));
+
+  modeSelect.addEventListener('change', () => {
+    mode = modeSelect.value === 'analyze' ? 'analyze' : 'chat';
+    send.textContent = mode === 'analyze' ? 'Analyze' : 'Send';
+    input.placeholder = mode === 'analyze'
+      ? 'Yêu cầu AI đánh giá setup, entry, SL và TP…'
+      : 'Hỏi về chart đang chọn…';
+    persist();
+  });
+  reasoningSelect.addEventListener('change', () => {
+    reasoningEffort = reasoningSelect.value as ReasoningEffort;
+    persist();
+  });
+  modelInput.addEventListener('change', () => {
+    model = modelInput.value.trim();
+    persist();
+  });
+
+  view.querySelector<HTMLButtonElement>('#assistant-new')!.addEventListener('click', () => {
+    conversation = [];
+    messages.replaceChildren();
+    appendMessage('assistant', 'Đã bắt đầu cuộc trò chuyện mới cho chart hiện tại.');
+  });
+
+  async function submitMessage(rawMessage: string): Promise<void> {
+    const message = rawMessage.trim();
+    if (!message || busy) return;
+    const context = currentContext();
+    if (!context) {
+      appendMessage('assistant', 'Không lấy được dữ liệu chart đang chọn. Hãy tải chart xong rồi thử lại.');
+      return;
+    }
+
+    appendMessage('user', message);
+    input.value = '';
+    requestId = crypto.randomUUID();
+    setBusy(true);
+    try {
+      const response = await client.chat({
+        requestId,
+        mode,
+        message,
+        model: model || null,
+        reasoningEffort,
+        conversation: conversation.slice(-MAX_CONVERSATION_MESSAGES),
+        context,
+        screenshotDataUrl: captureActiveChart(),
+      });
+      appendMessage('assistant', response.message, response.tradePlan);
+      const nextConversation: AssistantConversationMessage[] = [
+        ...conversation,
+        { role: 'user', content: message },
+        { role: 'assistant', content: response.message },
+      ];
+      conversation = nextConversation.slice(-MAX_CONVERSATION_MESSAGES);
+      status.textContent = 'Codex connected';
+      status.classList.remove('error');
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      appendMessage('assistant', `Lỗi: ${text}`);
+      status.textContent = text;
+      status.classList.add('error');
+    } finally {
+      requestId = null;
+      setBusy(false);
+      input.focus({ preventScroll: true });
+    }
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void submitMessage(input.value);
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  cancel.addEventListener('click', () => {
+    if (requestId) void client.cancel(requestId).catch(() => undefined);
+  });
+
+  const observer = new MutationObserver(() => {
+    if (!view.hidden) currentContext();
+  });
+  observer.observe(document.getElementById('charts') ?? document.body, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'hidden'],
+  });
+
+  void client.health().then((health) => {
+    status.textContent = health.codexAvailable ? 'Codex connected' : health.detail;
+    status.classList.toggle('error', !health.codexAvailable);
+  }).catch((error) => {
+    status.textContent = error instanceof Error ? error.message : String(error);
+    status.classList.add('error');
+  });
+
+  modeSelect.dispatchEvent(new Event('change'));
+  currentContext();
+  appendMessage('assistant', 'Sẵn sàng. Chọn chart rồi hỏi trực tiếp; chế độ Phân tích lệnh sẽ trả WAIT/LONG/SHORT cùng entry, SL và TP.');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mountAssistant, { once: true });
+} else {
+  mountAssistant();
+}
