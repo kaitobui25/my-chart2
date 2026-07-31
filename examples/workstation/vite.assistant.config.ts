@@ -18,7 +18,7 @@ function assistantProxy(): Record<string, ProxyOptions> {
 function assistantIntegration(): Plugin {
   return {
     name: 'l2chart-assistant-integration',
-    enforce: 'post',
+    enforce: 'pre',
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
       if (!normalizedId.endsWith(MAIN_MODULE_SUFFIX)) return null;
