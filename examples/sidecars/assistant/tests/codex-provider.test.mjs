@@ -1,6 +1,28 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeAccountStatus } from '../codex-provider.mjs'
+import { normalizeAccountStatus, normalizeModelList } from '../codex-provider.mjs'
+
+test('normalizes Codex model catalog and supported reasoning efforts', () => {
+  const models = normalizeModelList({
+    data: [{
+      id: 'gpt-5.3-codex',
+      displayName: 'GPT-5.3 Codex',
+      defaultReasoningEffort: 'high',
+      supportedReasoningEfforts: [
+        { reasoningEffort: 'low' },
+        { reasoningEffort: 'high' },
+        { reasoningEffort: 'xhigh' }
+      ]
+    }]
+  })
+
+  assert.deepEqual(models, [{
+    id: 'gpt-5.3-codex',
+    label: 'GPT-5.3 Codex',
+    defaultReasoningEffort: 'high',
+    supportedReasoningEfforts: ['low', 'high', 'xhigh']
+  }])
+})
 
 test('normalizes Codex day and seven-day quota status', () => {
   const status = normalizeAccountStatus({
