@@ -22,8 +22,9 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Keep chart symbols separate per provider
-        shell: python
+        shell: bash
         run: |
+          python3 - <<'PY'
           from pathlib import Path
           path = Path('examples/workstation/main.ts')
           text = path.read_text()
@@ -108,6 +109,7 @@ jobs:
               raise SystemExit('persistTileSymbols block not found')
           text = text.replace(old, new)
           path.write_text(text)
+          PY
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run build:demo
