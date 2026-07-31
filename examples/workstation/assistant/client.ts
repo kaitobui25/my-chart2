@@ -3,6 +3,7 @@ import type {
   AssistantConversationMessage,
   AssistantMode,
   AssistantResponse,
+  CodexStatusResponse,
   ReasoningEffort,
 } from './types';
 
@@ -59,6 +60,10 @@ export class AssistantApiClient {
 
   health(): Promise<{ ok: boolean; codexAvailable: boolean; detail: string }> {
     return this.request('/health');
+  }
+
+  status(payload: { model: string | null; reasoningEffort: ReasoningEffort }): Promise<CodexStatusResponse> {
+    return this.request('/status', { method: 'POST', body: JSON.stringify(payload) });
   }
 
   chat(payload: ChatRequest): Promise<AssistantResponse> {
