@@ -26,7 +26,12 @@ function formatDateHeader(date: Date): string {
   )} +0000`;
 }
 
-function dnseSignatureHeaders(apiKey: string, apiSecret: string, method: string, path: string): HeadersInit {
+function dnseSignatureHeaders(
+  apiKey: string,
+  apiSecret: string,
+  method: string,
+  path: string,
+): Record<string, string> {
   const dateValue = formatDateHeader(new Date());
   const nonce = randomUUID().replace(/-/g, '');
   const signingString = `(request-target): ${method.toLowerCase()} ${path}\ndate: ${dateValue}\nnonce: ${nonce}`;
@@ -129,7 +134,7 @@ function installDnseRestProxy(middlewares: {
       const dnsePath = localUrl.pathname;
       const dnseUrl = `${DNSE_REST_TARGET}${dnsePath}${localUrl.search}`;
       const body = await readBody(req);
-      const headers: HeadersInit = {
+      const headers: Record<string, string> = {
         ...dnseSignatureHeaders(resolved.apiKey, resolved.apiSecret, req.method || 'GET', dnsePath),
       };
       if (body && body.length > 0) headers['Content-Type'] = req.headers['content-type'] || 'application/json';
@@ -137,7 +142,7 @@ function installDnseRestProxy(middlewares: {
       const upstream = await fetch(dnseUrl, {
         method: req.method,
         headers,
-        body,
+        body: body ? new Uint8Array(body) : undefined,
       });
       res.statusCode = upstream.status;
       upstream.headers.forEach((value, key) => {
@@ -173,7 +178,7 @@ function providerProxy(fiinQuantSidecarToken: string): Record<string, string | P
       rewrite: (path) => path.replace(/^\/fiinquant-api/, ''),
       bypass(request, response) {
         if (isAllowedBrowserRequest(request)) return;
-        sendJson(response, 403, { message: 'Cross-site requests are not allowed' });
+        if (response) sendJson(response, 403, { message: 'Cross-site requests are not allowed' });
         return false;
       },
       configure(proxy) {
