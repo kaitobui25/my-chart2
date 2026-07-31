@@ -6,7 +6,11 @@ import { withCodexAppServer } from './codex-app-server-client.mjs'
 import { commandExists, spawnCommand } from './command-utils.mjs'
 import { parseResponse, responseSchemaFor } from './response-schema.mjs'
 
-const REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh'])
+export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh']
+const REASONING_EFFORT_SET = new Set(CODEX_REASONING_EFFORTS)
+const MODEL_CACHE_MS = 5 * 60 * 1000
+let modelCache = null
+let modelCacheAt = 0
 
 function normalizeModel(value) {
   if (value == null || value === '') return null
@@ -16,7 +20,35 @@ function normalizeModel(value) {
 
 function normalizeEffort(value) {
   const effort = String(value ?? '').toLowerCase()
-  return REASONING_EFFORTS.has(effort) ? effort : 'medium'
+  return REASONING_EFFORT_SET.has(effort) ? effort : 'medium'
+}
+
+function reasoningValue(value) {
+  if (typeof value === 'string') return value
+  return value?.reasoningEffort ?? value?.reasoning_effort ?? value?.effort ?? value?.value ?? value?.id ?? null
+}
+
+export function normalizeModelList(response) {
+  const rows = Array.isArray(response?.data)
+    ? response.data
+    : Array.isArray(response?.models)
+      ? response.models
+      : []
+
+  return rows.map(item => {
+    const id = normalizeModel(item?.id ?? item?.model ?? item?.slug)
+    if (id === null) return null
+    const efforts = (item?.supportedReasoningEfforts ?? item?.supported_reasoning_efforts ?? [])
+      .map(reasoningValue)
+      .map(value => String(value ?? '').toLowerCase())
+      .filter(value => REASONING_EFFORT_SET.has(value))
+    return {
+      id,
+      label: String(item?.displayName ?? item?.display_name ?? item?.name ?? id),
+      defaultReasoningEffort: normalizeEffort(item?.defaultReasoningEffort ?? item?.default_reasoning_effort),
+      supportedReasoningEfforts: efforts.length > 0 ? [...new Set(efforts)] : [...CODEX_REASONING_EFFORTS]
+    }
+  }).filter(Boolean)
 }
 
 function finiteOrNull(value) {
@@ -86,6 +118,22 @@ function terminate(child) {
     return
   }
   child.kill('SIGTERM')
+}
+
+export async function getCodexOptions({ runtimeRoot }) {
+  if (!codexAvailable()) throw unavailableError()
+  const now = Date.now()
+  if (modelCache !== null && now - modelCacheAt < MODEL_CACHE_MS) {
+    return { models: modelCache, reasoningEfforts: [...CODEX_REASONING_EFFORTS] }
+  }
+
+  await mkdir(runtimeRoot, { recursive: true })
+  const models = await withCodexAppServer({ cwd: runtimeRoot }, async client => {
+    return normalizeModelList(await client.request('model/list', { includeHidden: false }))
+  })
+  modelCache = models
+  modelCacheAt = now
+  return { models, reasoningEfforts: [...CODEX_REASONING_EFFORTS] }
 }
 
 export async function getCodexStatus({ runtimeRoot, model, reasoningEffort }) {
