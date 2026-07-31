@@ -1,7 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
+import { commandExists, spawnCommand } from './command-utils.mjs'
 import { parseResponse, responseSchemaFor } from './response-schema.mjs'
 
 const REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh'])
@@ -18,8 +19,7 @@ function normalizeEffort(value) {
 }
 
 export function codexAvailable() {
-  const command = process.platform === 'win32' ? 'where' : 'which'
-  return spawnSync(command, ['codex'], { stdio: 'ignore', windowsHide: true }).status === 0
+  return commandExists('codex')
 }
 
 function terminate(child) {
@@ -68,7 +68,7 @@ export async function runCodex({ runtimeRoot, mode, model, reasoningEffort, prom
   let child
   try {
     await new Promise((resolve, reject) => {
-      child = spawn('codex', args, {
+      child = spawnCommand('codex', args, {
         cwd: runtimeRoot,
         windowsHide: true,
         stdio: ['pipe', 'ignore', 'pipe']
