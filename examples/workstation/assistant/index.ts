@@ -252,6 +252,12 @@ function mountAssistant(): void {
   const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
   const client = new AssistantApiClient();
 
+  const setConnectionStatus = (text: string, connected: boolean) => {
+    status.textContent = text;
+    status.classList.toggle('connected', connected);
+    status.classList.toggle('error', !connected);
+  };
+
   modeSelect.value = mode;
   reasoningSelect.value = reasoningEffort;
 
@@ -427,14 +433,12 @@ function mountAssistant(): void {
       const response = await client.status({ model: model || null, reasoningEffort });
       thinking.remove();
       appendMessage('assistant', formatCodexStatus(response));
-      status.textContent = 'Codex connected';
-      status.classList.remove('error');
+      setConnectionStatus('Codex connected', true);
     } catch (error) {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
       appendMessage('assistant', `Lỗi: ${text}`);
-      status.textContent = text;
-      status.classList.add('error');
+      setConnectionStatus(text, false);
     } finally {
       setBusy(false);
       input.focus({ preventScroll: true });
@@ -479,14 +483,12 @@ function mountAssistant(): void {
         { role: 'assistant', content: response.message },
       ];
       conversation = nextConversation.slice(-MAX_CONVERSATION_MESSAGES);
-      status.textContent = 'Codex connected';
-      status.classList.remove('error');
+      setConnectionStatus('Codex connected', true);
     } catch (error) {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
       appendMessage('assistant', `Lỗi: ${text}`);
-      status.textContent = text;
-      status.classList.add('error');
+      setConnectionStatus(text, false);
     } finally {
       thinking.remove();
       requestId = null;
@@ -519,11 +521,9 @@ function mountAssistant(): void {
   });
 
   void client.health().then((health) => {
-    status.textContent = health.codexAvailable ? 'Codex connected' : health.detail;
-    status.classList.toggle('error', !health.codexAvailable);
+    setConnectionStatus(health.codexAvailable ? 'Codex connected' : health.detail, health.codexAvailable);
   }).catch((error) => {
-    status.textContent = error instanceof Error ? error.message : String(error);
-    status.classList.add('error');
+    setConnectionStatus(error instanceof Error ? error.message : String(error), false);
   });
   void loadModelOptions();
 
