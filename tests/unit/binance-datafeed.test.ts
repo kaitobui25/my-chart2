@@ -58,5 +58,9 @@ describe('BinanceDatafeed helpers', () => {
     await expect(feed.searchSymbols('BTC')).resolves.toEqual([
       { symbol: 'BTCUSDT', name: 'BTC/USDT', exchange: 'BINANCE USD-M' },
     ]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://fapi.binance.com/fapi/v1/exchangeInfo',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });

@@ -202,7 +202,7 @@ export class BinanceDatafeed implements Datafeed {
     };
     const objectOptions = typeof options === 'string' ? {} : options;
     this.cache = objectOptions.cache ?? new BinanceHistoryCache();
-    this.fetchImpl = objectOptions.fetchImpl ?? fetch;
+    this.fetchImpl = objectOptions.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.websocketFactory = objectOptions.websocketFactory ?? ((url) => new WebSocket(url));
     this.requestTimeoutMs = objectOptions.requestTimeoutMs ?? 10_000;
   }
@@ -478,7 +478,7 @@ export class BinanceDatafeed implements Datafeed {
     const controller = new AbortController();
     const timeout = globalThis.setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
-      const response = await this.fetchImpl(url, { signal: controller.signal });
+      const response = await this.fetchImpl(url.toString(), { signal: controller.signal });
       if (!response.ok) {
         const retryAfter = response.headers.get('retry-after');
         const suffix = retryAfter ? `; retry after ${retryAfter}s` : '';
