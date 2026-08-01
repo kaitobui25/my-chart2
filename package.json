@@ -75,6 +75,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "lucide": "^1.25.0"
+    "lucide": "^1.27.0"
   }
 }
