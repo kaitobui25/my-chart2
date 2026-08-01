@@ -56,6 +56,7 @@ import {
   type DnseRealtimeState,
 } from '../providers/dnse';
 import { FiinQuantDatafeed, type FiinQuantHealth } from '../providers/fiinquant';
+import { BinanceDatafeed } from '../providers/binance';
 import { SampleDatafeed } from '../providers/sample';
 import {
   MarketHub,
@@ -80,7 +81,7 @@ const indicatorCatalog = getIndicators();
 translateDom();
 observeTranslations();
 
-type PriceProviderId = 'demo' | 'dnse' | 'fiinquant';
+type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'binance-spot' | 'binance-usdm';
 type ProviderCredentialMode = 'session' | 'server';
 
 interface DnseStoredSettings {
@@ -110,6 +111,8 @@ const MAX_HISTORY_RANGE_SECONDS: Record<string, number> = {
   '1w': 20 * 365 * 86400,
 };
 const DEFAULT_SYMBOLS = ['HPG', 'SSI', 'VNM', 'VN30F1M'];
+const BINANCE_DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+const PROVIDER_WATCHLISTS_KEY = 'l2chart.providerWatchlists.v1';
 
 function pricePrecisionForSymbol(symbol: string): number | null {
   return /^VN30F/i.test(symbol.trim()) ? 1 : null;
@@ -792,7 +795,13 @@ function countdownText(candle: Candle | undefined, interval: string): string {
 
 function readActiveProvider(): PriceProviderId {
   const stored = localStorage.getItem(ACTIVE_PROVIDER_KEY);
-  return stored === 'demo' || stored === 'dnse' || stored === 'fiinquant' ? stored : 'demo';
+  return stored === 'demo'
+    || stored === 'dnse'
+    || stored === 'fiinquant'
+    || stored === 'binance-spot'
+    || stored === 'binance-usdm'
+    ? stored
+    : 'demo';
 }
 
 function dnseWsProxyBase(): string {
@@ -884,6 +893,8 @@ let dnseRealtimeState: DnseRealtimeState = 'idle';
 let dnseRealtimeDetail = '';
 let unsubscribeDnseRealtimeStatus: (() => void) | null = null;
 const demoFeed = new SampleDatafeed();
+const binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });
+const binanceUsdmFeed = new BinanceDatafeed({ market: 'usdm' });
 
 if (activeProvider === 'dnse' && !dnseFeed) {
   activeProvider = 'demo';
@@ -984,10 +995,45 @@ function reportProviderLoadFailure(provider: PriceProviderId, message: string): 
   void reportFiinQuantHealth();
 }
 
+function isBinanceProvider(provider: PriceProviderId): provider is 'binance-spot' | 'binance-usdm' {
+  return provider === 'binance-spot' || provider === 'binance-usdm';
+}
+
+function providerFamily(provider: PriceProviderId): 'vietnam' | 'binance' {
+  return isBinanceProvider(provider) ? 'binance' : 'vietnam';
+}
+
+function providerWatchlistKey(provider: PriceProviderId): string {
+  return isBinanceProvider(provider) ? provider : 'vietnam';
+}
+
+function defaultSymbolsForProvider(provider: PriceProviderId): string[] {
+  return isBinanceProvider(provider) ? BINANCE_DEFAULT_SYMBOLS : DEFAULT_SYMBOLS;
+}
+
 function setActiveProvider(provider: PriceProviderId): void {
   if (provider === 'dnse' && !dnseFeed) provider = 'demo';
+  const previousProvider = activeProvider;
+  const previousWatchlist = tradingWorkspace?.getWatchlist() ?? [];
   activeProvider = provider;
   localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);
+
+  if (providerFamily(previousProvider) !== providerFamily(provider)) {
+    const defaultSymbol = defaultSymbolsForProvider(provider)[0];
+    for (const tile of tiles) tile.setSymbol(defaultSymbol, false);
+  }
+
+  const previousWatchlistKey = providerWatchlistKey(previousProvider);
+  const nextWatchlistKey = providerWatchlistKey(provider);
+  if (tradingWorkspace && previousWatchlistKey !== nextWatchlistKey) {
+    const stored = readStoredJson<Record<string, string[]>>(PROVIDER_WATCHLISTS_KEY, {});
+    if (previousWatchlist.length > 0) stored[previousWatchlistKey] = previousWatchlist;
+    const nextWatchlist = stored[nextWatchlistKey] ?? defaultSymbolsForProvider(provider);
+    stored[nextWatchlistKey] = nextWatchlist;
+    writeStoredJson(PROVIDER_WATCHLISTS_KEY, stored);
+    tradingWorkspace.replaceWatchlist(nextWatchlist);
+  }
+
   refreshProviderUi();
   reloadAllTiles();
   tradingWorkspace?.setSourceLabel(currentFeed().label);
@@ -1002,6 +1048,12 @@ function currentFeed(): { feed: Datafeed | null; label: string; unavailable: str
     return dnseFeed
       ? { feed: dnseFeed, label: 'DNSE', unavailable: null }
       : { feed: null, label: 'DNSE', unavailable: 'đăng nhập DNSE' };
+  }
+  if (activeProvider === 'binance-spot') {
+    return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };
+  }
+  if (activeProvider === 'binance-usdm') {
+    return { feed: binanceUsdmFeed, label: 'Binance USD-M Futures', unavailable: null };
   }
   return { feed: fiinQuantFeed, label: 'FiinQuant', unavailable: null };
 }
@@ -3629,7 +3681,7 @@ function renderProviderCredentialModes(): void {
     : tr('Phiên trình duyệt chỉ giữ thông tin đăng nhập và sidecar token trong bộ nhớ tab. Khi truy cập qua LAN/Tailscale, cần nhập SIDECAR_TOKEN trong Cài đặt nâng cao.');
 }
 
-function setProviderCredentialMode(provider: Exclude<PriceProviderId, 'demo'>, mode: ProviderCredentialMode): void {
+function setProviderCredentialMode(provider: 'dnse' | 'fiinquant', mode: ProviderCredentialMode): void {
   if (provider === 'dnse') {
     dnseCredentialMode = mode;
     dnseSettings.credentialMode = mode;
@@ -3676,6 +3728,14 @@ function renderDnseProviderStatus(): void {
   } else {
     providerStatus.textContent = tr('DNSE đã sẵn sàng. Realtime sẽ mở khi chart hoặc watchlist đăng ký dữ liệu.');
   }
+}
+
+function renderBinanceProviderStatus(provider: 'binance-spot' | 'binance-usdm'): void {
+  const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;
+  providerStatus.dataset.tone = 'success';
+  providerStatus.textContent = provider === 'binance-spot'
+    ? `Binance Spot dùng public REST/WebSocket, không cần API key. Cache ${feed.cacheAvailable ? 'IndexedDB đang bật' : 'không khả dụng trong browser này'}.`
+    : `Binance USD-M Futures dùng public REST/WebSocket, không cần API key. Cache ${feed.cacheAvailable ? 'IndexedDB đang bật' : 'không khả dụng trong browser này'}.`;
 }
 
 function bindDnseRealtimeStatus(): void {
@@ -3738,6 +3798,16 @@ function providerConnectionSummary(provider: PriceProviderId): ProviderConnectio
     };
   }
 
+  if (isBinanceProvider(provider)) {
+    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;
+    return {
+      service: tr('Khả dụng'),
+      realtime: feed.cacheAvailable ? 'WebSocket · IndexedDB' : 'WebSocket',
+      serviceTone: 'success',
+      realtimeTone: 'success',
+    };
+  }
+
   const stream = fiinQuantHealthSnapshot?.stream;
   if (fiinQuantHealthSnapshot?.tokenConfigured === false) {
     return {
@@ -3787,8 +3857,14 @@ function providerConnectionSummary(provider: PriceProviderId): ProviderConnectio
 
 function renderProviderConnectionSummary(): void {
   providerSourceSummary.replaceChildren();
-  const names: Record<PriceProviderId, string> = { demo: 'Demo', dnse: 'DNSE', fiinquant: 'FiinQuant' };
-  for (const provider of ['demo', 'dnse', 'fiinquant'] as PriceProviderId[]) {
+  const names: Record<PriceProviderId, string> = {
+    demo: 'Demo',
+    dnse: 'DNSE',
+    fiinquant: 'FiinQuant',
+    'binance-spot': 'Binance Spot',
+    'binance-usdm': 'Binance Futures',
+  };
+  for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {
     const state = providerConnectionSummary(provider);
     const row = document.createElement('div');
     row.className = 'provider-source-row';
@@ -3834,6 +3910,9 @@ function renderProviderConnectionSummary(): void {
     } else if (provider === 'demo') {
       action.textContent = tr('Dùng');
       action.classList.add('primary');
+    } else if (isBinanceProvider(provider)) {
+      action.textContent = tr('Dùng');
+      action.classList.add('primary');
     } else if (provider === 'dnse') {
       action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');
       action.classList.toggle('primary', !!dnseFeed);
@@ -3852,8 +3931,15 @@ function renderProviderConnectionSummary(): void {
   }
 }
 
+function providerDisplayName(provider: PriceProviderId): string {
+  if (provider === 'demo') return 'Demo';
+  if (provider === 'dnse') return 'DNSE';
+  if (provider === 'fiinquant') return 'FiinQuant';
+  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';
+}
+
 function renderProviderSourceState(): void {
-  const providerName = activeProvider === 'demo' ? 'Demo' : activeProvider === 'dnse' ? 'DNSE' : 'FiinQuant';
+  const providerName = providerDisplayName(activeProvider);
   const fiinState = fiinQuantConnectionState === 'connected'
     ? tr('đã kết nối')
     : fiinQuantConnectionState === 'checking'
@@ -3868,10 +3954,15 @@ function renderProviderSourceState(): void {
     ? tr('mô phỏng')
     : activeProvider === 'dnse'
       ? dnseStateLabel()
-      : fiinState;
+      : activeProvider === 'fiinquant'
+        ? fiinState
+        : activeProvider === 'binance-spot'
+          ? 'Spot · IndexedDB'
+          : 'USD-M · IndexedDB';
   sourceBtn.classList.toggle(
     'active',
-    (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')
+    isBinanceProvider(activeProvider)
+      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')
       || (activeProvider === 'dnse' && dnseRealtimeState === 'connected'),
   );
   sourceBtn.classList.toggle(
@@ -3892,6 +3983,8 @@ function refreshProviderUi(): void {
     providerStatus.textContent = tr('Đang dùng dữ liệu mô phỏng. Không cần tài khoản hay API credential.');
   } else if (activeProvider === 'dnse') {
     renderDnseProviderStatus();
+  } else if (isBinanceProvider(activeProvider)) {
+    renderBinanceProviderStatus(activeProvider);
   } else {
     void reportFiinQuantHealth();
   }
@@ -3920,6 +4013,8 @@ function setProviderPanel(provider: PriceProviderId): void {
     providerStatus.textContent = tr('Đang dùng dữ liệu mô phỏng. Không cần tài khoản hay API credential.');
   } else if (provider === 'dnse') {
     renderDnseProviderStatus();
+  } else if (isBinanceProvider(provider)) {
+    renderBinanceProviderStatus(provider);
   } else {
     void reportFiinQuantHealth();
   }
@@ -3967,6 +4062,10 @@ async function activateProviderFromSwitcher(provider: PriceProviderId): Promise<
   setProviderPanel(provider);
   if (provider === 'demo') {
     setActiveProvider('demo');
+    return;
+  }
+  if (isBinanceProvider(provider)) {
+    setActiveProvider(provider);
     return;
   }
   if (provider === 'dnse') {
@@ -4205,15 +4304,34 @@ providerOverlay.addEventListener('pointerdown', (e) => {
 });
 providerOverlay.querySelectorAll<HTMLButtonElement>('[data-provider-tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const provider = btn.dataset.providerTab === 'fiinquant'
-      ? 'fiinquant'
-      : btn.dataset.providerTab === 'dnse'
-        ? 'dnse'
-        : 'demo';
+    const value = btn.dataset.providerTab;
+    const provider: PriceProviderId = value === 'fiinquant'
+      || value === 'dnse'
+      || value === 'binance-spot'
+      || value === 'binance-usdm'
+      ? value
+      : 'demo';
     setProviderPanel(provider);
   });
 });
 document.getElementById('demo-use')!.addEventListener('click', () => setActiveProvider('demo'));
+document.getElementById('binance-spot-use')!.addEventListener('click', () => setActiveProvider('binance-spot'));
+document.getElementById('binance-usdm-use')!.addEventListener('click', () => setActiveProvider('binance-usdm'));
+providerOverlay.querySelectorAll<HTMLButtonElement>('[data-binance-cache-clear]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const provider = button.dataset.binanceCacheClear === 'usdm' ? 'binance-usdm' : 'binance-spot';
+    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;
+    button.disabled = true;
+    delete providerStatus.dataset.tone;
+    providerStatus.textContent = tr('Đang xóa cache Binance...');
+    void feed.clearCache().then(() => {
+      providerStatus.dataset.tone = 'success';
+      providerStatus.textContent = tr('Đã xóa cache Binance cho thị trường này.');
+    }).finally(() => {
+      button.disabled = false;
+    });
+  });
+});
 fiinQuantUseButton.addEventListener('click', () => {
   void useConfiguredFiinQuantSession();
 });
