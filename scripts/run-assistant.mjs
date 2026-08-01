@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
 const serverPath = path.join(ROOT, 'examples', 'sidecars', 'assistant', 'server.mjs')
-const configPath = path.join(ROOT, 'examples', 'workstation', 'vite.assistant.config.ts')
+const configPath = path.join(ROOT, 'examples', 'workstation', 'vite.config.ts')
 
 if (!existsSync(viteBin)) {
   console.error('Missing node_modules. Run "npm install" once, then start this launcher again.')
