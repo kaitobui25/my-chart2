@@ -1,16 +1,14 @@
 # L2Chart AI Assistant
 
-The assistant is an optional workstation feature. It does not change the provider-neutral chart package under `src/`. The normal workstation loads the AI tab; it can connect only when the local assistant sidecar is running.
+The assistant is integrated into the workstation. It does not change the provider-neutral chart package under `src/`. The standard development command starts both the chart and the local AI sidecar.
 
-## Start on Windows
+## Start
 
 1. Install dependencies once with `npm install`.
 2. Install Codex CLI and sign in with ChatGPT.
-3. Double-click `open-ai-chart.bat`.
+3. Run `npm run dev`.
 
-The launcher starts the loopback-only Codex sidecar on `127.0.0.1:8788` and the normal workstation config.
-
-You can also run the chart normally with `npm run dev`. The AI tab will be visible, but it will report the sidecar as offline until `examples/sidecars/assistant/server.mjs` is running.
+This single command starts the loopback-only Codex sidecar on `127.0.0.1:8788` and the complete workstation. On Windows, `open-ai-chart.bat` remains a convenience shortcut for the same command.
 
 ## Design
 

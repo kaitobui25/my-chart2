@@ -11,6 +11,9 @@ npm install
 npm run dev
 ```
 
+The development command starts the complete workstation and its local AI
+sidecar together. Install Codex CLI and sign in with ChatGPT to use the AI tab.
+
 The default sample provider is deterministic and requires no credentials. The
 provider integrations are reference implementations, not runtime dependencies
 of the `lamlong-chart` package.

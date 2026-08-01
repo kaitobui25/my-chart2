@@ -49,7 +49,7 @@
     "canvas"
   ],
   "scripts": {
-    "dev": "vite --config examples/workstation/vite.config.ts",
+    "dev": "node scripts/run-assistant.mjs",
     "build": "npm run build:demo",
     "build:demo": "vite build --config examples/workstation/vite.config.ts",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
