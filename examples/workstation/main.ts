@@ -66,7 +66,7 @@ import {
   type MarketQuote,
 } from './trading/paper';
 import { TradingWorkspace } from './trading/workspace';
-import { SyncedReplaySession, type ReplayParticipant } from './replay/replay-session';
+import { SyncedReplaySession, type ReplayParticipant, type ReplaySessionSnapshot } from './replay/replay-session';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -2255,6 +2255,20 @@ class Tile implements ReplayParticipant {
   private applyPricePrecision(): void {
     this.pricePrecision = pricePrecisionForSymbol(this.symbol);
     this.chart?.setPricePrecision(this.pricePrecision);
+  }
+
+  /** Giu contract assistant cu; state replay van do session dung chung quan ly. */
+  getReplayInfo(): ReplaySessionSnapshot {
+    return replaySession?.snapshot() ?? {
+      phase: 'idle',
+      cursor: -1,
+      total: 0,
+      speed: 1,
+      currentTime: null,
+      baseInterval: null,
+      symbol: null,
+      error: null,
+    };
   }
 
   getHistoryRange(): HistoryRange | null {
