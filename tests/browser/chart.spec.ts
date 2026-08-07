@@ -6,6 +6,7 @@ interface ChartState {
   candleCount: number;
   drawingCount: number;
   chartRootCount: number;
+  mode: string;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -44,6 +45,26 @@ test('renders on Canvas and supports wheel zoom and pointer pan', async ({ page 
   await expect.poll(
     () => page.evaluate(() => window.chartTest.state().rightIndex),
   ).not.toBe(beforePan);
+});
+
+test('renders Heikin Ashi from raw candles and keeps realtime updates working', async ({ page }) => {
+  const before = await page.evaluate(() => window.chartTest.lastCloses());
+  expect(before.raw).toBe(before.displayed);
+
+  await page.evaluate(() => window.chartTest.setMode('heikin-ashi'));
+  await expect.poll(() => page.evaluate(() => window.chartTest.state().mode)).toBe('heikin-ashi');
+
+  const transformed = await page.evaluate(() => window.chartTest.lastCloses());
+  expect(transformed.raw).not.toBe(transformed.displayed);
+
+  await page.evaluate(() => window.chartTest.updateLatest(112));
+  expect(await page.evaluate(() => window.chartTest.state().candleCount)).toBe(120);
+  const updated = await page.evaluate(() => window.chartTest.lastCloses());
+  expect(updated.raw).not.toBe(updated.displayed);
+
+  await page.evaluate(() => window.chartTest.appendCandle());
+  expect(await page.evaluate(() => window.chartTest.state().candleCount)).toBe(121);
+  expect(await page.evaluate(() => window.chartTest.state().mode)).toBe('heikin-ashi');
 });
 
 test('updates candles, restores drawing history, and destroys cleanly', async ({ page }) => {

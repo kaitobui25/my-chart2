@@ -48,7 +48,7 @@ export abstract class Series {
   }
 }
 
-export type PriceSeriesMode = 'candles' | 'bars' | 'line' | 'area';
+export type PriceSeriesMode = 'candles' | 'heikin-ashi' | 'bars' | 'line' | 'area';
 
 /** The main OHLC series of a chart. Reads candles owned by the chart (no copy). */
 export class CandleSeries extends Series {
@@ -65,7 +65,7 @@ export class CandleSeries extends Series {
     if (data.length === 0) return null;
     let min = Infinity;
     let max = -Infinity;
-    const hl = this.mode === 'candles' || this.mode === 'bars';
+    const hl = this.mode === 'candles' || this.mode === 'heikin-ashi' || this.mode === 'bars';
     for (let i = from; i <= to; i++) {
       const c = data[i];
       if (hl) {
@@ -87,6 +87,7 @@ export class CandleSeries extends Series {
   draw(rc: RenderContext): void {
     switch (this.mode) {
       case 'candles':
+      case 'heikin-ashi':
         this.drawCandles(rc);
         break;
       case 'bars':
