@@ -47,6 +47,11 @@ export { darkTheme, lightTheme, type Theme, type Candle, type LinePoint } from '
 export { heikinAshi, heikinAshiCandle } from './core/heikin-ashi';
 export { aggregateCalendarCandles, type CalendarInterval } from './calendar-candles';
 export {
+  aggregateCandles,
+  mergeCandleIntoInterval,
+  type CandleProjectionUpdate,
+} from './candle-aggregation';
+export {
   SUPPORTED_INTERVALS,
   isIntervalCode,
   isCalendarInterval,
