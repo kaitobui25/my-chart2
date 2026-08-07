@@ -6,6 +6,7 @@ import {
   type QuoteUpdate,
   type SymbolSearchResult,
 } from '../../src/datafeed';
+import { intervalApproxSeconds, isCalendarInterval, nextIntervalStart } from '../../src/interval';
 import {
   BinanceHistoryCache,
   type BinanceMarket,
@@ -233,11 +234,22 @@ export class BinanceDatafeed implements Datafeed {
     const normalized = normalizedSymbol(symbol);
     if (!normalized) return [];
     const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
-    const step = INTERVAL_SECONDS[interval] ?? 60;
+    const step = INTERVAL_SECONDS[interval] ?? intervalApproxSeconds(interval);
+    const calendarInterval = isCalendarInterval(interval);
 
     if (!range) {
       const cached = await this.cache.readLatest(this.market, normalized, interval, requestedLimit);
       const lastCached = cached[cached.length - 1]?.time;
+      if (calendarInterval) {
+        try {
+          const remote = await this.fetchRecent(normalized, interval, requestedLimit);
+          await this.writeClosedCandles(normalized, interval, remote);
+          return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
+        } catch (error) {
+          if (cached.length > 0) return cached;
+          throw error;
+        }
+      }
       const currentBar = Math.floor(Date.now() / 1000 / step) * step;
       try {
         if (lastCached !== undefined && cached.length >= requestedLimit) {
@@ -258,6 +270,23 @@ export class BinanceDatafeed implements Datafeed {
         return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
       } catch (error) {
         if (cached.length > 0) return cached;
+        throw error;
+      }
+    }
+
+    if (calendarInterval) {
+      const requested = { from: Math.min(range.from, range.to), to: Math.max(range.from, range.to) };
+      const cached = await this.cache.readRange(
+        this.market, normalized, interval, requested.from, requested.to, requestedLimit,
+      );
+      try {
+        const remote = await this.fetchRange(normalized, interval, requested, requestedLimit);
+        await this.writeClosedCandles(normalized, interval, remote);
+        return mergeBinanceCandles(cached, remote)
+          .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
+          .slice(-requestedLimit);
+      } catch (error) {
+        if (cached.length > 0) return cached.slice(-requestedLimit);
         throw error;
       }
     }
@@ -407,9 +436,8 @@ export class BinanceDatafeed implements Datafeed {
   }
 
   private async writeClosedCandles(symbol: string, interval: string, candles: Candle[]): Promise<void> {
-    const step = INTERVAL_SECONDS[interval] ?? 60;
     const now = Math.floor(Date.now() / 1000);
-    const closed = candles.filter((candle) => candle.time + step <= now);
+    const closed = candles.filter((candle) => nextIntervalStart(candle.time, interval) <= now);
     await this.cache.write(this.market, symbol, interval, closed);
   }
 

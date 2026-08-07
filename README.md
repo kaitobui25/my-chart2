@@ -34,6 +34,7 @@ to replace every one of them.
 ## Capabilities
 
 - Candlestick, Heikin Ashi, OHLC bar, line, area, histogram, band, and zone series
+- Calendar-aware weekly and monthly timeframes (`1W`, `1M`)
 - Independent price panes sharing one index-based time scale
 - Horizontal and vertical pan, wheel/pinch zoom, autoscale, and manual scales
 - Crosshair events and synchronized crosshairs across chart instances

@@ -28,6 +28,8 @@ INTERVAL_SECONDS = {
     "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
     "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400,
 }
+CALENDAR_INTERVALS = {"1w", "1M"}
+SUPPORTED_INTERVALS = set(INTERVAL_SECONDS) | CALENDAR_INTERVALS
 # Expired entries are returned immediately and refreshed in the background.
 TTL_INTRADAY = 15.0
 TTL_DAILY = 120.0
@@ -77,37 +79,88 @@ class FiinQuantGateway:
                       from_time: int | None = None,
                       to_time: int | None = None) -> list[dict]:
         client = self._ensure_client()
+        source_interval = "1d" if interval in CALENDAR_INTERVALS else interval
         requested_from = from_time
         requested_to = to_time
+        if interval in CALENDAR_INTERVALS and from_time is not None and to_time is not None:
+            requested_from = self._calendar_bucket_time(from_time, interval)
+            requested_to = min(
+                int(datetime.now(VN_TZ).timestamp()),
+                self._next_calendar_bucket_time(to_time, interval) - 1,
+            )
+
+        source_limit = limit
+        if interval == "1w":
+            source_limit = min(20000, max(60, limit * 8 + 14))
+        elif interval == "1M":
+            source_limit = min(20000, max(60, limit * 35 + 35))
+
         use_rolling_range = (
-            from_time is None and to_time is None and interval != "1d"
+            requested_from is None and requested_to is None and source_interval != "1d"
         )
         if use_rolling_range:
             # period=N can stop at the previous completed trading day. A
             # rolling range includes the current session in one HTTP request.
             now = datetime.now(VN_TZ)
-            bars_per_session = (4.5 * 60 * 60) / INTERVAL_SECONDS[interval]
-            estimated_sessions = limit / max(bars_per_session, 1)
+            bars_per_session = (4.5 * 60 * 60) / INTERVAL_SECONDS[source_interval]
+            estimated_sessions = source_limit / max(bars_per_session, 1)
             span_days = max(7, math.ceil(estimated_sessions * 1.75) + 4)
             requested_from = int((now - timedelta(days=span_days)).timestamp())
             requested_to = int(now.timestamp())
 
         candles_by_time: dict[int, dict] = {}
         data = self._request_history(
-            client, symbol, interval, limit, requested_from, requested_to
+            client, symbol, source_interval, source_limit, requested_from, requested_to
         )
         for candle in self._history_candles(data):
             candles_by_time[candle["time"]] = candle
 
-        # Holidays or suspended symbols can leave the estimated range short.
-        # Fall back to period=N only then and merge without duplicate times.
-        if use_rolling_range and len(candles_by_time) < limit:
+        if use_rolling_range and len(candles_by_time) < source_limit:
             data = self._request_history(
-                client, symbol, interval, limit, None, None
+                client, symbol, source_interval, source_limit, None, None
             )
             for candle in self._history_candles(data):
                 candles_by_time[candle["time"]] = candle
-        return sorted(candles_by_time.values(), key=lambda c: c["time"])[-limit:]
+
+        candles = sorted(candles_by_time.values(), key=lambda c: c["time"])
+        if interval in CALENDAR_INTERVALS:
+            candles = self._aggregate_calendar_history(candles, interval)
+        return candles[-limit:]
+
+    @staticmethod
+    def _calendar_bucket_time(timestamp: float, interval: str) -> int:
+        local = datetime.fromtimestamp(timestamp, VN_TZ)
+        if interval == "1w":
+            local = (local - timedelta(days=local.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        elif interval == "1M":
+            local = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return int(local.timestamp())
+
+    @classmethod
+    def _next_calendar_bucket_time(cls, timestamp: float, interval: str) -> int:
+        start = datetime.fromtimestamp(cls._calendar_bucket_time(timestamp, interval), VN_TZ)
+        if interval == "1w":
+            return int((start + timedelta(days=7)).timestamp())
+        if start.month == 12:
+            return int(start.replace(year=start.year + 1, month=1).timestamp())
+        return int(start.replace(month=start.month + 1).timestamp())
+
+    @classmethod
+    def _aggregate_calendar_history(cls, candles: list[dict], interval: str) -> list[dict]:
+        result: list[dict] = []
+        for candle in candles:
+            bucket = cls._calendar_bucket_time(candle["time"], interval)
+            previous = result[-1] if result else None
+            if previous is None or previous["time"] != bucket:
+                result.append({**candle, "time": bucket})
+                continue
+            previous["high"] = max(previous["high"], candle["high"])
+            previous["low"] = min(previous["low"], candle["low"])
+            previous["close"] = candle["close"]
+            previous["volume"] = float(previous.get("volume") or 0) + float(candle.get("volume") or 0)
+        return result
 
     def _request_history(self, client, symbol: str, interval: str, limit: int,
                          from_time: int | None,
@@ -283,7 +336,7 @@ class HistoryCache:
             )
             return candles, False
         key = (symbol, interval)
-        ttl = TTL_DAILY if interval == "1d" else TTL_INTRADAY
+        ttl = TTL_DAILY if interval in {"1d", "1w", "1M"} else TTL_INTRADAY
         entry = self._store.get(key)
         if entry is not None:
             candles, fetched_at, coverage = entry
@@ -585,14 +638,17 @@ class TickHub:
 
     def _aggregate(self, symbol: str, interval: str, close: float, match_volume: float,
                    total_volume, tick_time: float) -> dict | None:
-        step = INTERVAL_SECONDS.get(interval)
-        if step is None:
-            return None
-        if interval == "1d":
-            local = datetime.fromtimestamp(tick_time, VN_TZ)
-            bucket = int(local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+        if interval in CALENDAR_INTERVALS:
+            bucket = FiinQuantGateway._calendar_bucket_time(tick_time, interval)
         else:
-            bucket = int(tick_time // step) * step
+            step = INTERVAL_SECONDS.get(interval)
+            if step is None:
+                return None
+            if interval == "1d":
+                local = datetime.fromtimestamp(tick_time, VN_TZ)
+                bucket = int(local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+            else:
+                bucket = int(tick_time // step) * step
 
         key = (symbol, interval)
         bar = self.bars.get(key)
@@ -910,7 +966,7 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
         to_time = int(request.query["to"]) if request.query.get("to") else None
         if not symbol:
             return web.json_response({"message": "symbol is required"}, status=400)
-        if interval not in INTERVAL_SECONDS:
+        if interval not in SUPPORTED_INTERVALS:
             return web.json_response({"message": f"unsupported interval: {interval}"}, status=400)
         try:
             candles, cached = await current_cache.get(
@@ -954,7 +1010,7 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
             return ws
         symbol = request.query.get("symbol", "").strip().upper()
         interval = request.query.get("interval", "1m")
-        initial = {(symbol, interval)} if symbol and interval in INTERVAL_SECONDS else set()
+        initial = {(symbol, interval)} if symbol and interval in SUPPORTED_INTERVALS else set()
         current_hub.register(ws, initial)
         try:
             async for msg in ws:
@@ -975,7 +1031,7 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
                         next_symbol = str(item.get("symbol") or "").strip().upper()
                         next_interval = str(item.get("interval") or "")
                         if next_symbol and len(next_symbol) <= 32 \
-                                and next_interval in INTERVAL_SECONDS:
+                                and next_interval in SUPPORTED_INTERVALS:
                             subscriptions.add((next_symbol, next_interval))
                     current_hub.set_subscriptions(ws, subscriptions)
                 if msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):

@@ -1,5 +1,6 @@
 import type { Candle } from '../../src/core/types';
-import { INTERVAL_SECONDS, type Datafeed, type HistoryRange } from '../../src/datafeed';
+import { type Datafeed, type HistoryRange } from '../../src/datafeed';
+import { estimateIntervalBars, intervalStart, shiftIntervalStart } from '../../src/interval';
 
 /** Deterministic PRNG so the demo renders the same series every load. */
 function mulberry32(seed: number): () => number {
@@ -26,15 +27,12 @@ export class SampleDatafeed implements Datafeed {
   readonly name = 'Sample (offline)';
 
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
-    const step = INTERVAL_SECONDS[interval] ?? 60;
     const rand = mulberry32(hashCode(symbol + interval));
     const requestedTo = range?.to ?? Math.floor(Date.now() / 1000);
-    const end = Math.floor(requestedTo / step) * step;
-    const requestedCount = range
-      ? Math.floor((end - Math.ceil(range.from / step) * step) / step) + 1
-      : limit;
+    const end = intervalStart(requestedTo, interval);
+    const requestedCount = range ? estimateIntervalBars(range.from, end, interval) : limit;
     const count = Math.max(1, Math.min(limit, requestedCount));
-    const start = end - (count - 1) * step;
+    const start = shiftIntervalStart(end, interval, -(count - 1));
 
     let price = 100 + rand() * 40000;
     const candles: Candle[] = [];
@@ -46,7 +44,7 @@ export class SampleDatafeed implements Datafeed {
       const high = Math.max(open, close) * (1 + rand() * vol * 0.6);
       const low = Math.min(open, close) * (1 - rand() * vol * 0.6);
       candles.push({
-        time: start + i * step,
+        time: shiftIntervalStart(start, interval, i),
         open,
         high,
         low,
@@ -62,13 +60,12 @@ export class SampleDatafeed implements Datafeed {
   private lastBySeries = new Map<string, Candle>();
 
   subscribe(symbol: string, interval: string, onCandle: (c: Candle) => void): () => void {
-    const step = INTERVAL_SECONDS[interval] ?? 60;
     const key = symbol + interval;
     const timer = setInterval(() => {
       const prev = this.lastBySeries.get(key);
       if (!prev) return;
       const now = Math.floor(Date.now() / 1000);
-      const barTime = Math.floor(now / step) * step;
+      const barTime = intervalStart(now, interval);
       const move = prev.close * (Math.random() - 0.5) * 0.002;
       let c: Candle;
       if (barTime > prev.time) {

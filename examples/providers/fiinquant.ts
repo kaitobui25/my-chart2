@@ -1,5 +1,6 @@
 import type { Candle } from '../../src/core/types';
 import type { Datafeed, HistoryRange, SymbolSearchResult } from '../../src/datafeed';
+import { intervalStart, isCalendarInterval, nextIntervalStart } from '../../src/interval';
 
 export interface FiinQuantHealth {
   ok: boolean;
@@ -83,13 +84,19 @@ export class FiinQuantDatafeed implements Datafeed {
   }
 
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
+    const calendarRange = range && isCalendarInterval(interval)
+      ? {
+          from: intervalStart(Math.min(range.from, range.to), interval, 420),
+          to: Math.min(Math.floor(Date.now() / 1000), nextIntervalStart(Math.max(range.from, range.to), interval, 420) - 1),
+        }
+      : range;
     const url = new URL(`${this.baseUrl}/history`, window.location.origin);
     url.searchParams.set('symbol', symbol.trim().toUpperCase());
     url.searchParams.set('interval', interval);
     url.searchParams.set('limit', String(limit));
-    if (range) {
-      url.searchParams.set('from', String(range.from));
-      url.searchParams.set('to', String(range.to));
+    if (calendarRange) {
+      url.searchParams.set('from', String(calendarRange.from));
+      url.searchParams.set('to', String(calendarRange.to));
     }
     let res: Response;
     try {
@@ -107,7 +114,7 @@ export class FiinQuantDatafeed implements Datafeed {
     return ((payload as { candles?: Candle[] }).candles ?? [])
       .map((c) => this.validCandle(c))
       .filter((c): c is Candle => c !== null)
-      .filter((c) => !range || (c.time >= range.from && c.time <= range.to));
+      .filter((c) => !calendarRange || (c.time >= calendarRange.from && c.time <= calendarRange.to));
   }
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolSearchResult[]> {

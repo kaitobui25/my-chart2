@@ -45,6 +45,18 @@ export { PriceScale, type PriceScaleMode } from './core/price-scale';
 export { getChartLocale, setChartLocale, type ChartLocale } from './core/i18n';
 export { darkTheme, lightTheme, type Theme, type Candle, type LinePoint } from './core/types';
 export { heikinAshi, heikinAshiCandle } from './core/heikin-ashi';
+export { aggregateCalendarCandles, type CalendarInterval } from './calendar-candles';
+export {
+  SUPPORTED_INTERVALS,
+  isIntervalCode,
+  isCalendarInterval,
+  intervalApproxSeconds,
+  intervalStart,
+  shiftIntervalStart,
+  nextIntervalStart,
+  estimateIntervalBars,
+  type IntervalCode,
+} from './interval';
 export * as indicators from './indicators';
 export {
   type Datafeed,
