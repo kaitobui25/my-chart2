@@ -36,7 +36,9 @@ import {
   L2Chart,
   darkTheme,
   lightTheme,
-  INTERVAL_SECONDS,
+  estimateIntervalBars,
+  intervalApproxSeconds,
+  nextIntervalStart,
   type Datafeed,
   type Candle,
   type DrawingStyle,
@@ -97,9 +99,15 @@ interface FiinQuantStoredSettings {
   credentialMode: ProviderCredentialMode;
 }
 
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
+const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1w', '1M'];
 const HISTORY_PAGE_SIZE = 500;
 const HISTORY_PAGE_TRIGGER_BARS = 30;
+
+function historyPageSizeFor(interval: string): number {
+  if (interval === '1M') return 120;
+  if (interval === '1w') return 260;
+  return HISTORY_PAGE_SIZE;
+}
 const MAX_HISTORY_RANGE_SECONDS: Record<string, number> = {
   '1m': 7 * 86400,
   '5m': 30 * 86400,
@@ -109,6 +117,7 @@ const MAX_HISTORY_RANGE_SECONDS: Record<string, number> = {
   '4h': 3 * 365 * 86400,
   '1d': 10 * 365 * 86400,
   '1w': 20 * 365 * 86400,
+  '1M': 40 * 365 * 86400,
 };
 const DEFAULT_SYMBOLS = ['HPG', 'SSI', 'VNM', 'VN30F1M'];
 const BINANCE_DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
@@ -636,7 +645,13 @@ function defaultTileTemplate(symbol = DEFAULT_SYMBOLS[0]): TileTemplate {
 }
 
 function intervalLabel(interval: string): string {
-  return interval === '1d' ? '1D' : interval;
+  if (interval === '1d') return '1D';
+  if (interval === '1w') return '1W';
+  return interval;
+}
+
+function providerCalendarOffsetMinutes(providerId: PriceProviderId): number {
+  return providerId === 'dnse' || providerId === 'fiinquant' ? 7 * 60 : 0;
 }
 
 function defaultCandleColors(): CandleColors {
@@ -781,10 +796,10 @@ function preserveDepth(quote: MarketQuote, previous: MarketQuote | null): Market
   };
 }
 
-function countdownText(candle: Candle | undefined, interval: string): string {
+function countdownText(candle: Candle | undefined, interval: string, utcOffsetMinutes = 0): string {
   if (!candle) return '--:--';
-  const seconds = INTERVAL_SECONDS[interval] ?? 60;
-  const remaining = Math.max(0, candle.time + seconds - Math.floor(Date.now() / 1000));
+  const closesAt = nextIntervalStart(candle.time, interval, utcOffsetMinutes);
+  const remaining = Math.max(0, closesAt - Math.floor(Date.now() / 1000));
   const hours = Math.floor(remaining / 3600);
   const minutes = Math.floor((remaining % 3600) / 60);
   const secs = remaining % 60;
@@ -1581,7 +1596,7 @@ class Tile {
 
   /** Change the timeframe using an interval code such as `15m` or `1h`. */
   setIntervalCode(iv: string, reload = true): boolean {
-    if (!INTERVAL_SECONDS[iv] || !INTERVALS.includes(iv)) return false;
+    if (!INTERVALS.includes(iv)) return false;
     if (iv === this.interval) return true;
     this.interval = iv;
     if (this.historyRange) this.historyRange = constrainHistoryRange(this.historyRange, iv);
@@ -2232,7 +2247,7 @@ class Tile {
     const quote = this.latestQuote;
     const lastCandle = this.chart.getCandles()[this.chart.getCandles().length - 1];
     if (!quote) {
-      this.marketEl.textContent = `-- / -- · ${countdownText(lastCandle, this.interval)}`;
+      this.marketEl.textContent = `-- / -- · ${countdownText(lastCandle, this.interval, providerCalendarOffsetMinutes(activeProvider))}`;
       return;
     }
     const decimals = this.pricePrecision ?? (quote.last < 10 ? 3 : 2);
@@ -2240,7 +2255,7 @@ class Tile {
     const book = quote.hasBidAsk
       ? ` · B ${quote.bid.toFixed(decimals)}  A ${quote.ask.toFixed(decimals)}`
       : '';
-    this.marketEl.textContent = `${matched}${book} · ${countdownText(lastCandle, this.interval)}`;
+    this.marketEl.textContent = `${matched}${book} · ${countdownText(lastCandle, this.interval, providerCalendarOffsetMinutes(activeProvider))}`;
   }
 
   private applyPricePrecision(): void {
@@ -2432,14 +2447,14 @@ class Tile {
     const token = this.loadToken;
     const symbol = this.symbol;
     const interval = this.interval;
-    const step = INTERVAL_SECONDS[interval] ?? 60;
     const lastTime = this.history[this.history.length - 1].time;
     const to = Math.floor(Date.now() / 1000);
-    if (to < lastTime + step) return;
+    const offset = providerCalendarOffsetMinutes(providerId);
+    if (to < nextIntervalStart(lastTime, interval, offset)) return;
 
     this.realtimeGapLoading = true;
     try {
-      const limit = Math.min(2000, Math.max(4, Math.ceil((to - lastTime) / step) + 2));
+      const limit = Math.min(2000, Math.max(4, estimateIntervalBars(lastTime, to, interval) + 2));
       const missing = await provider.feed.getHistory(symbol, interval, limit, { from: lastTime, to });
       if (
         token !== this.loadToken
@@ -2519,10 +2534,11 @@ class Tile {
     this.setFeedStatus('loading', this.historyRange ? 'đang tải lịch sử...' : 'đang tải...');
     this.setLoadState('loading', `${this.symbol} · ${this.interval}`);
     try {
-      const step = INTERVAL_SECONDS[this.interval] ?? 60;
+      const step = intervalApproxSeconds(this.interval);
+      const pageSize = historyPageSizeFor(this.interval);
       const range = this.historyRange ? { ...this.historyRange } : undefined;
-      const requestedBars = range ? Math.ceil((range.to - range.from) / step) + 2 : HISTORY_PAGE_SIZE;
-      const limit = range ? Math.min(20000, Math.max(50, requestedBars)) : HISTORY_PAGE_SIZE;
+      const requestedBars = range ? estimateIntervalBars(range.from, range.to, this.interval) + 2 : pageSize;
+      const limit = range ? Math.min(20000, Math.max(50, requestedBars)) : pageSize;
       const loaded = await provider.feed.getHistory(this.symbol, this.interval, limit, range);
       if (token !== this.loadToken) return;
       const candles = range
@@ -2554,8 +2570,8 @@ class Tile {
       this.unsubscribe = provider.feed.subscribe(this.symbol, this.interval, (c) => {
         if (token !== this.loadToken || this.replay) return;
         const last = this.history[this.history.length - 1];
-        const step = INTERVAL_SECONDS[this.interval] ?? 60;
-        if (last && c.time > last.time + step) void this.recoverRealtimeGap();
+        const offset = providerCalendarOffsetMinutes(activeProvider);
+        if (last && c.time > nextIntervalStart(last.time, this.interval, offset)) void this.recoverRealtimeGap();
         const candle = this.updateHistory(c);
         if (!candle) return;
         this.chart.updateCandle(candle);
@@ -2603,11 +2619,12 @@ class Tile {
     if (!provider.feed) return;
     const loadToken = this.loadToken;
     const oldestTime = this.history[0].time;
-    const step = INTERVAL_SECONDS[this.interval] ?? 60;
+    const step = intervalApproxSeconds(this.interval);
+    const pageSize = historyPageSizeFor(this.interval);
     const to = oldestTime - 1;
     const lookback = step < 86400
-      ? Math.max(HISTORY_PAGE_SIZE * step * 8, 10 * 86400)
-      : Math.max(HISTORY_PAGE_SIZE * step * 2, 365 * 86400);
+      ? Math.max(pageSize * step * 8, 10 * 86400)
+      : Math.max(pageSize * step * 2, 365 * 86400);
     const range = { from: Math.max(0, to - lookback), to };
 
     this.historyPageLoading = true;
@@ -2615,7 +2632,7 @@ class Tile {
       const loaded = await provider.feed.getHistory(
         this.symbol,
         this.interval,
-        HISTORY_PAGE_SIZE,
+        pageSize,
         range,
       );
       if (loadToken !== this.loadToken || providerId !== activeProvider) return;
@@ -4677,7 +4694,14 @@ function normalizeCommandText(raw: string): string {
 }
 
 function parseCommand(raw: string): Command {
-  const s = normalizeCommandText(raw.trim());
+  const trimmed = raw.trim();
+  const explicitInterval = /^(\d+)([mMhdwHDW])$/.exec(trimmed);
+  if (explicitInterval) {
+    const unit = explicitInterval[2];
+    const iv = unit === 'M' ? `${explicitInterval[1]}M` : `${explicitInterval[1]}${unit.toLowerCase()}`;
+    return INTERVALS.includes(iv) ? { type: 'interval', value: iv } : null;
+  }
+  const s = normalizeCommandText(trimmed);
   if (!s) return null;
   const digits = /^(\d+)$/.exec(s);
   if (digits) {
@@ -4691,10 +4715,10 @@ function parseCommand(raw: string): Command {
     const iv = minuteMap[digits[1]];
     return iv ? { type: 'interval', value: iv } : null;
   }
-  const unit = /^(\d+)([MHDW])$/.exec(s);
+  const unit = /^(\d+)([HDW])$/.exec(s);
   if (unit) {
     const iv = unit[1] + unit[2].toLowerCase();
-    return INTERVAL_SECONDS[iv] && INTERVALS.includes(iv) ? { type: 'interval', value: iv } : null;
+    return INTERVALS.includes(iv) ? { type: 'interval', value: iv } : null;
   }
   return { type: 'symbol', value: s };
 }

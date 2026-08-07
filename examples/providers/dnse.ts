@@ -6,6 +6,8 @@ import {
   type QuoteLevel,
   type QuoteUpdate,
 } from '../../src/datafeed';
+import { aggregateCalendarCandles } from '../../src/calendar-candles';
+import { intervalStart, nextIntervalStart } from '../../src/interval';
 
 export interface DnseCredentials {
   apiKey?: string;
@@ -42,6 +44,7 @@ interface DnseSubscription {
 const DEFAULT_REST_BASE = 'https://openapi.dnse.com.vn';
 const DEFAULT_WS_BASE = 'wss://ws-openapi.dnse.com.vn';
 const DEFAULT_MARKET_TYPE: DnseMarketType = 'STOCK';
+const VN_OFFSET_MINUTES = 7 * 60;
 // DNSE exposes top-price quotes on the seven G boards. The T boards belong to
 // trade subscriptions and cause the gateway to reject a top_price channel.
 const TOP_PRICE_BOARDS = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'];
@@ -337,6 +340,7 @@ export class DNSEDatafeed implements Datafeed {
 
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
     this.assertReady();
+    if (interval === '1M') return this.getMonthlyHistory(symbol, limit, range);
     const normalizedSymbol = normalizeDnseSymbol(symbol);
     const marketType = marketTypeForSymbol(normalizedSymbol, this.marketType);
     const resolution = this.resolutionFor(interval);
@@ -370,6 +374,7 @@ export class DNSEDatafeed implements Datafeed {
   }
 
   subscribe(symbol: string, interval: string, onCandle: (c: Candle) => void): () => void {
+    if (interval === '1M') return this.subscribeMonthly(symbol, onCandle);
     const resolution = this.resolutionFor(interval);
     const normalizedSymbol = normalizeDnseSymbol(symbol);
     const channel = `ohlc.${resolution}.json`;
@@ -388,6 +393,11 @@ export class DNSEDatafeed implements Datafeed {
     interval: string,
     onCandle: (symbol: string, candle: Candle) => void,
   ): () => void {
+    if (interval === '1M') {
+      const stops = [...new Set(symbols.map(normalizeDnseSymbol).filter(Boolean))]
+        .map((symbol) => this.subscribeMonthly(symbol, (candle) => onCandle(symbol, candle)));
+      return () => stops.forEach((stop) => stop());
+    }
     const resolution = this.resolutionFor(interval);
     const normalizedSymbols = [...new Set(symbols.map(normalizeDnseSymbol).filter(Boolean))];
     const symbolSet = new Set(normalizedSymbols);
@@ -667,6 +677,52 @@ export class DNSEDatafeed implements Datafeed {
 
   async testConnection(symbol = 'HPG'): Promise<void> {
     await this.getHistory(symbol, '1m', 1);
+  }
+
+  private async getMonthlyHistory(symbol: string, limit: number, range?: HistoryRange): Promise<Candle[]> {
+    const now = Math.floor(Date.now() / 1000);
+    const sourceRange = range
+      ? {
+          from: intervalStart(Math.min(range.from, range.to), '1M', VN_OFFSET_MINUTES),
+          to: Math.min(now, nextIntervalStart(Math.max(range.from, range.to), '1M', VN_OFFSET_MINUTES) - 1),
+        }
+      : undefined;
+    const dailyLimit = Math.min(20000, Math.max(60, limit * 24 + 31));
+    const daily = await this.getHistory(symbol, '1d', dailyLimit, sourceRange);
+    return aggregateCalendarCandles(daily, '1M', VN_OFFSET_MINUTES).slice(-limit);
+  }
+
+  private subscribeMonthly(symbol: string, onCandle: (candle: Candle) => void): () => void {
+    const dailyByTime = new Map<number, Candle>();
+    let active = true;
+    const emit = () => {
+      if (!active) return;
+      const monthly = aggregateCalendarCandles([...dailyByTime.values()], '1M', VN_OFFSET_MINUTES);
+      const candle = monthly[monthly.length - 1];
+      if (candle) onCandle(candle);
+    };
+
+    void this.getHistory(symbol, '1d', 45)
+      .then((candles) => {
+        if (!active) return;
+        // Khong de history tre ghi de candle realtime moi hon.
+        for (const candle of candles) {
+          if (!dailyByTime.has(candle.time)) dailyByTime.set(candle.time, candle);
+        }
+        emit();
+      })
+      .catch(() => undefined);
+
+    const stop = this.subscribe(symbol, '1d', (candle) => {
+      dailyByTime.set(candle.time, candle);
+      const cutoff = intervalStart(candle.time, '1M', VN_OFFSET_MINUTES) - 40 * 86400;
+      for (const time of dailyByTime.keys()) if (time < cutoff) dailyByTime.delete(time);
+      emit();
+    });
+    return () => {
+      active = false;
+      stop();
+    };
   }
 
   private assertReady(): void {
