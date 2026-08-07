@@ -3365,12 +3365,14 @@ for (const option of LAYOUT_OPTIONS) {
 
 const CHART_TYPE_ICONS: Record<PriceSeriesMode, string> = {
   candles: toolIcon('<path d="M5 3v14M3 7h4v6H3zM15 2v16M13 5h4v8h-4z"/>'),
+  'heikin-ashi': toolIcon('<path d="M5 2v16M3 8h4v5H3zM15 2v16M13 6h4v5h-4z"/>'),
   bars: toolIcon('<path d="M5 3v14M2 7h3M5 12h3M14 2v16M11 6h3M14 13h4"/>'),
   line: toolIcon('<path d="m2 15 5-6 4 3 7-8"/>'),
   area: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m2 15 5-6 4 3 7-8v13H2z" fill="currentColor" opacity=".18"/><path d="m2 15 5-6 4 3 7-8" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 const MODE_OPTIONS: [PriceSeriesMode, string, string][] = [
   ['candles', 'Nến', CHART_TYPE_ICONS.candles],
+  ['heikin-ashi', 'Heikin Ashi', CHART_TYPE_ICONS['heikin-ashi']],
   ['bars', 'Bar', CHART_TYPE_ICONS.bars],
   ['line', 'Line', CHART_TYPE_ICONS.line],
   ['area', 'Area', CHART_TYPE_ICONS.area],

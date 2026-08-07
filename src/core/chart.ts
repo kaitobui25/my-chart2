@@ -1,4 +1,5 @@
 import { type Candle, type Theme, darkTheme } from './types';
+import { heikinAshi, heikinAshiCandle } from './heikin-ashi';
 import { tr } from './i18n';
 import { ChevronDown, ChevronUp, createElement as createLucideElement, Settings2, Trash2, X } from 'lucide';
 import { TimeScale } from './time-scale';
@@ -164,6 +165,7 @@ export class L2Chart {
   theme: Theme;
 
   private candles: Candle[] = [];
+  private heikinAshiCandles: Candle[] = [];
   private intervalSec: number;
   private intervalExplicit: boolean;
   private axisW: number;
@@ -293,7 +295,7 @@ export class L2Chart {
     this.indicatorContext = this.createIndicatorContext();
     this.root.appendChild(this.indicatorContext);
 
-    this.mainSeries = new CandleSeries(() => this.candles);
+    this.mainSeries = new CandleSeries(() => this.priceSeriesCandles());
     const mainPane = this.createPane(3);
     mainPane.priceScale.setPrecision(options.pricePrecision ?? null);
     mainPane.series.push(this.mainSeries);
@@ -308,8 +310,9 @@ export class L2Chart {
   setData(candles: Candle[]): void {
     this.stampDrawingTimes();
     this.candles = candles;
+    this.heikinAshiCandles = heikinAshi(candles);
     this.reindexDrawingAnchors();
-    this.panes[0]?.priceScale.setBasePrice(candles[0]?.close ?? 1);
+    this.panes[0]?.priceScale.setBasePrice(this.priceSeriesCandles()[0]?.close ?? 1);
     if (!this.intervalExplicit && candles.length > 1) {
       const diffs: number[] = [];
       for (let i = 1; i < Math.min(candles.length, 20); i++) {
@@ -343,6 +346,8 @@ export class L2Chart {
 
     this.stampDrawingTimes();
     this.candles = [...older, ...this.candles];
+    // HA Open phu thuoc nen HA truoc, nen prepend history phai tinh lai toan bo chuoi.
+    this.heikinAshiCandles = heikinAshi(this.candles);
     this.timeScale.prependData(older.length);
     this.reindexDrawingAnchors();
     if (this.crosshair) this.crosshair.index += older.length;
@@ -351,7 +356,7 @@ export class L2Chart {
       this.measure.startIndex += older.length;
       this.measure.endIndex += older.length;
     }
-    this.panes[0]?.priceScale.setBasePrice(this.candles[0]?.close ?? 1);
+    this.panes[0]?.priceScale.setBasePrice(this.priceSeriesCandles()[0]?.close ?? 1);
     for (const pane of this.panes) pane.priceScale.reset();
     this.emitData();
     this.invalidate();
@@ -359,11 +364,19 @@ export class L2Chart {
 
   /** Append a new bar or replace the last one (live updates). */
   updateCandle(c: Candle): void {
-    const last = this.candles[this.candles.length - 1];
+    const lastIndex = this.candles.length - 1;
+    const last = this.candles[lastIndex];
     if (last && c.time === last.time) {
-      this.candles[this.candles.length - 1] = c;
+      this.candles[lastIndex] = c;
+      this.heikinAshiCandles[lastIndex] = heikinAshiCandle(
+        c,
+        this.heikinAshiCandles[lastIndex - 1],
+      );
     } else if (!last || c.time > last.time) {
       this.candles.push(c);
+      this.heikinAshiCandles.push(
+        heikinAshiCandle(c, this.heikinAshiCandles[this.heikinAshiCandles.length - 1]),
+      );
       this.timeScale.setDataLen(this.candles.length);
     } else {
       return;
@@ -374,6 +387,10 @@ export class L2Chart {
 
   getCandles(): readonly Candle[] {
     return this.candles;
+  }
+
+  private priceSeriesCandles(): readonly Candle[] {
+    return this.mainSeries.mode === 'heikin-ashi' ? this.heikinAshiCandles : this.candles;
   }
 
   getIntervalSec(): number {
@@ -393,6 +410,7 @@ export class L2Chart {
 
   setMode(mode: PriceSeriesMode): void {
     this.mainSeries.mode = mode;
+    this.panes[0]?.priceScale.setBasePrice(this.priceSeriesCandles()[0]?.close ?? 1);
     this.invalidate();
   }
 
@@ -2465,7 +2483,8 @@ export class L2Chart {
 
   private updateLegend(pane: Pane): void {
     const idx = this.crosshair?.index ?? this.candles.length - 1;
-    const c = this.candles[idx];
+    const priceCandles = this.priceSeriesCandles();
+    const c = priceCandles[idx];
     const decimals = pane.priceScale.decimals();
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;');
@@ -2476,7 +2495,7 @@ export class L2Chart {
     pane.legendEl.classList.toggle('l2chart-legend-collapsed', pane === this.panes[0] && this.legendCollapsed);
 
     if (pane === this.panes[0] && c) {
-      const prev = this.candles[idx - 1] ?? c;
+      const prev = priceCandles[idx - 1] ?? c;
       const chg = c.close - prev.close;
       const pct = prev.close !== 0 ? (chg / prev.close) * 100 : 0;
       const color = escAttr(chg >= 0 ? this.theme.up : this.theme.down);

@@ -1,4 +1,4 @@
-import { L2Chart, lightTheme, type Candle, type SerializedDrawing } from '../../src';
+import { L2Chart, lightTheme, type Candle, type PriceSeriesMode, type SerializedDrawing } from '../../src';
 
 const container = document.getElementById('chart');
 if (!container) throw new Error('Missing chart fixture container');
@@ -25,12 +25,15 @@ interface ChartTestState {
   candleCount: number;
   drawingCount: number;
   chartRootCount: number;
+  mode: PriceSeriesMode;
 }
 
 interface ChartTestApi {
   state(): ChartTestState;
   updateLatest(close: number): void;
   appendCandle(): void;
+  setMode(mode: PriceSeriesMode): void;
+  lastCloses(): { raw: number | null; displayed: number | null };
   setDrawing(): void;
   serializeDrawings(): string;
   restoreDrawings(payload: string): void;
@@ -62,6 +65,7 @@ window.chartTest = {
     candleCount: chart.getCandles().length,
     drawingCount: chart.getDrawings().length,
     chartRootCount: container.childElementCount,
+    mode: chart.mainSeries.mode,
   }),
   updateLatest: (close) => {
     const current = chart.getCandles();
@@ -86,6 +90,15 @@ window.chartTest = {
       close: latest.close + 1,
       volume: 2_500,
     });
+  },
+  setMode: (mode) => chart.setMode(mode),
+  lastCloses: () => {
+    const current = chart.getCandles();
+    const index = current.length - 1;
+    return {
+      raw: current[index]?.close ?? null,
+      displayed: chart.mainSeries.valueAt(index),
+    };
   },
   setDrawing: () => chart.setDrawings([drawing]),
   serializeDrawings: () => JSON.stringify(chart.getDrawings()),

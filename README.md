@@ -33,7 +33,7 @@ to replace every one of them.
 
 ## Capabilities
 
-- Candlestick, OHLC bar, line, area, histogram, band, and zone series
+- Candlestick, Heikin Ashi, OHLC bar, line, area, histogram, band, and zone series
 - Independent price panes sharing one index-based time scale
 - Horizontal and vertical pan, wheel/pinch zoom, autoscale, and manual scales
 - Crosshair events and synchronized crosshairs across chart instances
