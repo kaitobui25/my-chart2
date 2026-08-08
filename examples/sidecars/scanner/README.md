@@ -42,7 +42,21 @@ After CafeF publishes the completed session:
 python cafef_eod.py import-latest --mode eod
 ```
 
-Every CafeF import recalculates the scanner's active VN universe from local snapshots. A symbol is active when its latest `data_time` is within 30 calendar days of the newest `vn_eod` snapshot. Older/delisted/inactive symbols stay in SQLite with their candles and snapshots for history/audit, but are excluded from scans.
+Every CafeF import recalculates the scanner's active VN universe from local snapshots. A security must be within 30 calendar days of the newest `vn_eod` snapshot and classify as `STOCK` to remain active in the stock scanner. Older securities and fresh `ETF`/`CW`/`FUND`/`UNKNOWN` rows stay in SQLite with their candles and snapshots for history/audit, but are excluded from stock scans.
+
+The audited symbol classifier currently uses these families:
+
+- `STOCK`: exactly three alphanumeric characters.
+- `CW`: HOSE `C` + three-character underlying code + four digits, for example `CHPG2632`.
+- `ETF`: `E1VFVN30` or `FUE...`.
+- `FUND`: `FUC...`, including `FUCVREIT` and the `FUCTVGF...` family.
+- anything else: `UNKNOWN`.
+
+To apply the classifier to an existing fresh `vn_eod` database without downloading CafeF again:
+
+```bash
+python cafef_eod.py reclassify
+```
 
 ### Inspect import state
 
@@ -50,7 +64,7 @@ Every CafeF import recalculates the scanner's active VN universe from local snap
 python cafef_eod.py status
 ```
 
-`status` reports `activeMaxAgeDays: 30` together with the active/snapshot coverage.
+`status` reports `activeMaxAgeDays: 30` together with the active/snapshot coverage. Import commands also report an `assetTypes` breakdown before non-stock rows are excluded from the active stock universe.
 
 ### Deterministic/manual import
 
