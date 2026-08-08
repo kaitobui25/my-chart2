@@ -84,12 +84,16 @@ jobs:
           cache-dependency-path: |
             examples/sidecars/fiinquant/requirements.txt
             examples/sidecars/fiinquant/requirements-provider.txt
+            examples/sidecars/scanner/requirements.txt
 
       - name: Install sidecar test dependency
         run: python -m pip install aiohttp
 
-      - name: Test sidecar
+      - name: Test FiinQuant sidecar
         run: python -m unittest discover -s examples/sidecars/fiinquant
+
+      - name: Test scanner sidecar
+        run: python -m unittest discover -s examples/sidecars/scanner/tests -v
 
       - name: Audit runtime and provider dependencies
         run: python scripts/audit-provider.py
