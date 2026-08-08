@@ -84,7 +84,7 @@ declare global {
   interface Window {
     __L2CHART_SCANNER_BRIDGE__?: Readonly<{
       getProvider(): string;
-      openSymbol(source: ScannerSourceId, symbol: string): void;
+      openSymbol(symbol: string): void;
     }>;
   }
 }
