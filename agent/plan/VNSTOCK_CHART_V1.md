@@ -121,10 +121,10 @@ Add `vnstock` to provider selection and Vietnam provider family.
 - Provider status should show sidecar availability, effective source, cache status, and polling mode.
 - No login fields.
 
-Add Vite proxy:
+Add Vite proxy. Port `8730` is already owned by the scanner sidecar, so Vnstock uses `8740`:
 
 ```text
-/vnstock-api -> http://127.0.0.1:8730
+/vnstock-api -> http://127.0.0.1:8740
 ```
 
 ## Launcher behavior
