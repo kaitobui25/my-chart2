@@ -53,36 +53,72 @@ class ScannerEngine:
         if provider is None:
             return await self._fail(state, f'provider not configured: {request.source}', progress)
         if not provider.capabilities.available:
-            return await self._fail(state, provider.capabilities.detail or f'{request.source} unavailable', progress)
+            return await self._fail(
+                state,
+                provider.capabilities.detail or f'{request.source} unavailable',
+                progress,
+            )
 
         async with self.planner.provider_lock(request.source):
             try:
                 await self._refresh_instruments(provider, request)
-                active_symbols = await asyncio.to_thread(self.db.list_active_symbols, request.source)
-                await asyncio.to_thread(self.db.update_scan, run_id, universe_count=len(active_symbols))
-                await self._notify(state, progress)
-
-                await self._refresh_snapshots(provider, request.source, active_symbols, state)
-                candidates = await asyncio.to_thread(
-                    self.db.stage1_candidates, request.source, request.universes, request.filters
+                active_symbols = await asyncio.to_thread(
+                    self.db.list_active_symbols, request.source
                 )
-                await asyncio.to_thread(self.db.update_scan, run_id, stage1_count=len(candidates))
+                await asyncio.to_thread(
+                    self.db.update_scan,
+                    run_id,
+                    universe_count=len(active_symbols),
+                )
                 await self._notify(state, progress)
 
-                refresh_count = await self._refresh_candidate_history(provider, candidates, state)
-                await asyncio.to_thread(self.db.update_scan, run_id, history_refresh_count=refresh_count)
+                await self._refresh_snapshots(
+                    provider, request.source, active_symbols, state
+                )
+                candidates = await asyncio.to_thread(
+                    self.db.stage1_candidates,
+                    request.source,
+                    request.universes,
+                    request.filters,
+                )
+                await asyncio.to_thread(
+                    self.db.update_scan,
+                    run_id,
+                    stage1_count=len(candidates),
+                )
+                await self._notify(state, progress)
+
+                refresh_count = await self._refresh_candidate_history(
+                    provider, candidates, state
+                )
+                await asyncio.to_thread(
+                    self.db.update_scan,
+                    run_id,
+                    history_refresh_count=refresh_count,
+                )
 
                 evaluated_ids = await self._refresh_ha(provider, request, candidates)
-                await asyncio.to_thread(self.db.update_scan, run_id, stage2_count=len(evaluated_ids))
+                await asyncio.to_thread(
+                    self.db.update_scan,
+                    run_id,
+                    stage2_count=len(evaluated_ids),
+                )
                 await self._notify(state, progress)
 
                 final_rows = await asyncio.to_thread(
-                    self.db.query_final, request.source, request.filters, request.heikin_ashi, evaluated_ids
+                    self.db.query_final,
+                    request.source,
+                    request.filters,
+                    request.heikin_ashi,
+                    evaluated_ids,
                 )
                 now = int(time.time())
                 results: list[dict] = []
                 for row in final_rows:
-                    stale = now - int(row.get('fetched_at') or 0) > provider.capabilities.snapshot_ttl_seconds * 2
+                    stale = (
+                        now - int(row.get('fetched_at') or 0)
+                        > provider.capabilities.snapshot_ttl_seconds * 2
+                    )
                     warnings = ['snapshot stale'] if stale else []
                     results.append(ScanResult(
                         instrument_id=int(row['instrument_id']),
@@ -101,8 +137,14 @@ class ScannerEngine:
                         ha_close=float(row['ha_close']),
                         green=bool(row['green']),
                         no_lower_wick=bool(row['no_lower_wick']),
-                        ha_close_change_pct=None if row['ha_close_change_pct'] is None else float(row['ha_close_change_pct']),
-                        ha_body_pct=None if row['ha_body_pct'] is None else float(row['ha_body_pct']),
+                        ha_close_change_pct=(
+                            None
+                            if row['ha_close_change_pct'] is None
+                            else float(row['ha_close_change_pct'])
+                        ),
+                        ha_body_pct=(
+                            None if row['ha_body_pct'] is None else float(row['ha_body_pct'])
+                        ),
                         source_last_time=int(row['source_last_time']),
                         computed_at=int(row['computed_at']),
                         stale=stale,
@@ -123,12 +165,21 @@ class ScannerEngine:
             except Exception as exc:  # noqa: BLE001
                 return await self._fail(state, str(exc)[:500], progress)
 
-    async def _refresh_instruments(self, provider: ScannerProvider, request: ScanRequest) -> None:
+    async def _refresh_instruments(
+        self,
+        provider: ScannerProvider,
+        request: ScanRequest,
+    ) -> None:
         age = await asyncio.to_thread(self.db.instrument_age, request.source)
         if age is not None and age <= INSTRUMENT_TTL_SECONDS:
             return
         instruments = await provider.list_instruments(provider.capabilities.default_universes)
-        await asyncio.to_thread(self.db.upsert_instruments, request.source, instruments, True)
+        await asyncio.to_thread(
+            self.db.upsert_instruments,
+            request.source,
+            instruments,
+            True,
+        )
 
     async def _refresh_snapshots(
         self,
@@ -143,21 +194,31 @@ class ScannerEngine:
             coverage.get('active_count') == coverage.get('snapshot_count')
             and int(coverage.get('active_count') or 0) > 0
         )
-        fresh = oldest is not None and int(time.time()) - int(oldest) <= provider.capabilities.snapshot_ttl_seconds
+        fresh = (
+            oldest is not None
+            and int(time.time()) - int(oldest)
+            <= provider.capabilities.snapshot_ttl_seconds
+        )
         if complete and fresh:
             return
         try:
             snapshots = await provider.snapshots(active_symbols)
-            await asyncio.to_thread(self.db.upsert_snapshots, provider_id, snapshots)
+            await asyncio.to_thread(
+                self.db.upsert_snapshots,
+                provider_id,
+                snapshots,
+            )
             if len(snapshots) < len(active_symbols):
                 state.warnings.append(
-                    f'{provider_id}: snapshot returned {len(snapshots)}/{len(active_symbols)} symbols'
+                    f'{provider_id}: snapshot returned '
+                    f'{len(snapshots)}/{len(active_symbols)} symbols'
                 )
         except Exception as exc:  # noqa: BLE001
             if int(coverage.get('snapshot_count') or 0) == 0:
                 raise
             state.warnings.append(
-                f'{provider_id}: snapshot refresh failed; using cached values: {str(exc)[:180]}'
+                f'{provider_id}: snapshot refresh failed; using cached values: '
+                f'{str(exc)[:180]}'
             )
 
     async def _refresh_candidate_history(
@@ -171,11 +232,21 @@ class ScannerEngine:
         incremental: list[dict] = []
         for candidate in candidates:
             instrument_id = int(candidate['instrument_id'])
-            candle_state = await asyncio.to_thread(self.db.candle_state, instrument_id, '1d')
-            if candle_state is None or int(candle_state['count']) < HISTORY_BOOTSTRAP_BARS:
+            candle_state = await asyncio.to_thread(
+                self.db.candle_state,
+                instrument_id,
+                '1d',
+            )
+            # The first request asks for a deep warm-up. If a newly listed asset
+            # legitimately has fewer bars, it is still considered bootstrapped;
+            # otherwise every scan would re-download the same short history.
+            if candle_state is None:
                 bootstrap.append(candidate)
                 continue
-            if now - int(candle_state['updated_at']) > provider.capabilities.history_ttl_seconds:
+            if (
+                now - int(candle_state['updated_at'])
+                > provider.capabilities.history_ttl_seconds
+            ):
                 next_candidate = dict(candidate)
                 next_candidate['_last_time'] = int(candle_state['last_time'])
                 incremental.append(next_candidate)
@@ -184,25 +255,43 @@ class ScannerEngine:
         if bootstrap:
             symbols = [str(item['symbol']) for item in bootstrap]
             try:
-                history = await provider.daily_history(symbols, HISTORY_BOOTSTRAP_BARS)
-                refreshed += await self._persist_history(provider.capabilities.id, bootstrap, history)
+                history = await provider.daily_history(
+                    symbols,
+                    HISTORY_BOOTSTRAP_BARS,
+                )
+                refreshed += await self._persist_history(
+                    provider.capabilities.id,
+                    bootstrap,
+                    history,
+                )
             except Exception as exc:  # noqa: BLE001
                 state.warnings.append(
-                    f'{provider.capabilities.id}: bootstrap history refresh failed: {str(exc)[:180]}'
+                    f'{provider.capabilities.id}: bootstrap history refresh failed: '
+                    f'{str(exc)[:180]}'
                 )
 
         if incremental:
             symbols = [str(item['symbol']) for item in incremental]
             since_time = max(
                 0,
-                min(int(item['_last_time']) for item in incremental) - HISTORY_INCREMENT_OVERLAP_SECONDS,
+                min(int(item['_last_time']) for item in incremental)
+                - HISTORY_INCREMENT_OVERLAP_SECONDS,
             )
             try:
-                history = await provider.daily_history(symbols, 64, since_time=since_time)
-                refreshed += await self._persist_history(provider.capabilities.id, incremental, history)
+                history = await provider.daily_history(
+                    symbols,
+                    64,
+                    since_time=since_time,
+                )
+                refreshed += await self._persist_history(
+                    provider.capabilities.id,
+                    incremental,
+                    history,
+                )
             except Exception as exc:  # noqa: BLE001
                 state.warnings.append(
-                    f'{provider.capabilities.id}: incremental history refresh failed; using cache: {str(exc)[:180]}'
+                    f'{provider.capabilities.id}: incremental history refresh failed; '
+                    f'using cache: {str(exc)[:180]}'
                 )
         return refreshed
 
@@ -213,7 +302,9 @@ class ScannerEngine:
         history: dict[str, list],
     ) -> int:
         ids = await asyncio.to_thread(
-            self.db.instrument_ids, provider_id, [str(item['symbol']) for item in candidates]
+            self.db.instrument_ids,
+            provider_id,
+            [str(item['symbol']) for item in candidates],
         )
         refreshed = 0
         for symbol, candles in history.items():
@@ -221,7 +312,11 @@ class ScannerEngine:
             if instrument_id is None or not candles:
                 continue
             await asyncio.to_thread(
-                self.db.upsert_candles, instrument_id, candles, '1d', HISTORY_RETAIN_BARS
+                self.db.upsert_candles,
+                instrument_id,
+                candles,
+                '1d',
+                HISTORY_RETAIN_BARS,
             )
             refreshed += 1
         return refreshed
@@ -237,33 +332,32 @@ class ScannerEngine:
         for candidate in candidates:
             instrument_id = int(candidate['instrument_id'])
             daily = await asyncio.to_thread(
-                self.db.read_candles, instrument_id, '1d', HISTORY_RETAIN_BARS
+                self.db.read_candles,
+                instrument_id,
+                '1d',
+                HISTORY_RETAIN_BARS,
             )
             if len(daily) < minimum_daily:
                 continue
-            source_last_time = daily[-1].time
-            cached = await asyncio.to_thread(
-                self.db.ha_is_current,
-                instrument_id,
+
+            # Recompute Stage-2 HA from local SQLite every scan. This is cheap
+            # compared with network I/O and, crucially, catches an in-progress
+            # daily candle whose OHLC changed while its timestamp stayed the same.
+            metrics = compute_latest_metrics(
+                daily,
                 request.heikin_ashi.timeframe,
-                request.heikin_ashi.candle,
-                source_last_time,
+                provider.capabilities.timezone,
+                continuous_market=provider.capabilities.continuous_market,
+            )
+            selected = metrics.get(request.heikin_ashi.candle)
+            if selected is None:
+                continue
+            await asyncio.to_thread(
+                self.db.upsert_ha_metrics,
+                instrument_id,
+                metrics.values(),
                 HA_ALGO_VERSION,
             )
-            if not cached:
-                metrics = compute_latest_metrics(
-                    daily,
-                    request.heikin_ashi.timeframe,
-                    provider.capabilities.timezone,
-                    continuous_market=provider.capabilities.continuous_market,
-                )
-                if metrics:
-                    await asyncio.to_thread(
-                        self.db.upsert_ha_metrics,
-                        instrument_id,
-                        metrics.values(),
-                        HA_ALGO_VERSION,
-                    )
             evaluated.append(instrument_id)
         return evaluated
 
