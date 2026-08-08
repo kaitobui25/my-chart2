@@ -12,6 +12,7 @@ from aiohttp import web
 
 from db import ScannerDB
 from engine import ScanExecution, ScannerEngine
+from local_eod_provider import LocalEodProvider
 from models import ScanRequest
 from providers import build_providers
 
@@ -119,6 +120,7 @@ def build_runtime() -> ScannerRuntime:
     db_path = Path(os.environ.get('SCANNER_DB_PATH', str(DEFAULT_DB_PATH)))
     db = ScannerDB(db_path, BASE_DIR / 'migrations')
     providers = build_providers(username, password)
+    providers['vn_eod'] = LocalEodProvider()
     return ScannerRuntime(db, ScannerEngine(db, providers))
 
 
