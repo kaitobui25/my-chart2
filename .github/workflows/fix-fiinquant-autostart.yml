@@ -1,0 +1,87 @@
+name: Fix FiinQuant autostart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-fiinquant-autostart.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Disable implicit FiinQuant autostart
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          launcher = Path('scripts/run-assistant.mjs')
+          text = launcher.read_text(encoding='utf-8')
+
+          marker = "const DEFAULT_WORKSTATION_PORT = 53173\n"
+          replacement = """const DEFAULT_WORKSTATION_PORT = 53173
+const fiinQuantAutostart = process.argv.includes('--fiinquant')
+  || /^(1|true|yes)$/i.test(process.env.FIINQUANT_AUTOSTART ?? '')
+"""
+          if marker not in text:
+              raise SystemExit('launcher constant marker not found')
+          text = text.replace(marker, replacement, 1)
+
+          old = """  try {
+    let fiinQuantHealth = await ensureFiinQuantSidecar()
+    fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
+    if (!fiinQuantEnv.SIDECAR_TOKEN) {
+      console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+    }
+  } catch (error) {
+    console.warn(`[fiinquant] Optional provider unavailable: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  await startOrReuseWorkstation()
+"""
+          new = """  if (fiinQuantAutostart) {
+    try {
+      let fiinQuantHealth = await ensureFiinQuantSidecar()
+      fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
+      if (!fiinQuantEnv.SIDECAR_TOKEN) {
+        console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+      }
+    } catch (error) {
+      console.warn(`[fiinquant] Optional provider unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  } else {
+    console.log('[fiinquant] Autostart disabled. Use "npm run dev:fiinquant" when FiinQuant is needed.')
+  }
+
+  await startOrReuseWorkstation()
+"""
+          if old not in text:
+              raise SystemExit('launcher startup block marker not found')
+          launcher.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          package_path = Path('package.json')
+          package = json.loads(package_path.read_text(encoding='utf-8'))
+          scripts = package.setdefault('scripts', {})
+          rebuilt = {}
+          for key, value in scripts.items():
+              rebuilt[key] = value
+              if key == 'dev':
+                  rebuilt['dev:fiinquant'] = 'node scripts/run-assistant.mjs --fiinquant'
+          package['scripts'] = rebuilt
+          package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+          node --check scripts/run-assistant.mjs
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
+          git diff --check
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-assistant.mjs package.json
+          git commit -m "fix FiinQuant optional startup isolation"
+          git push
