@@ -1,4 +1,4 @@
-export type ScannerSourceId = 'fiinquant' | 'binance_spot' | 'binance_usdm';
+export type ScannerSourceId = 'fiinquant' | 'vn_eod' | 'binance_spot' | 'binance_usdm';
 export type ScannerTimeframe = '1w' | '1M';
 export type ScannerCandleKind = 'current' | 'closed';
 
@@ -15,6 +15,8 @@ export interface ScannerSource {
   continuous_market: boolean;
   snapshot_ttl_seconds: number;
   history_ttl_seconds: number;
+  refresh_mode: 'network' | 'preloaded';
+  universes_are_exchanges: boolean;
   available: boolean;
   detail?: string | null;
 }
