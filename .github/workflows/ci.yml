@@ -32,6 +32,7 @@ jobs:
       - name: Check formatting and types
         run: |
           git diff --check
+          node --check scripts/run-assistant.mjs
           npm run typecheck
 
       - name: Test chart behavior
