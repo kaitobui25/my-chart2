@@ -2,18 +2,33 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Plugin, ViteDevServer } from 'vite';
 
 const SCANNER_TARGET = 'http://127.0.0.1:8730';
 const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
 const ACTIVE_TILE_MARKER = 'let activeTile: Tile | null = null;';
-const WORKSTATION_DIR = fileURLToPath(new URL('../', import.meta.url));
-const SIDECARS_DIR = path.resolve(WORKSTATION_DIR, '..', 'sidecars');
+
+function findRepoRoot(start: string): string {
+  let current = path.resolve(start);
+  while (true) {
+    const scanner = path.join(current, 'examples', 'sidecars', 'scanner', 'scanner_sidecar.py');
+    if (existsSync(path.join(current, 'package.json')) && existsSync(scanner)) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(start);
+    current = parent;
+  }
+}
+
+// Vite bundles config imports into a temporary file by default, so import.meta.url
+// is not a stable way to locate repo sidecars. The dev/preview commands run from
+// the repository tree; walk upward from cwd instead.
+const REPO_ROOT = findRepoRoot(process.cwd());
+const SIDECARS_DIR = path.join(REPO_ROOT, 'examples', 'sidecars');
 const SCANNER_DIR = path.join(SIDECARS_DIR, 'scanner');
 const SCANNER_SCRIPT = path.join(SCANNER_DIR, 'scanner_sidecar.py');
 const FIINQUANT_VENV = path.join(SIDECARS_DIR, 'fiinquant', '.venv');
 let scannerChild: ChildProcess | null = null;
+let scannerStarting: Promise<boolean> | null = null;
 
 function isAllowedBrowserRequest(req: IncomingMessage): boolean {
   if (req.headers['sec-fetch-site'] === 'cross-site') return false;
@@ -51,6 +66,14 @@ async function scannerIsHealthy(): Promise<boolean> {
   }
 }
 
+async function waitForScannerHealth(attempts = 40): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await scannerIsHealthy()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
 function scannerPython(): string {
   if (process.env.SCANNER_PYTHON) return process.env.SCANNER_PYTHON;
   const venv = process.platform === 'win32'
@@ -61,36 +84,65 @@ function scannerPython(): string {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
-async function ensureScannerSidecar(server?: ViteDevServer): Promise<void> {
-  if (await scannerIsHealthy() || scannerChild) return;
+async function startScannerSidecar(server?: ViteDevServer): Promise<boolean> {
   if (!existsSync(SCANNER_SCRIPT)) {
     console.warn(`[scanner] Missing sidecar: ${SCANNER_SCRIPT}`);
-    return;
+    return false;
   }
-  const python = scannerPython();
-  console.log(`[scanner] Starting sidecar with ${python}`);
-  scannerChild = spawn(python, [SCANNER_SCRIPT], {
-    cwd: SCANNER_DIR,
-    stdio: 'inherit',
-    windowsHide: false,
-    env: process.env,
-  });
-  scannerChild.once('exit', () => { scannerChild = null; });
-  scannerChild.once('error', (error) => {
-    console.warn(`[scanner] ${error.message}`);
-    scannerChild = null;
-  });
-  server?.httpServer?.once('close', () => {
-    if (scannerChild && !scannerChild.killed) scannerChild.kill();
-  });
+
+  if (!scannerChild) {
+    const python = scannerPython();
+    console.log(`[scanner] Starting sidecar with ${python}`);
+    scannerChild = spawn(python, [SCANNER_SCRIPT], {
+      cwd: SCANNER_DIR,
+      stdio: 'inherit',
+      windowsHide: false,
+      env: process.env,
+    });
+    const child = scannerChild;
+    child.once('exit', (code, signal) => {
+      if (scannerChild === child) scannerChild = null;
+      if (code !== 0 && signal == null) {
+        console.warn(`[scanner] sidecar exited with code ${code ?? 'unknown'}`);
+      }
+    });
+    child.once('error', (error) => {
+      console.warn(`[scanner] ${error.message}`);
+      if (scannerChild === child) scannerChild = null;
+    });
+    server?.httpServer?.once('close', () => {
+      if (scannerChild === child && !child.killed) child.kill();
+    });
+  }
+
+  const ready = await waitForScannerHealth();
+  if (!ready) console.warn(`[scanner] sidecar did not become ready at ${SCANNER_TARGET}`);
+  return ready;
 }
 
-function installScannerProxy(middlewares: {
-  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
-}): void {
+async function ensureScannerSidecar(server?: ViteDevServer): Promise<boolean> {
+  if (await scannerIsHealthy()) return true;
+  if (!scannerStarting) {
+    scannerStarting = startScannerSidecar(server).finally(() => {
+      scannerStarting = null;
+    });
+  }
+  return scannerStarting;
+}
+
+function installScannerProxy(
+  middlewares: {
+    use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
+  },
+  ensureSidecar: () => Promise<boolean>,
+): void {
   middlewares.use('/scanner-api', async (req, res) => {
     if (!isAllowedBrowserRequest(req)) {
       sendJson(res, 403, { message: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if (!(await ensureSidecar())) {
+      sendJson(res, 503, { message: 'Scanner sidecar failed to start' });
       return;
     }
     try {
@@ -121,11 +173,11 @@ export function scannerIntegration(): Plugin {
     name: 'l2chart-scanner-integration',
     enforce: 'pre',
     configureServer(server) {
-      installScannerProxy(server.middlewares);
+      installScannerProxy(server.middlewares, () => ensureScannerSidecar(server));
       void ensureScannerSidecar(server);
     },
     configurePreviewServer(server) {
-      installScannerProxy(server.middlewares);
+      installScannerProxy(server.middlewares, () => ensureScannerSidecar());
       void ensureScannerSidecar();
     },
     transform(code, id) {
