@@ -7,16 +7,20 @@ import run_autologin
 
 class RunAutologinTests(unittest.TestCase):
     @patch.object(run_autologin.web, "run_app")
+    @patch.object(run_autologin, "build_app")
     @patch.object(run_autologin, "FiinQuantGateway")
     @patch.object(run_autologin, "load_env")
     def test_eager_login_uses_env_credentials(
         self,
         load_env: MagicMock,
         gateway_type: MagicMock,
+        build_app: MagicMock,
         run_app: MagicMock,
     ) -> None:
         gateway = MagicMock()
+        app = object()
         gateway_type.return_value = gateway
+        build_app.return_value = app
         with patch.dict(
             os.environ,
             {
@@ -32,19 +36,22 @@ class RunAutologinTests(unittest.TestCase):
         load_env.assert_called_once_with()
         gateway_type.assert_called_once_with("user", "password")
         gateway._ensure_client.assert_called_once_with()
-        run_app.assert_called_once()
-        self.assertEqual(run_app.call_args.kwargs["host"], "127.0.0.1")
-        self.assertEqual(run_app.call_args.kwargs["port"], 9876)
+        build_app.assert_called_once_with(gateway)
+        run_app.assert_called_once_with(app, host="127.0.0.1", port=9876, print=None)
 
     @patch.object(run_autologin.web, "run_app")
+    @patch.object(run_autologin, "build_app")
     @patch.object(run_autologin, "FiinQuantGateway")
     @patch.object(run_autologin, "load_env")
     def test_missing_credentials_keeps_manual_login_available(
         self,
         load_env: MagicMock,
         gateway_type: MagicMock,
+        build_app: MagicMock,
         run_app: MagicMock,
     ) -> None:
+        app = object()
+        build_app.return_value = app
         with patch.dict(
             os.environ,
             {
@@ -59,8 +66,8 @@ class RunAutologinTests(unittest.TestCase):
 
         load_env.assert_called_once_with()
         gateway_type.assert_not_called()
-        run_app.assert_called_once()
-        self.assertIsNone(run_app.call_args.args[0]._state["runtime"]["gateway"] if False else None)
+        build_app.assert_called_once_with(None)
+        run_app.assert_called_once_with(app, host="127.0.0.1", port=8720, print=None)
 
 
 if __name__ == "__main__":
