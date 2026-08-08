@@ -82,13 +82,14 @@ export function scannerIntegration(): Plugin {
       const bridge = `
 window.__L2CHART_SCANNER_BRIDGE__ = Object.freeze({
   getProvider() { return activeProvider; },
-  openSymbol(source, symbol) {
+  openSymbol(symbol) {
     const providerMap = {
       fiinquant: 'fiinquant',
       binance_spot: 'binance-spot',
       binance_usdm: 'binance-usdm',
     };
-    const targetProvider = providerMap[String(source ?? '')];
+    const scannerSource = document.getElementById('scanner-source')?.value ?? '';
+    const targetProvider = providerMap[String(scannerSource)];
     if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider);
     activeTile?.setSymbol(String(symbol ?? ''));
   },
