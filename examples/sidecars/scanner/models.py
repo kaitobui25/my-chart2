@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-ProviderId = Literal['fiinquant', 'binance_spot', 'binance_usdm']
+ProviderId = Literal['fiinquant', 'vn_eod', 'binance_spot', 'binance_usdm']
 Timeframe = Literal['1w', '1M']
 CandleKind = Literal['current', 'closed']
+RefreshMode = Literal['network', 'preloaded']
+
+VN_STOCK_EXCHANGES = frozenset({'HOSE', 'HNX', 'UPCOM'})
 
 
 @dataclass(frozen=True)
@@ -22,13 +25,19 @@ class ProviderCapabilities:
     continuous_market: bool
     snapshot_ttl_seconds: int
     history_ttl_seconds: int
+    refresh_mode: RefreshMode = 'network'
     available: bool = True
     detail: str | None = None
+
+    @property
+    def universes_are_exchanges(self) -> bool:
+        return bool(self.universes) and set(self.universes).issubset(VN_STOCK_EXCHANGES)
 
     def to_json(self) -> dict[str, Any]:
         payload = asdict(self)
         payload['universes'] = list(self.universes)
         payload['default_universes'] = list(self.default_universes)
+        payload['universes_are_exchanges'] = self.universes_are_exchanges
         return payload
 
 
@@ -93,7 +102,7 @@ class ScanRequest:
         if not isinstance(payload, dict):
             raise ValueError('request body must be a JSON object')
         source = str(payload.get('source') or '').strip()
-        if source not in {'fiinquant', 'binance_spot', 'binance_usdm'}:
+        if source not in {'fiinquant', 'vn_eod', 'binance_spot', 'binance_usdm'}:
             raise ValueError(f'unsupported source: {source or "(empty)"}')
 
         raw_universes = payload.get('universes', [])
