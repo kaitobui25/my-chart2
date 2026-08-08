@@ -8,7 +8,7 @@ import type { Plugin, ViteDevServer } from 'vite';
 const SCANNER_TARGET = 'http://127.0.0.1:8730';
 const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
 const ACTIVE_TILE_MARKER = 'let activeTile: Tile | null = null;';
-const WORKSTATION_DIR = path.dirname(fileURLToPath(new URL('../', import.meta.url)));
+const WORKSTATION_DIR = fileURLToPath(new URL('../', import.meta.url));
 const SIDECARS_DIR = path.resolve(WORKSTATION_DIR, '..', 'sidecars');
 const SCANNER_DIR = path.join(SIDECARS_DIR, 'scanner');
 const SCANNER_SCRIPT = path.join(SCANNER_DIR, 'scanner_sidecar.py');
