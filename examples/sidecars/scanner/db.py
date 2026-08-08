@@ -210,8 +210,11 @@ class ScannerDB:
         snapshots: Iterable[MarketSnapshot],
         retain: int = 1000,
         deactivate_missing: bool = False,
+        active_max_age_seconds: int | None = None,
     ) -> int:
         """Atomically persist one parsed EOD dataset with bounded candle retention."""
+        if active_max_age_seconds is not None and active_max_age_seconds < 0:
+            raise ValueError('active_max_age_seconds must be non-negative')
         instrument_items = list(instruments)
         snapshot_items = list(snapshots)
         now = int(time.time())
@@ -274,6 +277,27 @@ class ScannerDB:
                      fetched_at=excluded.fetched_at''',
                 snapshot_rows,
             )
+            if active_max_age_seconds is not None:
+                latest = self._conn.execute(
+                    '''SELECT MAX(ms.data_time) AS latest_data_time
+                       FROM market_snapshot ms JOIN instruments i ON i.id=ms.instrument_id
+                       WHERE i.provider=?''',
+                    (provider,),
+                ).fetchone()
+                latest_data_time = None if latest is None else latest['latest_data_time']
+                if latest_data_time is None:
+                    self._conn.execute('UPDATE instruments SET active=0 WHERE provider=?', (provider,))
+                else:
+                    cutoff = int(latest_data_time) - int(active_max_age_seconds)
+                    self._conn.execute(
+                        '''UPDATE instruments
+                           SET active=CASE WHEN EXISTS (
+                               SELECT 1 FROM market_snapshot ms
+                               WHERE ms.instrument_id=instruments.id AND ms.data_time>=?
+                           ) THEN 1 ELSE 0 END
+                           WHERE provider=?''',
+                        (cutoff, provider),
+                    )
         return inserted
 
     def read_candles(self, instrument_id: int, interval: str = '1d', limit: int = 1000) -> list[Candle]:
