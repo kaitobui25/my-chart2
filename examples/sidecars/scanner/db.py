@@ -9,7 +9,7 @@ from typing import Iterable
 
 from models import Candle, HeikinScan, Instrument, MarketSnapshot, ScanFilters
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class ScannerDB:
@@ -146,10 +146,16 @@ class ScannerDB:
                 ''', rows,
             )
 
-    def stage1_candidates(self, provider: str, universes: tuple[str, ...], filters: ScanFilters) -> list[dict]:
+    def stage1_candidates(
+        self,
+        provider: str,
+        universes: tuple[str, ...],
+        filters: ScanFilters,
+        filter_universes_by_exchange: bool = False,
+    ) -> list[dict]:
         clauses = ['i.provider=?', 'i.active=1']
         params: list[object] = [provider]
-        if universes and provider == 'fiinquant':
+        if universes and filter_universes_by_exchange:
             placeholders = ','.join('?' for _ in universes)
             clauses.append(f'UPPER(i.exchange) IN ({placeholders})')
             params.extend(universes)
@@ -195,6 +201,80 @@ class ScannerDB:
                        )''',
                     (instrument_id, interval, instrument_id, interval, retain),
                 )
+
+    def import_eod_dataset(
+        self,
+        provider: str,
+        instruments: Iterable[Instrument],
+        history: dict[str, list[Candle]],
+        snapshots: Iterable[MarketSnapshot],
+        retain: int = 1000,
+        deactivate_missing: bool = False,
+    ) -> int:
+        """Atomically persist one parsed EOD dataset with bounded candle retention."""
+        instrument_items = list(instruments)
+        snapshot_items = list(snapshots)
+        now = int(time.time())
+        inserted = 0
+        with self._lock, self._conn:
+            if deactivate_missing:
+                self._conn.execute('UPDATE instruments SET active=0 WHERE provider=?', (provider,))
+            self._conn.executemany(
+                '''INSERT INTO instruments(provider,symbol,name,exchange,asset_type,active,last_seen_at)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(provider,symbol) DO UPDATE SET
+                     name=excluded.name,exchange=excluded.exchange,asset_type=excluded.asset_type,
+                     active=excluded.active,last_seen_at=excluded.last_seen_at''',
+                [
+                    (provider, item.symbol, item.name, item.exchange, item.asset_type, 1 if item.active else 0, now)
+                    for item in instrument_items
+                ],
+            )
+            ids = {
+                str(row['symbol']): int(row['id'])
+                for row in self._conn.execute(
+                    'SELECT id,symbol FROM instruments WHERE provider=?', (provider,)
+                ).fetchall()
+            }
+            candle_sql = '''INSERT INTO candles(instrument_id,interval,time,open,high,low,close,volume,is_closed,updated_at)
+                            VALUES(?,?,?,?,?,?,?,?,?,?)
+                            ON CONFLICT(instrument_id,interval,time) DO UPDATE SET
+                              open=excluded.open,high=excluded.high,low=excluded.low,close=excluded.close,
+                              volume=excluded.volume,is_closed=excluded.is_closed,updated_at=excluded.updated_at'''
+            for symbol, candles in history.items():
+                instrument_id = ids.get(symbol)
+                if instrument_id is None or not candles:
+                    continue
+                rows = [
+                    (instrument_id, '1d', item.time, item.open, item.high, item.low, item.close,
+                     item.volume, 1 if item.is_closed else 0, now)
+                    for item in candles
+                ]
+                self._conn.executemany(candle_sql, rows)
+                inserted += len(rows)
+                if retain > 0:
+                    self._conn.execute(
+                        '''DELETE FROM candles WHERE instrument_id=? AND interval='1d' AND time NOT IN (
+                             SELECT time FROM candles WHERE instrument_id=? AND interval='1d' ORDER BY time DESC LIMIT ?
+                           )''',
+                        (instrument_id, instrument_id, retain),
+                    )
+            snapshot_rows = [
+                (ids[item.symbol], item.price, item.volume, item.market_cap, item.data_time, now)
+                for item in snapshot_items if item.symbol in ids
+            ]
+            self._conn.executemany(
+                '''INSERT INTO market_snapshot(instrument_id,price,volume,market_cap,data_time,fetched_at)
+                   VALUES(?,?,?,?,?,?)
+                   ON CONFLICT(instrument_id) DO UPDATE SET
+                     price=COALESCE(excluded.price,market_snapshot.price),
+                     volume=COALESCE(excluded.volume,market_snapshot.volume),
+                     market_cap=excluded.market_cap,
+                     data_time=COALESCE(excluded.data_time,market_snapshot.data_time),
+                     fetched_at=excluded.fetched_at''',
+                snapshot_rows,
+            )
+        return inserted
 
     def read_candles(self, instrument_id: int, interval: str = '1d', limit: int = 1000) -> list[Candle]:
         with self._lock:
@@ -272,6 +352,52 @@ class ScannerDB:
                   ORDER BY h.ha_close_change_pct DESC,i.symbol'''
         with self._lock:
             return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
+
+    def begin_eod_import(
+        self,
+        provider: str,
+        source: str,
+        mode: str,
+        adjusted: bool,
+        source_url: str | None,
+        source_sha256: str | None,
+    ) -> int:
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                '''INSERT INTO eod_import_runs(provider,source,mode,adjusted,source_url,source_sha256,started_at,status)
+                   VALUES(?,?,?,?,?,?,?,?)''',
+                (provider, source, mode, 1 if adjusted else 0, source_url, source_sha256, int(time.time()), 'running'),
+            )
+            return int(cursor.lastrowid)
+
+    def finish_eod_import(
+        self,
+        import_id: int,
+        *,
+        status: str,
+        trade_date: int | None = None,
+        member_count: int = 0,
+        row_count: int = 0,
+        symbol_count: int = 0,
+        inserted_candle_count: int = 0,
+        error: str | None = None,
+    ) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                '''UPDATE eod_import_runs SET trade_date=?,finished_at=?,member_count=?,row_count=?,symbol_count=?,
+                          inserted_candle_count=?,status=?,error=? WHERE id=?''',
+                (trade_date, int(time.time()), member_count, row_count, symbol_count,
+                 inserted_candle_count, status, error, import_id),
+            )
+
+    def latest_successful_import(self, provider: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                '''SELECT * FROM eod_import_runs WHERE provider=? AND status='complete'
+                   ORDER BY COALESCE(trade_date,0) DESC,COALESCE(finished_at,0) DESC LIMIT 1''',
+                (provider,),
+            ).fetchone()
+        return None if row is None else dict(row)
 
     def begin_scan(self, provider: str, filters_json: dict) -> int:
         with self._lock, self._conn:
