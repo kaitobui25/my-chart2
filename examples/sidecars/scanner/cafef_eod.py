@@ -14,6 +14,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 import zipfile
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -21,7 +22,8 @@ from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from db import ScannerDB
-from models import Candle, Instrument, MarketSnapshot
+from models import Candle, Instrument, MarketSnapshot, ScanFilters
+from security_classifier import STOCK, classify_vn_security
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / 'data' / 'scanner.db'
@@ -368,7 +370,8 @@ def _dataset(parsed: ParsedArchive) -> tuple[list[Instrument], dict[str, list[Ca
         records.sort(key=lambda item: item.time)
         bounded = records[-HISTORY_RETAIN_BARS:]
         exchange = next((item.exchange for item in reversed(records) if item.exchange), '')
-        instruments.append(Instrument('vn_eod', symbol, symbol, exchange, 'STOCK', True))
+        asset_type = classify_vn_security(symbol, exchange)
+        instruments.append(Instrument(PROVIDER_ID, symbol, symbol, exchange, asset_type, True))
         candles = [
             Candle(item.time, item.open, item.high, item.low, item.close, item.volume, True)
             for item in bounded
@@ -379,6 +382,31 @@ def _dataset(parsed: ParsedArchive) -> tuple[list[Instrument], dict[str, list[Ca
         snapshots.append(MarketSnapshot(symbol, latest.close, latest.volume, None, latest.time))
     instruments.sort(key=lambda item: item.symbol)
     return instruments, history, snapshots, latest_trade_time
+
+
+def reclassify_active_universe(db: ScannerDB) -> dict[str, int]:
+    """Reclassify all currently fresh CafeF securities and keep only STOCK active."""
+    rows = db.stage1_candidates(PROVIDER_ID, (), ScanFilters(), False)
+    counts: Counter[str] = Counter()
+    updates: list[Instrument] = []
+    for row in rows:
+        symbol = str(row['symbol'])
+        exchange = str(row['exchange'] or '')
+        asset_type = classify_vn_security(symbol, exchange)
+        counts[asset_type] += 1
+        updates.append(
+            Instrument(
+                PROVIDER_ID,
+                symbol,
+                str(row['name'] or symbol),
+                exchange,
+                asset_type,
+                asset_type == STOCK,
+            )
+        )
+    if updates:
+        db.upsert_instruments(PROVIDER_ID, updates, deactivate_missing=False)
+    return dict(sorted(counts.items()))
 
 
 def import_archive(
@@ -411,6 +439,7 @@ def import_archive(
             deactivate_missing=mode == 'upto',
             active_max_age_seconds=ACTIVE_MAX_AGE_SECONDS,
         )
+        asset_types = reclassify_active_universe(db)
         coverage = db.snapshot_coverage(PROVIDER_ID)
         db.finish_eod_import(
             audit_id,
@@ -430,6 +459,7 @@ def import_archive(
             'rows': parsed.row_count,
             'symbols': len(instruments),
             'activeSymbols': coverage['active_count'],
+            'assetTypes': asset_types,
             'candles': inserted,
             'sha256': source_sha256,
             'source': source_url,
@@ -476,6 +506,7 @@ def build_cli() -> argparse.ArgumentParser:
     file_parser.add_argument('path')
     file_parser.add_argument('--mode', choices=('eod', 'upto'), default='eod')
 
+    subparsers.add_parser('reclassify', help='Reclassify the existing fresh VN EOD universe without downloading data.')
     subparsers.add_parser('status', help='Show the latest successful VN EOD import and DB coverage.')
     return parser
 
@@ -491,6 +522,12 @@ def main(argv: Iterable[str] | None = None) -> int:
         elif args.command == 'import-file':
             path = Path(args.path).expanduser().resolve()
             result = import_archive(db, path.read_bytes(), mode=args.mode, source_url=str(path))
+        elif args.command == 'reclassify':
+            result = {
+                'ok': True,
+                'assetTypes': reclassify_active_universe(db),
+                'coverage': db.snapshot_coverage(PROVIDER_ID),
+            }
         elif args.command == 'status':
             result = {
                 'database': str(db.path),
