@@ -1,6 +1,13 @@
 import type { Candle } from '../../src/core/types';
 import type { Datafeed, HistoryRange, SymbolSearchResult } from '../../src/datafeed';
-import { intervalStart, isCalendarInterval, nextIntervalStart } from '../../src/interval';
+import { intervalApproxSeconds, intervalStart, isCalendarInterval, nextIntervalStart } from '../../src/interval';
+import {
+  BrowserHistoryCache,
+  FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+  mergeHistoryCoverage,
+  missingHistoryCoverage,
+  type BrowserHistoryCacheApi,
+} from './browser-history-cache';
 
 export interface FiinQuantHealth {
   ok: boolean;
@@ -21,15 +28,38 @@ export interface FiinQuantHealth {
   } | null;
 }
 
+export interface FiinQuantDatafeedOptions {
+  cache?: BrowserHistoryCacheApi;
+  fetchImpl?: typeof fetch;
+}
+
+const MAX_HISTORY_REQUEST = 50_000;
+const FIINQUANT_UTC_OFFSET_MINUTES = 420;
+
+function mergeCandles(...groups: Candle[][]): Candle[] {
+  const byTime = new Map<number, Candle>();
+  for (const group of groups) {
+    for (const candle of group) byTime.set(candle.time, candle);
+  }
+  return [...byTime.values()].sort((left, right) => left.time - right.time);
+}
+
+function formatHistoryDate(time: number): string {
+  return new Date(time * 1000).toISOString().slice(0, 10);
+}
+
 /**
  * FiinQuant reference datafeed backed by the local Python sidecar example.
- * The application supplies the sidecar URL for its local or private-network
- * deployment. Authentication and caching remain outside the browser adapter.
+ * Historical candles are persisted in the shared browser cache so features
+ * such as Replay can reuse already downloaded history without forcing an old
+ * from_date request back through the provider.
  */
 export class FiinQuantDatafeed implements Datafeed {
   readonly name = 'FiinQuant';
   private readonly baseUrl: string;
   private readonly token: string;
+  private readonly cache: BrowserHistoryCacheApi;
+  private readonly fetchImpl: typeof fetch;
   private readonly streamSubscriptions = new Map<string, {
     symbol: string;
     interval: string;
@@ -41,9 +71,19 @@ export class FiinQuantDatafeed implements Datafeed {
   private readonly realtimeConnectedListeners = new Set<() => void>();
   private disposed = false;
 
-  constructor(baseUrl = '/fiinquant-api', token = '') {
+  constructor(baseUrl = '/fiinquant-api', token = '', options: FiinQuantDatafeedOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.token = token;
+    this.cache = options.cache ?? new BrowserHistoryCache();
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  }
+
+  get cacheAvailable(): boolean {
+    return this.cache.available;
+  }
+
+  async clearCache(): Promise<void> {
+    await this.cache.clearSource(FIINQUANT_ADJUSTED_HISTORY_SOURCE);
   }
 
   private sidecarHeaders(extra: Record<string, string> = {}): HeadersInit {
@@ -52,8 +92,13 @@ export class FiinQuantDatafeed implements Datafeed {
     return headers;
   }
 
+  private apiUrl(path: string): URL {
+    const origin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+    return new URL(`${this.baseUrl}${path}`, origin);
+  }
+
   async health(): Promise<FiinQuantHealth> {
-    const res = await fetch(`${this.baseUrl}/health`, {
+    const res = await this.fetchImpl(`${this.baseUrl}/health`, {
       headers: this.sidecarHeaders(),
       signal: AbortSignal.timeout(4000),
     });
@@ -62,10 +107,10 @@ export class FiinQuantDatafeed implements Datafeed {
   }
 
   async login(username: string, password: string): Promise<{ ok: boolean; loggedIn: boolean }> {
-    const url = new URL(`${this.baseUrl}/session`, window.location.origin);
+    const url = this.apiUrl('/session');
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await this.fetchImpl(url, {
         method: 'POST',
         headers: this.sidecarHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ username, password }),
@@ -84,44 +129,83 @@ export class FiinQuantDatafeed implements Datafeed {
   }
 
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
-    const calendarRange = range && isCalendarInterval(interval)
-      ? {
-          from: intervalStart(Math.min(range.from, range.to), interval, 420),
-          to: Math.min(Math.floor(Date.now() / 1000), nextIntervalStart(Math.max(range.from, range.to), interval, 420) - 1),
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!normalizedSymbol) return [];
+    const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
+
+    if (!range) {
+      const cached = await this.cache.readLatest(
+        FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+        normalizedSymbol,
+        interval,
+        requestedLimit,
+      );
+      try {
+        const remote = await this.fetchHistory(normalizedSymbol, interval, requestedLimit);
+        await this.persistHistory(normalizedSymbol, interval, remote, this.returnedCoverage(remote, interval));
+        return mergeCandles(cached, remote).slice(-requestedLimit);
+      } catch (error) {
+        if (cached.length > 0) return cached;
+        throw error;
+      }
+    }
+
+    const requested = this.normalizeRange(range, interval);
+    if (requested.from > requested.to) return [];
+    const cached = await this.cache.readRange(
+      FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+      normalizedSymbol,
+      interval,
+      requested.from,
+      requested.to,
+      requestedLimit,
+    );
+    const coverage = await this.cache.coverage(
+      FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+      normalizedSymbol,
+      interval,
+    );
+    const missing = missingHistoryCoverage(coverage, requested);
+
+    if (missing.length === 0) {
+      return cached
+        .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
+        .slice(-requestedLimit);
+    }
+
+    let fetched: Candle[] = [];
+    for (const gap of missing) {
+      try {
+        const remote = await this.fetchHistory(normalizedSymbol, interval, requestedLimit, gap);
+        fetched = mergeCandles(fetched, remote);
+        await this.persistHistory(normalizedSymbol, interval, remote, gap);
+      } catch (error) {
+        const partial = mergeCandles(cached, fetched);
+        if (partial.length > 0) {
+          throw this.partialHistoryError(coverage, gap, error);
         }
-      : range;
-    const url = new URL(`${this.baseUrl}/history`, window.location.origin);
-    url.searchParams.set('symbol', symbol.trim().toUpperCase());
-    url.searchParams.set('interval', interval);
-    url.searchParams.set('limit', String(limit));
-    if (calendarRange) {
-      url.searchParams.set('from', String(calendarRange.from));
-      url.searchParams.set('to', String(calendarRange.to));
+        throw error;
+      }
     }
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        headers: this.sidecarHeaders(),
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch {
-      throw new Error(`Cannot reach the FiinQuant sidecar at ${this.baseUrl}. Start the reference sidecar in examples/sidecars/fiinquant.`);
-    }
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(String((payload as { message?: string }).message ?? `HTTP ${res.status}`));
-    }
-    return ((payload as { candles?: Candle[] }).candles ?? [])
-      .map((c) => this.validCandle(c))
-      .filter((c): c is Candle => c !== null)
-      .filter((c) => !calendarRange || (c.time >= calendarRange.from && c.time <= calendarRange.to));
+
+    const complete = await this.cache.readRange(
+      FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+      normalizedSymbol,
+      interval,
+      requested.from,
+      requested.to,
+      requestedLimit,
+    );
+    return mergeCandles(cached, complete, fetched)
+      .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
+      .slice(-requestedLimit);
   }
 
   async searchSymbols(query: string, limit = 20): Promise<SymbolSearchResult[]> {
-    const url = new URL(`${this.baseUrl}/symbols`, window.location.origin);
+    const url = this.apiUrl('/symbols');
     url.searchParams.set('q', query.trim().toUpperCase());
     url.searchParams.set('limit', String(Math.min(100, Math.max(1, limit))));
-    const res = await fetch(url, {
+    const res = await this.fetchImpl(url, {
       headers: this.sidecarHeaders(),
       signal: AbortSignal.timeout(6000),
     });
@@ -195,12 +279,95 @@ export class FiinQuantDatafeed implements Datafeed {
     return () => this.realtimeConnectedListeners.delete(listener);
   }
 
+  private async fetchHistory(
+    symbol: string,
+    interval: string,
+    limit: number,
+    range?: HistoryRange,
+  ): Promise<Candle[]> {
+    const url = this.apiUrl('/history');
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('interval', interval);
+    url.searchParams.set('limit', String(limit));
+    if (range) {
+      url.searchParams.set('from', String(range.from));
+      url.searchParams.set('to', String(range.to));
+    }
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        headers: this.sidecarHeaders(),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      throw new Error(`Cannot reach the FiinQuant sidecar at ${this.baseUrl}. Start the reference sidecar in examples/sidecars/fiinquant.`);
+    }
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(String((payload as { message?: string }).message ?? `HTTP ${res.status}`));
+    }
+    return ((payload as { candles?: Candle[] }).candles ?? [])
+      .map((candle) => this.validCandle(candle))
+      .filter((candle): candle is Candle => candle !== null)
+      .filter((candle) => !range || (candle.time >= range.from && candle.time <= range.to));
+  }
+
+  private normalizeRange(range: HistoryRange, interval: string): HistoryRange {
+    const from = Math.min(range.from, range.to);
+    const to = Math.max(range.from, range.to);
+    if (!isCalendarInterval(interval)) return { from, to };
+    return {
+      from: intervalStart(from, interval, FIINQUANT_UTC_OFFSET_MINUTES),
+      to: Math.min(
+        Math.floor(Date.now() / 1000),
+        nextIntervalStart(to, interval, FIINQUANT_UTC_OFFSET_MINUTES) - 1,
+      ),
+    };
+  }
+
+  private returnedCoverage(candles: Candle[], interval: string): HistoryRange | null {
+    if (candles.length === 0) return null;
+    const first = Math.min(...candles.map((candle) => candle.time));
+    const last = Math.max(...candles.map((candle) => candle.time));
+    const to = isCalendarInterval(interval)
+      ? nextIntervalStart(last, interval, FIINQUANT_UTC_OFFSET_MINUTES)
+      : last + Math.max(1, intervalApproxSeconds(interval));
+    return { from: first, to };
+  }
+
+  private async persistHistory(
+    symbol: string,
+    interval: string,
+    candles: Candle[],
+    coverage: HistoryRange | null,
+  ): Promise<void> {
+    await this.cache.write(FIINQUANT_ADJUSTED_HISTORY_SOURCE, symbol, interval, candles);
+    if (coverage) {
+      await this.cache.markCoverage(FIINQUANT_ADJUSTED_HISTORY_SOURCE, symbol, interval, coverage);
+    }
+  }
+
+  private partialHistoryError(
+    coverage: HistoryRange[],
+    gap: HistoryRange,
+    cause: unknown,
+  ): Error {
+    const known = mergeHistoryCoverage(coverage);
+    const local = known.length === 0
+      ? 'Local cache has no confirmed coverage.'
+      : `Local cache coverage is ${formatHistoryDate(known[0].from)} to ${formatHistoryDate(known[known.length - 1].to)}.`;
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return new Error(
+      `${local} FiinQuant could not backfill ${formatHistoryDate(gap.from)} to ${formatHistoryDate(gap.to)}: ${reason}`,
+    );
+  }
+
   private ensureStreamSocket(): void {
     if (this.disposed || this.streamSubscriptions.size === 0) return;
     if (this.streamSocket?.readyState === WebSocket.OPEN
       || this.streamSocket?.readyState === WebSocket.CONNECTING) return;
 
-    const wsUrl = new URL(`${this.baseUrl}/stream`, window.location.origin);
+    const wsUrl = this.apiUrl('/stream');
     wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
 
     const socket = new WebSocket(wsUrl.toString());
