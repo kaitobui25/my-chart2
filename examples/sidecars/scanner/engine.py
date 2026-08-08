@@ -61,10 +61,17 @@ class ScannerEngine:
 
         async with self.planner.provider_lock(request.source):
             try:
-                await self._refresh_instruments(provider, request)
+                if provider.capabilities.refresh_mode == 'network':
+                    await self._refresh_instruments(provider, request)
+
                 active_symbols = await asyncio.to_thread(
                     self.db.list_active_symbols, request.source
                 )
+                if provider.capabilities.refresh_mode == 'preloaded' and not active_symbols:
+                    raise RuntimeError(
+                        f'{provider.capabilities.label}: no local EOD data. '
+                        'Import CafeF adjusted EOD/Upto data first.'
+                    )
                 await asyncio.to_thread(
                     self.db.update_scan,
                     run_id,
@@ -72,14 +79,17 @@ class ScannerEngine:
                 )
                 await self._notify(state, progress)
 
-                await self._refresh_snapshots(
-                    provider, request.source, active_symbols, state
-                )
+                if provider.capabilities.refresh_mode == 'network':
+                    await self._refresh_snapshots(
+                        provider, request.source, active_symbols, state
+                    )
+
                 candidates = await asyncio.to_thread(
                     self.db.stage1_candidates,
                     request.source,
                     request.universes,
                     request.filters,
+                    provider.capabilities.universes_are_exchanges,
                 )
                 await asyncio.to_thread(
                     self.db.update_scan,
@@ -88,9 +98,12 @@ class ScannerEngine:
                 )
                 await self._notify(state, progress)
 
-                refresh_count = await self._refresh_candidate_history(
-                    provider, candidates, state
-                )
+                if provider.capabilities.refresh_mode == 'network':
+                    refresh_count = await self._refresh_candidate_history(
+                        provider, candidates, state
+                    )
+                else:
+                    refresh_count = 0
                 await asyncio.to_thread(
                     self.db.update_scan,
                     run_id,
@@ -113,13 +126,33 @@ class ScannerEngine:
                     evaluated_ids,
                 )
                 now = int(time.time())
+                import_state = None
+                if provider.capabilities.refresh_mode == 'preloaded':
+                    import_state = await asyncio.to_thread(
+                        self.db.latest_successful_import, request.source
+                    )
+                    if import_state is None:
+                        state.warnings.append(
+                            f'{provider.capabilities.label}: local data has no successful import audit metadata'
+                        )
+
                 results: list[dict] = []
                 for row in final_rows:
-                    stale = (
-                        now - int(row.get('fetched_at') or 0)
-                        > provider.capabilities.snapshot_ttl_seconds * 2
-                    )
-                    warnings = ['snapshot stale'] if stale else []
+                    if provider.capabilities.refresh_mode == 'preloaded':
+                        reference_time = int(
+                            (import_state or {}).get('trade_date')
+                            or row.get('data_time')
+                            or row.get('fetched_at')
+                            or 0
+                        )
+                        stale = now - reference_time > provider.capabilities.snapshot_ttl_seconds
+                        warnings = ['EOD data stale'] if stale else []
+                    else:
+                        stale = (
+                            now - int(row.get('fetched_at') or 0)
+                            > provider.capabilities.snapshot_ttl_seconds * 2
+                        )
+                        warnings = ['snapshot stale'] if stale else []
                     results.append(ScanResult(
                         instrument_id=int(row['instrument_id']),
                         symbol=str(row['symbol']),
@@ -237,9 +270,6 @@ class ScannerEngine:
                 instrument_id,
                 '1d',
             )
-            # The first request asks for a deep warm-up. If a newly listed asset
-            # legitimately has fewer bars, it is still considered bootstrapped;
-            # otherwise every scan would re-download the same short history.
             if candle_state is None:
                 bootstrap.append(candidate)
                 continue
@@ -340,9 +370,6 @@ class ScannerEngine:
             if len(daily) < minimum_daily:
                 continue
 
-            # Recompute Stage-2 HA from local SQLite every scan. This is cheap
-            # compared with network I/O and, crucially, catches an in-progress
-            # daily candle whose OHLC changed while its timestamp stayed the same.
             metrics = compute_latest_metrics(
                 daily,
                 request.heikin_ashi.timeframe,
