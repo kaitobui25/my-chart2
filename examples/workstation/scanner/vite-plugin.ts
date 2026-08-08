@@ -1,9 +1,19 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Plugin } from 'vite';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Plugin, ViteDevServer } from 'vite';
 
 const SCANNER_TARGET = 'http://127.0.0.1:8730';
 const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
 const ACTIVE_TILE_MARKER = 'let activeTile: Tile | null = null;';
+const WORKSTATION_DIR = path.dirname(fileURLToPath(new URL('../', import.meta.url)));
+const SIDECARS_DIR = path.resolve(WORKSTATION_DIR, '..', 'sidecars');
+const SCANNER_DIR = path.join(SIDECARS_DIR, 'scanner');
+const SCANNER_SCRIPT = path.join(SCANNER_DIR, 'scanner_sidecar.py');
+const FIINQUANT_VENV = path.join(SIDECARS_DIR, 'fiinquant', '.venv');
+let scannerChild: ChildProcess | null = null;
 
 function isAllowedBrowserRequest(req: IncomingMessage): boolean {
   if (req.headers['sec-fetch-site'] === 'cross-site') return false;
@@ -30,6 +40,49 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(payload));
+}
+
+async function scannerIsHealthy(): Promise<boolean> {
+  try {
+    const response = await fetch(`${SCANNER_TARGET}/health`, { signal: AbortSignal.timeout(500) });
+    return response.ok && (await response.json())?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+function scannerPython(): string {
+  if (process.env.SCANNER_PYTHON) return process.env.SCANNER_PYTHON;
+  const venv = process.platform === 'win32'
+    ? path.join(FIINQUANT_VENV, 'Scripts', 'python.exe')
+    : path.join(FIINQUANT_VENV, 'bin', 'python');
+  if (existsSync(venv)) return venv;
+  if (process.env.FIINQUANT_PYTHON) return process.env.FIINQUANT_PYTHON;
+  return process.platform === 'win32' ? 'python' : 'python3';
+}
+
+async function ensureScannerSidecar(server?: ViteDevServer): Promise<void> {
+  if (await scannerIsHealthy() || scannerChild) return;
+  if (!existsSync(SCANNER_SCRIPT)) {
+    console.warn(`[scanner] Missing sidecar: ${SCANNER_SCRIPT}`);
+    return;
+  }
+  const python = scannerPython();
+  console.log(`[scanner] Starting sidecar with ${python}`);
+  scannerChild = spawn(python, [SCANNER_SCRIPT], {
+    cwd: SCANNER_DIR,
+    stdio: 'inherit',
+    windowsHide: false,
+    env: process.env,
+  });
+  scannerChild.once('exit', () => { scannerChild = null; });
+  scannerChild.once('error', (error) => {
+    console.warn(`[scanner] ${error.message}`);
+    scannerChild = null;
+  });
+  server?.httpServer?.once('close', () => {
+    if (scannerChild && !scannerChild.killed) scannerChild.kill();
+  });
 }
 
 function installScannerProxy(middlewares: {
@@ -69,9 +122,11 @@ export function scannerIntegration(): Plugin {
     enforce: 'pre',
     configureServer(server) {
       installScannerProxy(server.middlewares);
+      void ensureScannerSidecar(server);
     },
     configurePreviewServer(server) {
       installScannerProxy(server.middlewares);
+      void ensureScannerSidecar();
     },
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
