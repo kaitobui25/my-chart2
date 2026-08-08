@@ -17,12 +17,14 @@ Workstation Scanner UI -> /scanner-api -> scanner sidecar -> request planner -> 
 Providers expose capabilities (market-cap, bulk snapshot/history, timezone/calendar, concurrency) so scanner engine stays provider-neutral.
 
 ## Performance
-1. Stage 1 uses bulk/latest snapshots and SQL filters before history.
-2. Persist canonical 1d candles for 1W/1M scans; derive week/month locally instead of storing duplicate 1W/1M history.
-3. Prefer provider batch calls. FiinQuant supports ticker lists; Binance uses bulk ticker endpoints for Stage 1.
-4. Request planner fetches only missing/stale candidates, single-flights identical work, and uses bounded concurrency.
-5. Bootstrap HA history once, then recompute only when source daily candles change. Rebuild on algorithm-version change or cache-integrity failure.
-6. SQLite uses WAL, serialized writes, batch transactions/upserts, PRAGMA user_version migrations, and safe backup API/VACUUM INTO.
+1. **Stage 1 first:** use bulk/latest snapshots and SQL filters before any history request.
+2. **Canonical 1D:** persist canonical `1d` candles for 1W/1M scans; derive week/month locally instead of requesting/storing duplicate 1W/1M history.
+3. **Batch providers:** prefer bulk calls. FiinQuant uses ticker lists in batches; Binance uses bulk ticker endpoints for Stage 1.
+4. **Request planner:** fetch only missing/stale candidate history, single-flight provider work, and use bounded concurrency.
+5. **Network cache hard, compute cheap:** bootstrap daily history once, then request only overlapping recent/missing daily bars. Recompute the selected HA timeframe locally from SQLite for Stage-2 on each scan. This intentionally spends cheap local CPU so an open daily candle whose OHLC changed without changing timestamp can never leave a stale current HA signal.
+6. **New listings:** once an initial deep-history request has completed, a symbol with fewer than the target warm-up bars is treated as bootstrapped and switches to incremental refresh instead of repeatedly downloading the same short history.
+7. **SQLite:** WAL, serialized writes, batch transactions/upserts, `PRAGMA user_version` migrations, bounded retention, and safe backup API/VACUUM INTO.
+8. **Stale fallback:** successful cached data is not erased when a provider refresh fails; freshness is exposed in scan output.
 
 ## SQLite schema
 ### instruments
@@ -40,19 +42,22 @@ instrument_id, timeframe(1w|1M), kind(current|closed), candle_time, ha_open/high
 ### scan_runs
 id, provider, started_at, finished_at, universe_count, stage1_count, history_refresh_count, stage2_count, result_count, filters_json, status, error.
 
-## HA contract
+## Heikin Ashi contract
 HA close=(O+H+L+C)/4. First HA open=(O+C)/2. Next HA open=(previous HA open+previous HA close)/2. HA high=max(H,HA open,HA close). HA low=min(L,HA open,HA close). Green means HA close>HA open. No-lower-wick uses numeric tolerance. HA close change %=(current HA close/previous HA close-1)*100.
+
+Calendar policy is provider-specific: FiinQuant uses Asia/Ho_Chi_Minh trading-session calendar; Binance is continuous 24/7 UTC. A Vietnamese stock week is considered closed after the final Friday session boundary rather than waiting for the next Monday.
 
 ## API
 - GET /health
 - GET /sources
 - POST /scan
 - GET /runs/{id}
+- POST /backup
 
-POST /scan uses a single heikinAshi.timeframe value, never an array.
+POST /scan uses a single `heikinAshi.timeframe` value, never an array.
 
 ## UI
-Scanner controls: Source, Universe, Price min/max, Volume min/max, Market cap min/max, HA timeframe Week OR Month, Green, No lower wick, HA close-change threshold, Current/Closed, Scan. Results show symbol/exchange/price/volume/market-cap/selected HA timeframe/state/change/candle time/freshness and can open the symbol in the chart.
+Scanner controls: Source, Universe, Price min/max, Volume min/max, Market cap min/max, HA timeframe Week OR Month, Green, No lower wick, HA close-change threshold, Current/Closed, Scan. Results show symbol/exchange/price/volume/market-cap/selected HA timeframe/state/change/candle time/freshness and can open the symbol in the chart. If the scan source differs from the active chart source, opening a result switches the chart provider first.
 
 ## Build order
 1. Contracts/capabilities.
