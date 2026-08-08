@@ -10,8 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cafef_eod import discover_latest_url, import_archive, parse_archive
+from cafef_eod import discover_latest_url, import_archive, parse_archive, reclassify_active_universe
 from db import ScannerDB
+from models import Instrument, MarketSnapshot
+from security_classifier import classify_vn_security
 
 
 def make_zip(name: str, text: str) -> bytes:
@@ -78,6 +80,16 @@ class CafeFEodParserTests(unittest.TestCase):
             'https://cafef.vn/data/ami_data/20260807/CafeF.SolieuGD.Upto07082026.zip',
         )
 
+    def test_security_classifier_matches_audited_symbol_families(self):
+        self.assertEqual(classify_vn_security('AAA', 'HOSE'), 'STOCK')
+        self.assertEqual(classify_vn_security('CHPG2632', 'HOSE'), 'CW')
+        self.assertEqual(classify_vn_security('CHPG2632', 'HNX'), 'UNKNOWN')
+        self.assertEqual(classify_vn_security('E1VFVN30', 'HOSE'), 'ETF')
+        self.assertEqual(classify_vn_security('FUESSVFL', 'HOSE'), 'ETF')
+        self.assertEqual(classify_vn_security('FUCTVGF3', 'HOSE'), 'FUND')
+        self.assertEqual(classify_vn_security('FUCVREIT', 'HOSE'), 'FUND')
+        self.assertEqual(classify_vn_security('ABCD', 'HOSE'), 'UNKNOWN')
+
 
 class CafeFEodImportTests(unittest.TestCase):
     def setUp(self):
@@ -105,6 +117,7 @@ class CafeFEodImportTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertEqual(result['symbols'], 2)
         self.assertEqual(result['activeSymbols'], 2)
+        self.assertEqual(result['assetTypes'], {'STOCK': 2})
         self.assertEqual(result['candles'], 3)
         self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA', 'CCC'])
         coverage = self.db.snapshot_coverage('vn_eod')
@@ -120,25 +133,81 @@ class CafeFEodImportTests(unittest.TestCase):
         self.assertEqual(audit['symbol_count'], 2)
         self.assertEqual(audit['inserted_candle_count'], 3)
 
+    def test_import_keeps_non_stock_data_but_excludes_it_from_active_stock_universe(self):
+        payload = make_zip(
+            'CafeF.HOSE.txt',
+            '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
+            'AAA,20260807,10,12,9,11,1000\n'
+            'E1VFVN30,20260807,30,31,29,30.5,2000\n'
+            'FUESSVFL,20260807,28,29,27,28.5,3000\n'
+            'FUCTVGF3,20260807,14,15,13,14.5,100\n'
+            'FUCVREIT,20260807,7,8,6,7.5,100\n'
+            'CHPG2632,20260807,0.5,0.6,0.4,0.55,4000\n'
+            'ABCD,20260807,20,21,19,20.5,500\n',
+        )
+
+        result = import_archive(self.db, payload, mode='upto', source_url='classified.zip')
+
+        self.assertEqual(result['symbols'], 7)
+        self.assertEqual(result['activeSymbols'], 1)
+        self.assertEqual(
+            result['assetTypes'],
+            {'CW': 1, 'ETF': 2, 'FUND': 2, 'STOCK': 1, 'UNKNOWN': 1},
+        )
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA'])
+
+        ids = self.db.instrument_ids(
+            'vn_eod',
+            ['AAA', 'E1VFVN30', 'FUESSVFL', 'FUCTVGF3', 'FUCVREIT', 'CHPG2632', 'ABCD'],
+        )
+        self.assertEqual(len(ids), 7)
+        self.assertEqual(len(self.db.read_candles(ids['CHPG2632'])), 1)
+        self.assertEqual(len(self.db.read_candles(ids['E1VFVN30'])), 1)
+
+    def test_reclassify_backfills_legacy_fresh_rows_without_network_import(self):
+        self.db.upsert_instruments(
+            'vn_eod',
+            [
+                Instrument('vn_eod', 'AAA', 'AAA', 'HOSE', 'STOCK', True),
+                Instrument('vn_eod', 'CHPG2632', 'CHPG2632', 'HOSE', 'STOCK', True),
+                Instrument('vn_eod', 'FUESSVFL', 'FUESSVFL', 'HOSE', 'STOCK', True),
+            ],
+            deactivate_missing=False,
+        )
+        self.db.upsert_snapshots(
+            'vn_eod',
+            [
+                MarketSnapshot('AAA', 10, 1000, None, 1786035600),
+                MarketSnapshot('CHPG2632', 0.5, 1000, None, 1786035600),
+                MarketSnapshot('FUESSVFL', 28, 1000, None, 1786035600),
+            ],
+        )
+
+        counts = reclassify_active_universe(self.db)
+
+        self.assertEqual(counts, {'CW': 1, 'ETF': 1, 'STOCK': 1})
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA'])
+
     def test_upto_keeps_stale_history_but_only_recent_symbols_active(self):
         payload = make_zip(
             'CafeF.HOSE.txt',
             '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
-            'FRESH,20260807,10,12,9,11,1000\n'
-            'EDGE,20260708,20,22,19,21,900\n'
-            'STALE,20260707,30,32,29,31,800\n'
-            'OLD,20150901,40,42,39,41,700\n',
+            'AAA,20260807,10,12,9,11,1000\n'
+            'BBB,20260708,20,22,19,21,900\n'
+            'CCC,20260707,30,32,29,31,800\n'
+            'DDD,20150901,40,42,39,41,700\n',
         )
         result = import_archive(self.db, payload, mode='upto', source_url='bootstrap.zip')
 
         self.assertEqual(result['symbols'], 4)
         self.assertEqual(result['activeSymbols'], 2)
-        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['EDGE', 'FRESH'])
+        self.assertEqual(result['assetTypes'], {'STOCK': 2})
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA', 'BBB'])
 
-        ids = self.db.instrument_ids('vn_eod', ['FRESH', 'EDGE', 'STALE', 'OLD'])
-        self.assertEqual(set(ids), {'FRESH', 'EDGE', 'STALE', 'OLD'})
-        self.assertEqual(len(self.db.read_candles(ids['STALE'])), 1)
-        self.assertEqual(len(self.db.read_candles(ids['OLD'])), 1)
+        ids = self.db.instrument_ids('vn_eod', ['AAA', 'BBB', 'CCC', 'DDD'])
+        self.assertEqual(set(ids), {'AAA', 'BBB', 'CCC', 'DDD'})
+        self.assertEqual(len(self.db.read_candles(ids['CCC'])), 1)
+        self.assertEqual(len(self.db.read_candles(ids['DDD'])), 1)
 
     def test_eod_import_does_not_deactivate_recent_symbols_missing_from_daily_file(self):
         bootstrap = make_zip(
@@ -174,6 +243,7 @@ class CafeFEodImportTests(unittest.TestCase):
 
         result = import_archive(self.db, daily, mode='eod', source_url='daily.zip')
         self.assertEqual(result['activeSymbols'], 1)
+        self.assertEqual(result['assetTypes'], {'STOCK': 1})
         self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA'])
         bbb_id = self.db.instrument_ids('vn_eod', ['BBB'])['BBB']
         self.assertEqual(len(self.db.read_candles(bbb_id)), 1)
