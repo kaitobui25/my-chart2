@@ -15,6 +15,11 @@ from models import Candle, Instrument, MarketSnapshot, ProviderCapabilities, Pro
 
 FIINQUANT_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 FIINQUANT_RECENT_DAYS = 10
+FIINQUANT_UNIVERSE_INDEX = {
+    'HOSE': 'VNINDEX',
+    'HNX': 'HNXIndex',
+    'UPCOM': 'UpcomIndex',
+}
 
 
 def _finite(value: Any) -> float | None:
@@ -181,8 +186,15 @@ class FiinQuantProvider(ScannerProvider):
 
         def fetch() -> list[Instrument]:
             items: dict[str, Instrument] = {}
-            for universe in requested:
-                raw = client.TickerList(tickers=[universe])
+            for requested_universe in requested:
+                universe = str(requested_universe).strip().upper()
+                index_name = FIINQUANT_UNIVERSE_INDEX.get(universe)
+                if index_name is None:
+                    raise ValueError(f'unsupported FiinQuant universe: {requested_universe}')
+                # FiinQuant TickerList accepts one index name via `ticker`. Keep
+                # exchange as HOSE/HNX/UPCOM in SQLite so Stage-1 universe filters
+                # remain provider-neutral instead of storing VNINDEX/HNXIndex names.
+                raw = client.TickerList(ticker=index_name)
                 for row in self._raw_records(raw):
                     symbol = self._symbol_from_row(row)
                     if not symbol:
@@ -192,13 +204,8 @@ class FiinQuantProvider(ScannerProvider):
                         for key in ('name', 'organName', 'companyName', 'tickerName')
                         if row.get(key)
                     ), '')
-                    exchange = next((
-                        str(row.get(key) or '').strip().upper()
-                        for key in ('exchange', 'comGroupCode', 'market', 'floor')
-                        if row.get(key)
-                    ), universe)
                     items[symbol] = Instrument(
-                        'fiinquant', symbol, name, exchange or universe, 'STOCK', True
+                        'fiinquant', symbol, name, universe, 'STOCK', True
                     )
             return sorted(items.values(), key=lambda item: item.symbol)
 
