@@ -59,7 +59,12 @@ def _next_bucket(start: datetime, timeframe: Timeframe) -> datetime:
     return start.replace(month=start.month + 1)
 
 
-def aggregate_daily(candles: list[Candle], timeframe: Timeframe, timezone_name: str) -> list[AggregatedCandle]:
+def aggregate_daily(
+    candles: list[Candle],
+    timeframe: Timeframe,
+    timezone_name: str,
+    continuous_market: bool = True,
+) -> list[AggregatedCandle]:
     if timeframe not in {'1w', '1M'}:
         raise ValueError(f'unsupported HA timeframe: {timeframe}')
     tz = ZoneInfo(timezone_name)
@@ -70,7 +75,12 @@ def aggregate_daily(candles: list[Candle], timeframe: Timeframe, timezone_name: 
     for candle in ordered:
         start = _local_bucket_start(candle.time, timeframe, tz)
         key = int(start.timestamp())
-        end = int(_next_bucket(start, timeframe).timestamp())
+        next_bucket = _next_bucket(start, timeframe)
+        # A stock trading week cannot receive another regular session after
+        # Friday. A 24/7 market such as Binance stays open until Monday 00:00.
+        if timeframe == '1w' and not continuous_market:
+            next_bucket = start + timedelta(days=5)
+        end = int(next_bucket.timestamp())
         if current_key != key:
             result.append(AggregatedCandle(
                 time=key,
@@ -125,7 +135,13 @@ def to_heikin(candles: list[AggregatedCandle]) -> list[HeikinCandle]:
     return output
 
 
-def _metrics_for_index(series: list[HeikinCandle], index: int, timeframe: Timeframe, kind: CandleKind, source_last_time: int) -> HeikinMetrics:
+def _metrics_for_index(
+    series: list[HeikinCandle],
+    index: int,
+    timeframe: Timeframe,
+    kind: CandleKind,
+    source_last_time: int,
+) -> HeikinMetrics:
     candle = series[index]
     previous = series[index - 1] if index > 0 else None
     change = None
@@ -149,11 +165,17 @@ def _metrics_for_index(series: list[HeikinCandle], index: int, timeframe: Timefr
     )
 
 
-def compute_latest_metrics(daily: list[Candle], timeframe: Timeframe, timezone_name: str, now: int | None = None) -> dict[CandleKind, HeikinMetrics]:
+def compute_latest_metrics(
+    daily: list[Candle],
+    timeframe: Timeframe,
+    timezone_name: str,
+    now: int | None = None,
+    continuous_market: bool = True,
+) -> dict[CandleKind, HeikinMetrics]:
     if len(daily) < 3:
         return {}
     now_ts = int(datetime.now(timezone.utc).timestamp()) if now is None else int(now)
-    aggregated = aggregate_daily(daily, timeframe, timezone_name)
+    aggregated = aggregate_daily(daily, timeframe, timezone_name, continuous_market)
     series = to_heikin(aggregated)
     if len(series) < 2:
         return {}
