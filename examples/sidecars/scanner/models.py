@@ -19,6 +19,7 @@ class ProviderCapabilities:
     default_universes: tuple[str, ...]
     timezone: str
     max_history_concurrency: int
+    continuous_market: bool
     snapshot_ttl_seconds: int
     history_ttl_seconds: int
     available: bool = True
