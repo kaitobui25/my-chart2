@@ -30,6 +30,8 @@ VN_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 PROVIDER_ID = 'vn_eod'
 SOURCE_NAME = 'cafef'
 HISTORY_RETAIN_BARS = 1000
+ACTIVE_MAX_AGE_DAYS = 30
+ACTIVE_MAX_AGE_SECONDS = ACTIVE_MAX_AGE_DAYS * 24 * 60 * 60
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 64
@@ -405,9 +407,11 @@ def import_archive(
             instruments,
             history,
             snapshots,
-            HISTORY_RETAIN_BARS,
-            mode == 'upto',
+            retain=HISTORY_RETAIN_BARS,
+            deactivate_missing=mode == 'upto',
+            active_max_age_seconds=ACTIVE_MAX_AGE_SECONDS,
         )
+        coverage = db.snapshot_coverage(PROVIDER_ID)
         db.finish_eod_import(
             audit_id,
             status='complete',
@@ -425,6 +429,7 @@ def import_archive(
             'members': parsed.member_count,
             'rows': parsed.row_count,
             'symbols': len(instruments),
+            'activeSymbols': coverage['active_count'],
             'candles': inserted,
             'sha256': source_sha256,
             'source': source_url,
@@ -489,6 +494,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         elif args.command == 'status':
             result = {
                 'database': str(db.path),
+                'activeMaxAgeDays': ACTIVE_MAX_AGE_DAYS,
                 'latestImport': db.latest_successful_import(PROVIDER_ID),
                 'coverage': db.snapshot_coverage(PROVIDER_ID),
             }
