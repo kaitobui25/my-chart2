@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { spawn, spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +15,7 @@ const fiinQuantRequirementsPath = path.join(fiinQuantDir, 'requirements.txt')
 const fiinQuantProviderRequirementsPath = path.join(fiinQuantDir, 'requirements-provider.txt')
 const fiinQuantVenvDir = path.join(fiinQuantDir, '.venv')
 const ASSISTANT_HEALTH_URL = 'http://127.0.0.1:8788/health'
-const WORKSTATION_URL = 'http://127.0.0.1:53173/'
+const DEFAULT_WORKSTATION_PORT = 53173
 
 if (!existsSync(viteBin)) {
   console.error('Missing node_modules. Run "npm install" once, then start this launcher again.')
@@ -306,13 +307,35 @@ async function autoLoginFiinQuant(health) {
   return nextHealth
 }
 
-async function workstationIsRunning() {
+async function workstationProxyIsAuthorized(port) {
+  const baseUrl = `http://127.0.0.1:${port}`
   try {
-    const response = await fetch(WORKSTATION_URL, { signal: AbortSignal.timeout(900) })
-    return response.ok
+    const page = await fetch(`${baseUrl}/`, { signal: AbortSignal.timeout(900) })
+    if (!page.ok) return false
+    if (!fiinQuantEnv.SIDECAR_TOKEN) return true
+    const health = await readJson(`${baseUrl}/fiinquant-api/health`)
+    return health?.ok === true && health.authorized === true
   } catch {
     return false
   }
+}
+
+function portIsAvailable(port) {
+  return new Promise(resolve => {
+    const server = createServer()
+    server.unref()
+    server.once('error', () => resolve(false))
+    server.listen(port, '127.0.0.1', () => {
+      server.close(() => resolve(true))
+    })
+  })
+}
+
+async function chooseWorkstationPort() {
+  for (let port = DEFAULT_WORKSTATION_PORT; port < DEFAULT_WORKSTATION_PORT + 20; port += 1) {
+    if (await portIsAvailable(port)) return port
+  }
+  throw new Error('No free local workstation port was found near 53173.')
 }
 
 function openBrowser(url) {
@@ -327,6 +350,28 @@ function openBrowser(url) {
   child.unref()
 }
 
+async function startOrReuseWorkstation() {
+  if (await workstationProxyIsAuthorized(DEFAULT_WORKSTATION_PORT)) {
+    const url = `http://127.0.0.1:${DEFAULT_WORKSTATION_PORT}/`
+    console.log(`[workstation] Reusing dev server at ${url}`)
+    openBrowser(url)
+    return
+  }
+
+  const defaultPortFree = await portIsAvailable(DEFAULT_WORKSTATION_PORT)
+  const port = defaultPortFree ? DEFAULT_WORKSTATION_PORT : await chooseWorkstationPort()
+  if (port !== DEFAULT_WORKSTATION_PORT) {
+    console.warn(`[workstation] Port ${DEFAULT_WORKSTATION_PORT} is occupied by an older/incompatible dev server; starting this session on ${port}.`)
+  }
+  spawnManaged(process.execPath, [
+    viteBin,
+    '--config', workstationConfigPath,
+    '--port', String(port),
+    '--strictPort',
+    '--open',
+  ], { env: viteEnv })
+}
+
 try {
   await ensureAssistantSidecar()
   let fiinQuantHealth = await ensureFiinQuantSidecar()
@@ -336,14 +381,7 @@ try {
     console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
   }
 
-  if (await workstationIsRunning()) {
-    console.log(`[workstation] Reusing dev server at ${WORKSTATION_URL}`)
-    openBrowser(WORKSTATION_URL)
-  } else {
-    spawnManaged(process.execPath, [viteBin, '--config', workstationConfigPath, '--open'], {
-      env: viteEnv,
-    })
-  }
+  await startOrReuseWorkstation()
 } catch (error) {
   console.error(`[launcher] ${error instanceof Error ? error.message : String(error)}`)
   shutdown(1)
