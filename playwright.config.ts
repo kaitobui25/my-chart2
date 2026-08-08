@@ -14,12 +14,20 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  webServer: {
+  webServer: [
+  {
     command: 'npm run test:browser:serve',
     url: 'http://127.0.0.1:53174',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
+  {
+    command: 'npx vite --config examples/workstation/vite.config.ts',
+    url: 'http://127.0.0.1:53173',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
+],
   projects: [
     {
       name: 'chromium',

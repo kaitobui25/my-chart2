@@ -66,6 +66,7 @@ import {
   type MarketQuote,
 } from './trading/paper';
 import { TradingWorkspace } from './trading/workspace';
+import { SyncedReplaySession, type ReplayParticipant, type ReplaySessionSnapshot } from './replay/replay-session';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -297,21 +298,6 @@ interface DrawingMenuItem {
   label: string;
 }
 
-interface ReplayState {
-  candles: Candle[];
-  cursor: number;
-  speed: number;
-  playing: boolean;
-  timer: number | null;
-}
-
-interface ReplayInfo {
-  phase: 'idle' | 'selecting' | 'paused' | 'playing';
-  cursor: number;
-  total: number;
-  speed: number;
-}
-
 const LINE_TOOLS: DrawingMenuItem[] = [
   { tool: 'trendline', label: 'Đường xu hướng' },
   { tool: 'ray', label: 'Tia' },
@@ -468,6 +454,7 @@ function saveUiPreferences(): void {
 let globalDrawingToolbar: HTMLDivElement | null = null;
 let drawingEscapeHintTimer = 0;
 let scheduleToolbarOverflow: () => void = () => undefined;
+let replaySession: SyncedReplaySession | null = null;
 
 function hideDrawingEscapeHint(): void {
   const hint = document.getElementById('drawing-escape-hint');
@@ -1175,7 +1162,7 @@ function syncWatchlistFeeds(seedSymbols: string[] = []): void {
       const state = watchlistSymbols.get(update.symbol.toUpperCase());
       if (!state) return;
       for (const symbol of state.symbols) {
-        marketHub.update(quoteFromDepth(symbol, update, provider.label, marketHub.get(symbol)));
+          marketHub.update(quoteFromDepth(symbol, update, provider.label, marketHub.get(symbol)));
       }
     });
     watchlistUnsubscribers.push(unsubscribe);
@@ -1183,6 +1170,7 @@ function syncWatchlistFeeds(seedSymbols: string[] = []): void {
 }
 
 function reloadAllTiles(): void {
+  replaySession?.stop(false);
   for (const tile of tiles) void tile.load();
 }
 
@@ -1366,7 +1354,7 @@ function attachSymbolAutocomplete(
   };
 }
 
-class Tile {
+class Tile implements ReplayParticipant {
   readonly el: HTMLDivElement;
   readonly chart: L2Chart;
   symbol: string;
@@ -1385,10 +1373,9 @@ class Tile {
   private historyPageLoading = false;
   private historyPageExhausted = false;
   private historyPageRetryAfter = 0;
-  /** Full history stays private while the chart only receives replayed candles. */
+  /** Lich su raw day du duoc giu rieng; replay chi dua phan da mo khoa len chart. */
   private history: Candle[] = [];
-  private replay: ReplayState | null = null;
-  private replaySelecting = false;
+  private replayActive = false;
   private historyRange: HistoryRange | null = null;
   private readonly headerEl: HTMLDivElement;
   private readonly chartShellEl: HTMLDivElement;
@@ -1528,8 +1515,8 @@ class Tile {
       }
     });
     this.chart.onBarClick((e) => {
-      if (!this.replaySelecting || e.index === null) return;
-      this.startReplay(e.index);
+      if (e.index === null) return;
+      replaySession?.selectStart(this, e.index);
     });
     this.chart.onDrawingsChange((drawings, selectedId) => {
       const selectedDrawing = selectedId === null ? null : drawings.find((drawing) => drawing.id === selectedId) ?? null;
@@ -1581,6 +1568,7 @@ class Tile {
     const s = activeProvider === 'dnse' ? normalizeDnseSymbol(raw) : raw.trim().toUpperCase();
     if (!s) return;
     if (s === this.symbol) return;
+    if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     const currentPreferences = this.currentPreferences();
     this.persistPreferences();
     this.symbol = s;
@@ -1598,6 +1586,7 @@ class Tile {
   setIntervalCode(iv: string, reload = true): boolean {
     if (!INTERVALS.includes(iv)) return false;
     if (iv === this.interval) return true;
+    if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     this.interval = iv;
     if (this.historyRange) this.historyRange = constrainHistoryRange(this.historyRange, iv);
     this.intervalValueEl.textContent = intervalLabel(iv);
@@ -1624,6 +1613,7 @@ class Tile {
   }
 
   applyTemplate(template: TileTemplate): void {
+    if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     if (template.symbol) this.setSymbol(template.symbol, false);
     this.interval = INTERVALS.includes(template.interval) ? template.interval : this.interval;
     this.intervalValueEl.textContent = intervalLabel(this.interval);
@@ -2215,32 +2205,36 @@ class Tile {
     this.loadStateEl.hidden = false;
   }
 
+  private applyLocalQuote(quote: MarketQuote): void {
+    this.latestQuote = quote;
+    this.chart.setMarketQuote({
+      bid: quote.hasBidAsk ? quote.bid : null,
+      ask: quote.hasBidAsk ? quote.ask : null,
+      last: quote.last,
+      time: quote.time,
+    });
+    this.renderMarketStatus();
+  }
+
+  private publishReplayCandle(candle: Candle): void {
+    const candles = this.chart.getCandles();
+    const reference = candles[candles.length - 2]?.close ?? candle.open;
+    // Replay khong giu bid/ask realtime cu de tranh nhin thay du lieu tuong lai.
+    this.applyLocalQuote(quoteFromCandle(this.symbol, candle, reference, 'Replay'));
+  }
+
   private publishCandle(candle: Candle, source: string): void {
     const candles = this.chart.getCandles();
     const reference = candles[candles.length - 2]?.close ?? candle.open;
     const quote = preserveDepth(quoteFromCandle(this.symbol, candle, reference, source), this.latestQuote);
-    this.latestQuote = quote;
-    this.chart.setMarketQuote({
-      bid: quote.hasBidAsk ? quote.bid : null,
-      ask: quote.hasBidAsk ? quote.ask : null,
-      last: quote.last,
-      time: quote.time,
-    });
+    this.applyLocalQuote(quote);
     marketHub.update(quote);
-    this.renderMarketStatus();
   }
 
   private publishDepth(update: QuoteUpdate, source: string): void {
     const quote = quoteFromDepth(this.symbol, update, source, this.latestQuote);
-    this.latestQuote = quote;
-    this.chart.setMarketQuote({
-      bid: quote.hasBidAsk ? quote.bid : null,
-      ask: quote.hasBidAsk ? quote.ask : null,
-      last: quote.last,
-      time: quote.time,
-    });
+    this.applyLocalQuote(quote);
     marketHub.update(quote);
-    this.renderMarketStatus();
   }
 
   private renderMarketStatus(): void {
@@ -2263,14 +2257,17 @@ class Tile {
     this.chart?.setPricePrecision(this.pricePrecision);
   }
 
-  getReplayInfo(): ReplayInfo {
-    if (this.replaySelecting) return { phase: 'selecting', cursor: 0, total: this.history.length, speed: 1 };
-    if (!this.replay) return { phase: 'idle', cursor: 0, total: this.history.length, speed: 1 };
-    return {
-      phase: this.replay.playing ? 'playing' : 'paused',
-      cursor: this.replay.cursor,
-      total: this.replay.candles.length,
-      speed: this.replay.speed,
+  /** Giu contract assistant cu; state replay van do session dung chung quan ly. */
+  getReplayInfo(): ReplaySessionSnapshot {
+    return replaySession?.snapshot() ?? {
+      phase: 'idle',
+      cursor: -1,
+      total: 0,
+      speed: 1,
+      currentTime: null,
+      baseInterval: null,
+      symbol: null,
+      error: null,
     };
   }
 
@@ -2287,10 +2284,19 @@ class Tile {
     };
   }
 
+  getReplayHistorySummary(): { from: number; to: number; count: number } | null {
+    return this.getHistorySummary();
+  }
+
+  getReplayHistoryCandles(): readonly Candle[] {
+    return this.history.map((candle) => ({ ...candle }));
+  }
+
   setHistoryRange(range: HistoryRange, interval?: string): HistoryRange | null {
     const from = Math.floor(range.from);
     const to = Math.floor(range.to);
     if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return null;
+    if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     if (interval) this.setIntervalCode(interval, false);
     this.historyRange = constrainHistoryRange({ from, to }, this.interval);
     void this.load();
@@ -2303,123 +2309,66 @@ class Tile {
 
   clearHistoryRange(): void {
     if (!this.historyRange) return;
+    if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     this.historyRange = null;
     void this.load();
   }
 
-  toggleReplay(): void {
-    if (this.replay || this.replaySelecting) {
-      this.stopReplay();
-      return;
-    }
-    this.startReplaySelection();
+  getReplaySelectionTime(index: number, utcOffsetMinutes: number): number | null {
+    const candle = this.history[index];
+    return candle ? nextIntervalStart(candle.time, this.interval, utcOffsetMinutes) : null;
   }
 
-  toggleReplayPlayback(): void {
-    const replay = this.replay;
-    if (!replay) return;
-    if (replay.playing) {
-      this.pauseReplay();
-    } else {
-      this.playReplay();
-    }
-  }
-
-  stepReplay(): void {
-    const replay = this.replay;
-    if (!replay || replay.cursor >= replay.candles.length - 1) {
-      this.pauseReplay();
-      this.updateReplayStatus();
-      return;
-    }
-    replay.cursor += 1;
-    const candle = { ...replay.candles[replay.cursor] };
-    this.chart.updateCandle(candle);
-    this.publishCandle(candle, 'Replay');
-    if (replay.cursor >= replay.candles.length - 1) this.pauseReplay();
-    this.updateReplayStatus();
-  }
-
-  cycleReplaySpeed(): void {
-    const replay = this.replay;
-    if (!replay) return;
-    const speeds = [1, 2, 5, 10];
-    replay.speed = speeds[(speeds.indexOf(replay.speed) + 1) % speeds.length];
-    if (replay.playing) {
-      this.pauseReplay();
-      this.playReplay();
-    }
-    refreshReplayUi();
-  }
-
-  stopReplay(): void {
-    const hadReplay = this.replay !== null || this.replaySelecting;
-    this.clearReplayState();
-    refreshReplayUi();
-    if (hadReplay) void this.load();
-  }
-
-  private startReplaySelection(): void {
-    if (this.history.length < 2) return;
-    this.replaySelecting = true;
+  setReplaySelecting(selecting: boolean): void {
     this.selectDrawingTool('cursor');
-    this.chart.setReplaySelectionMode(true);
-    this.setFeedStatus('replay', 'chọn nến bắt đầu');
-    refreshReplayUi();
+    this.chart.setReplaySelectionMode(selecting);
+    if (selecting) this.setFeedStatus('replay', 'chọn nến bắt đầu');
   }
 
-  private startReplay(index: number): void {
-    if (this.history.length < 2) return;
-    const cursor = Math.min(Math.max(0, index), this.history.length - 2);
-    this.replaySelecting = false;
-    this.chart.setReplaySelectionMode(false);
+  enterReplay(): void {
+    this.loadToken += 1;
+    this.loading = false;
+    this.replayActive = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.quoteUnsubscribe?.();
     this.quoteUnsubscribe = null;
-    this.replay = {
-      candles: this.history.map((candle) => ({ ...candle })),
-      cursor,
-      speed: 1,
-      playing: false,
-      timer: null,
-    };
-    this.chart.setData(this.replay.candles.slice(0, cursor + 1).map((candle) => ({ ...candle })));
+    this.realtimeConnectionUnsubscribe?.();
+    this.realtimeConnectionUnsubscribe = null;
+    this.latestQuote = null;
+    this.chart.setMarketQuote(null);
+  }
+
+  setReplayData(candles: readonly Candle[]): void {
+    const data = candles.map((candle) => ({ ...candle }));
+    this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
+    this.chart.setData(data);
     this.chart.fitContent();
-    this.publishCandle(this.replay.candles[cursor], 'Replay');
-    this.updateReplayStatus();
+    const latest = data[data.length - 1];
+    if (latest) this.publishReplayCandle(latest);
   }
 
-  private playReplay(): void {
-    const replay = this.replay;
-    if (!replay || replay.cursor >= replay.candles.length - 1) return;
-    replay.playing = true;
-    replay.timer = window.setInterval(() => this.stepReplay(), Math.max(100, 1000 / replay.speed));
-    this.updateReplayStatus();
+  updateReplayCandle(candle: Candle): void {
+    this.chart.updateCandle({ ...candle });
+    this.publishReplayCandle(candle);
   }
 
-  private pauseReplay(): void {
-    const replay = this.replay;
-    if (!replay) return;
-    if (replay.timer !== null) window.clearInterval(replay.timer);
-    replay.timer = null;
-    replay.playing = false;
+  setReplayStatus(label: string): void {
+    this.setFeedStatus('replay', label);
   }
 
-  private clearReplayState(): void {
-    this.pauseReplay();
-    this.replay = null;
-    this.replaySelecting = false;
+  leaveReplay(reload: boolean): void {
+    const wasReplay = this.replayActive;
+    this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
-    refreshReplayUi();
-  }
-
-  private updateReplayStatus(): void {
-    const replay = this.replay;
-    if (!replay) return;
-    const suffix = replay.cursor >= replay.candles.length - 1 ? 'kết thúc' : `${replay.cursor + 1}/${replay.candles.length}`;
-    this.setFeedStatus('replay', `replay · ${suffix}`);
-    refreshReplayUi();
+    if (!wasReplay) return;
+    if (reload) {
+      void this.load();
+      return;
+    }
+    this.chart.setData(this.history.map((candle) => ({ ...candle })));
+    this.latestQuote = null;
+    this.chart.setMarketQuote(null);
   }
 
   private updateHistory(candle: Candle): Candle | null {
@@ -2438,7 +2387,7 @@ class Tile {
   }
 
   async recoverRealtimeGap(): Promise<void> {
-    if (this.realtimeGapLoading || this.historyRange || this.replay || this.history.length === 0) return;
+    if (this.realtimeGapLoading || this.historyRange || this.replayActive || this.history.length === 0) return;
 
     const providerId = activeProvider;
     const provider = currentFeed();
@@ -2463,7 +2412,7 @@ class Tile {
         || symbol !== this.symbol
         || interval !== this.interval
         || this.historyRange
-        || this.replay
+        || this.replayActive
       ) return;
 
       const byTime = new Map<number, Candle>();
@@ -2500,12 +2449,12 @@ class Tile {
   }
 
   async load(): Promise<void> {
+    if (this.replayActive) return;
     const token = ++this.loadToken;
     this.loading = true;
     this.historyPageLoading = false;
     this.historyPageExhausted = false;
     this.historyPageRetryAfter = 0;
-    this.clearReplayState();
     const hadRenderableData = this.history.length > 0;
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
@@ -2568,7 +2517,7 @@ class Tile {
         if (token === this.loadToken) void this.recoverRealtimeGap();
       }) ?? null;
       this.unsubscribe = provider.feed.subscribe(this.symbol, this.interval, (c) => {
-        if (token !== this.loadToken || this.replay) return;
+        if (token !== this.loadToken || this.replayActive) return;
         const last = this.history[this.history.length - 1];
         const offset = providerCalendarOffsetMinutes(activeProvider);
         if (last && c.time > nextIntervalStart(last.time, this.interval, offset)) void this.recoverRealtimeGap();
@@ -2579,7 +2528,7 @@ class Tile {
         this.setFeedStatus('live', `${provider.label} · ${new Date(candle.time * 1000).toLocaleTimeString()}`);
       });
       this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([this.symbol], (quote) => {
-        if (token !== this.loadToken || this.replay) return;
+        if (token !== this.loadToken || this.replayActive) return;
         this.publishDepth(quote, provider.label);
       }) ?? null;
       void this.recoverRealtimeGap();
@@ -2609,7 +2558,7 @@ class Tile {
       || this.historyPageLoading
       || this.historyPageExhausted
       || this.historyRange
-      || this.replay
+      || this.replayActive
       || this.history.length === 0
       || Date.now() < this.historyPageRetryAfter
     ) return;
@@ -2708,7 +2657,8 @@ class Tile {
   }
 
   destroy(): void {
-    this.clearReplayState();
+    this.replayActive = false;
+    this.chart.setReplaySelectionMode(false);
     if (this.countdownTimer !== null) window.clearInterval(this.countdownTimer);
     this.unsubscribe?.();
     this.quoteUnsubscribe?.();
@@ -2810,6 +2760,7 @@ function refreshLayoutVisibility(): void {
 }
 
 function setLayout(layout: LayoutId, templateSnapshots: TileTemplate[] = []): void {
+  if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
   activeLayout = layout;
   const count = LAYOUT_COUNTS[layout];
   chartsEl.className = `layout-${layout}`;
@@ -3120,38 +3071,76 @@ const REPLAY_PAUSE_ICON = lucideIcon(Pause);
 document.getElementById('replay-icon')!.innerHTML = lucideIcon(CirclePlay);
 
 function refreshReplayUi(): void {
-  const replay = activeTile?.getReplayInfo();
-  const active = replay && replay.phase !== 'idle';
-  const selecting = replay?.phase === 'selecting';
-  const playing = replay?.phase === 'playing';
+  const replay = replaySession?.snapshot() ?? {
+    phase: 'idle' as const,
+    cursor: -1,
+    total: 0,
+    speed: 1,
+    currentTime: null,
+    baseInterval: null,
+    symbol: null,
+    error: null,
+  };
+  const active = replay.phase !== 'idle';
+  const selecting = replay.phase === 'selecting';
+  const loading = replay.phase === 'loading';
+  const playing = replay.phase === 'playing';
+  const finished = replay.total > 0 && replay.cursor >= replay.total - 1;
 
   replayBtn.disabled = !activeTile;
-  replayBtn.classList.toggle('active', !!active);
-  replayLabel.textContent = selecting ? 'Chọn nến' : active ? 'Trực tiếp' : 'Replay';
-  replayBtn.title = active ? 'Dừng replay và quay lại dữ liệu thời gian thực' : 'Mở Bar Replay cho chart đang chọn';
+  replayBtn.classList.toggle('active', active);
+  replayLabel.textContent = selecting ? 'Chọn nến' : loading ? 'Đang tải' : active ? 'Trực tiếp' : 'Replay';
+  replayBtn.title = replay.error
+    ?? (active ? 'Dừng replay đồng bộ và quay lại dữ liệu thời gian thực' : 'Replay đồng bộ các chart đang hiển thị');
 
   replayControls.hidden = !active;
-  if (!active || !replay) {
+  if (!active) {
     scheduleToolbarOverflow();
     return;
   }
+
+  const timeLabel = replay.currentTime === null
+    ? ''
+    : new Date(replay.currentTime * 1000).toLocaleString(getLocale() === 'vi' ? 'vi-VN' : 'en-US');
   replayStatus.textContent = selecting
-    ? 'Chọn nến'
-    : `${replay.cursor + 1}/${replay.total}`;
+    ? 'Chọn nến trên một chart'
+    : loading
+      ? 'Đang tải raw candles...'
+      : `${replay.cursor + 1}/${replay.total}${timeLabel ? ` · ${timeLabel}` : ''}`;
   replayPlay.innerHTML = `<span class="replay-play-icon ${playing ? 'pause' : 'play'}">${playing ? REPLAY_PAUSE_ICON : REPLAY_PLAY_ICON}</span>`;
   replayPlay.title = playing ? 'Dừng replay' : 'Phát replay';
-  replayPlay.disabled = selecting || replay.cursor >= replay.total - 1;
-  replayStep.disabled = selecting || replay.cursor >= replay.total - 1;
-  replaySpeed.disabled = selecting;
+  replayPlay.disabled = selecting || loading || finished;
+  replayStep.disabled = selecting || loading || finished;
+  replaySpeed.disabled = selecting || loading;
   replaySpeed.textContent = `${replay.speed}×`;
   scheduleToolbarOverflow();
 }
 
-replayBtn.addEventListener('click', () => activeTile?.toggleReplay());
-replayPlay.addEventListener('click', () => activeTile?.toggleReplayPlayback());
-replayStep.addEventListener('click', () => activeTile?.stepReplay());
-replaySpeed.addEventListener('click', () => activeTile?.cycleReplaySpeed());
-replayStop.addEventListener('click', () => activeTile?.stopReplay());
+replaySession = new SyncedReplaySession({
+  getParticipants: () => visibleTilesForLayout(activeLayout),
+  getFeed: () => {
+    const provider = currentFeed();
+    return {
+      feed: provider.feed,
+      label: provider.label,
+      utcOffsetMinutes: providerCalendarOffsetMinutes(activeProvider),
+    };
+  },
+  claimMarketSource: (symbol, source) => marketHub.lockSource(symbol, source),
+  releaseMarketSource: (symbol, source) => marketHub.unlockSource(symbol, source),
+  publishRawCandle: (symbol, candle, currentTime, source) => {
+    // MarketHub chi nhan raw replay price mot lan cho moi tick cua clock chung.
+    const quote = quoteFromCandle(symbol, candle, candle.open, source);
+    marketHub.update({ ...quote, time: currentTime });
+  },
+  onStateChange: () => refreshReplayUi(),
+});
+
+replayBtn.addEventListener('click', () => replaySession?.toggle());
+replayPlay.addEventListener('click', () => replaySession?.togglePlayback());
+replayStep.addEventListener('click', () => replaySession?.step());
+replaySpeed.addEventListener('click', () => replaySession?.cycleSpeed());
+replayStop.addEventListener('click', () => replaySession?.stop(true));
 
 const templateButton = document.getElementById('template-btn') as HTMLButtonElement;
 const templateMenu = document.getElementById('template-menu')!;
@@ -4906,12 +4895,12 @@ window.addEventListener('keydown', (e) => {
   if (e.shiftKey && activeTile) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      activeTile.toggleReplayPlayback();
+      replaySession?.togglePlayback();
       return;
     }
     if (e.key === 'ArrowRight') {
       e.preventDefault();
-      activeTile.stepReplay();
+      replaySession?.step();
       return;
     }
   }

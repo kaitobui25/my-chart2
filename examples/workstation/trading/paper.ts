@@ -100,9 +100,23 @@ function finitePositive(value: number | undefined): number | undefined {
 export class MarketHub {
   private readonly quotes = new Map<string, MarketQuote>();
   private readonly listeners = new Set<(quote: MarketQuote) => void>();
+  private readonly exclusiveSources = new Map<string, string>();
+
+  /** Khoa mot symbol vao mot nguon gia, de replay khong bi live feed chen vao. */
+  lockSource(symbol: string, source: string): void {
+    this.exclusiveSources.set(symbol.trim().toUpperCase(), source);
+  }
+
+  /** Chi nguon dang giu lock moi duoc mo lock cua symbol. */
+  unlockSource(symbol: string, source: string): void {
+    const key = symbol.trim().toUpperCase();
+    if (this.exclusiveSources.get(key) === source) this.exclusiveSources.delete(key);
+  }
 
   update(quote: MarketQuote): void {
     const normalized = { ...quote, symbol: quote.symbol.trim().toUpperCase() };
+    const exclusiveSource = this.exclusiveSources.get(normalized.symbol);
+    if (exclusiveSource && normalized.source !== exclusiveSource) return;
     this.quotes.set(normalized.symbol, normalized);
     for (const listener of this.listeners) listener(normalized);
   }
