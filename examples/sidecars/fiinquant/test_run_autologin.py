@@ -25,7 +25,7 @@ class RunAutologinTests(unittest.TestCase):
             os.environ,
             {
                 "FIINQUANT_USERNAME": "user",
-                "FIINQUANT_PASSWORD": "password",
+                "FIINQUANT_PASSWORD": "test-value",  # pragma: allowlist secret
                 "HOST": "127.0.0.1",
                 "PORT": "9876",
             },
@@ -34,7 +34,7 @@ class RunAutologinTests(unittest.TestCase):
             run_autologin.main()
 
         load_env.assert_called_once_with()
-        gateway_type.assert_called_once_with("user", "password")
+        gateway_type.assert_called_once_with("user", "test-value")
         gateway._ensure_client.assert_called_once_with()
         build_app.assert_called_once_with(gateway)
         run_app.assert_called_once_with(app, host="127.0.0.1", port=9876, print=None)
@@ -56,7 +56,7 @@ class RunAutologinTests(unittest.TestCase):
             os.environ,
             {
                 "FIINQUANT_USERNAME": "",
-                "FIINQUANT_PASSWORD": "",
+                "FIINQUANT_PASSWORD": "",  # pragma: allowlist secret
                 "HOST": "127.0.0.1",
                 "PORT": "8720",
             },
