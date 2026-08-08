@@ -36,9 +36,12 @@ class ScannerDB:
         if current > SCHEMA_VERSION:
             raise RuntimeError(f'scanner DB schema {current} is newer than supported {SCHEMA_VERSION}')
         for version in range(current + 1, SCHEMA_VERSION + 1):
-            migration = self.migrations_dir / f'{version:03d}_initial.sql'
-            if not migration.exists():
-                raise RuntimeError(f'missing scanner migration: {migration.name}')
+            matches = sorted(self.migrations_dir.glob(f'{version:03d}_*.sql'))
+            if len(matches) != 1:
+                raise RuntimeError(
+                    f'expected exactly one scanner migration for version {version:03d}, found {len(matches)}'
+                )
+            migration = matches[0]
             self._conn.executescript(migration.read_text(encoding='utf-8'))
             self._conn.execute(f'PRAGMA user_version={version}')
             self._conn.commit()
@@ -80,12 +83,18 @@ class ScannerDB:
             return {}
         placeholders = ','.join('?' for _ in values)
         with self._lock:
-            rows = self._conn.execute(f'SELECT id,symbol FROM instruments WHERE provider=? AND symbol IN ({placeholders})', [provider, *values]).fetchall()
+            rows = self._conn.execute(
+                f'SELECT id,symbol FROM instruments WHERE provider=? AND symbol IN ({placeholders})',
+                [provider, *values],
+            ).fetchall()
         return {str(row['symbol']): int(row['id']) for row in rows}
 
     def instrument_age(self, provider: str) -> int | None:
         with self._lock:
-            row = self._conn.execute('SELECT MAX(last_seen_at) AS refreshed_at FROM instruments WHERE provider=?', (provider,)).fetchone()
+            row = self._conn.execute(
+                'SELECT MAX(last_seen_at) AS refreshed_at FROM instruments WHERE provider=?',
+                (provider,),
+            ).fetchone()
         if row is None or row['refreshed_at'] is None:
             return None
         return max(0, int(time.time()) - int(row['refreshed_at']))
@@ -110,7 +119,10 @@ class ScannerDB:
 
     def list_active_symbols(self, provider: str) -> list[str]:
         with self._lock:
-            rows = self._conn.execute('SELECT symbol FROM instruments WHERE provider=? AND active=1 ORDER BY symbol', (provider,)).fetchall()
+            rows = self._conn.execute(
+                'SELECT symbol FROM instruments WHERE provider=? AND active=1 ORDER BY symbol',
+                (provider,),
+            ).fetchall()
         return [str(row['symbol']) for row in rows]
 
     def upsert_snapshots(self, provider: str, snapshots: Iterable[MarketSnapshot], fetched_at: int | None = None) -> None:
@@ -128,7 +140,7 @@ class ScannerDB:
                 ON CONFLICT(instrument_id) DO UPDATE SET
                   price=COALESCE(excluded.price,market_snapshot.price),
                   volume=COALESCE(excluded.volume,market_snapshot.volume),
-                  market_cap=COALESCE(excluded.market_cap,market_snapshot.market_cap),
+                  market_cap=excluded.market_cap,
                   data_time=COALESCE(excluded.data_time,market_snapshot.data_time),
                   fetched_at=excluded.fetched_at
                 ''', rows,
@@ -191,7 +203,15 @@ class ScannerDB:
                    WHERE instrument_id=? AND interval=? ORDER BY time DESC LIMIT ?''',
                 (instrument_id, interval, limit),
             ).fetchall()
-        return [Candle(time=int(row['time']), open=float(row['open']), high=float(row['high']), low=float(row['low']), close=float(row['close']), volume=None if row['volume'] is None else float(row['volume']), is_closed=bool(row['is_closed'])) for row in reversed(rows)]
+        return [
+            Candle(
+                time=int(row['time']), open=float(row['open']), high=float(row['high']),
+                low=float(row['low']), close=float(row['close']),
+                volume=None if row['volume'] is None else float(row['volume']),
+                is_closed=bool(row['is_closed']),
+            )
+            for row in reversed(rows)
+        ]
 
     def candle_state(self, instrument_id: int, interval: str = '1d') -> dict | None:
         with self._lock:
@@ -255,7 +275,10 @@ class ScannerDB:
 
     def begin_scan(self, provider: str, filters_json: dict) -> int:
         with self._lock, self._conn:
-            cursor = self._conn.execute('INSERT INTO scan_runs(provider,started_at,filters_json,status) VALUES(?,?,?,?)', (provider, int(time.time()), json.dumps(filters_json, separators=(',', ':')), 'running'))
+            cursor = self._conn.execute(
+                'INSERT INTO scan_runs(provider,started_at,filters_json,status) VALUES(?,?,?,?)',
+                (provider, int(time.time()), json.dumps(filters_json, separators=(',', ':')), 'running'),
+            )
             return int(cursor.lastrowid)
 
     def update_scan(self, run_id: int, **fields: object) -> None:
