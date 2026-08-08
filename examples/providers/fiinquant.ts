@@ -330,8 +330,8 @@ export class FiinQuantDatafeed implements Datafeed {
     const first = Math.min(...candles.map((candle) => candle.time));
     const last = Math.max(...candles.map((candle) => candle.time));
     const to = isCalendarInterval(interval)
-      ? nextIntervalStart(last, interval, FIINQUANT_UTC_OFFSET_MINUTES) - 1
-      : last + Math.max(1, intervalApproxSeconds(interval)) - 1;
+      ? nextIntervalStart(last, interval, FIINQUANT_UTC_OFFSET_MINUTES)
+      : last + Math.max(1, intervalApproxSeconds(interval));
     return { from: first, to };
   }
 
