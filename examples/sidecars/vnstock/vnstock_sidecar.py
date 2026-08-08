@@ -45,7 +45,7 @@ def _read_simple_env(path: Path) -> None:
 
 _read_simple_env(Path(__file__).with_name('.env'))
 HOST = os.getenv('HOST', '127.0.0.1').strip() or '127.0.0.1'
-PORT = int(os.getenv('PORT', '8730'))
+PORT = int(os.getenv('PORT', '8740'))
 POLL_INTERVAL_SECONDS = max(2.0, float(os.getenv('POLL_INTERVAL_SECONDS', '5')))
 SYMBOL_CACHE_SECONDS = max(60, int(os.getenv('SYMBOL_CACHE_SECONDS', '3600')))
 
@@ -241,26 +241,24 @@ class VnstockGateway:
             return self._market, self._reference
 
     def health(self) -> dict[str, Any]:
+        # Health checks must never consume upstream Vnstock/API quota. The
+        # launcher polls this endpoint while waiting for the local sidecar, so
+        # constructing Market/Reference here can create a retry storm when the
+        # guest rate limit is already exhausted. Data clients stay fully lazy.
         try:
-            self._ensure_clients()
-            return {
-                'ok': True,
-                'configured': True,
-                'provider': 'Vnstock',
-                'routing': 'Unified UI (KBS/VCI auto)',
-                'timezone': 'Asia/Ho_Chi_Minh',
-                'pollIntervalSeconds': POLL_INTERVAL_SECONDS,
-            }
-        except Exception as exc:
-            return {
-                'ok': False,
-                'configured': False,
-                'provider': 'Vnstock',
-                'routing': 'Unified UI (KBS/VCI auto)',
-                'timezone': 'Asia/Ho_Chi_Minh',
-                'pollIntervalSeconds': POLL_INTERVAL_SECONDS,
-                'error': str(exc),
-            }
+            from importlib.util import find_spec
+            configured = find_spec('vnstock') is not None
+        except Exception:
+            configured = False
+        return {
+            'ok': True,
+            'configured': configured,
+            'provider': 'Vnstock',
+            'routing': 'Unified UI (KBS/VCI auto)',
+            'timezone': 'Asia/Ho_Chi_Minh',
+            'pollIntervalSeconds': POLL_INTERVAL_SECONDS,
+            **({} if configured else {'warning': 'vnstock package is not installed'}),
+        }
 
     def symbols(self, query: str, limit: int) -> list[SymbolItem]:
         now = time.time()

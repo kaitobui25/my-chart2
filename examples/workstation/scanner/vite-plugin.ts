@@ -29,6 +29,8 @@ const SCANNER_DIR = path.join(SIDECARS_DIR, 'scanner');
 const SCANNER_SCRIPT = path.join(SCANNER_DIR, 'scanner_sidecar.py');
 const VNSTOCK_DIR = path.join(SIDECARS_DIR, 'vnstock');
 const VNSTOCK_SCRIPT = path.join(VNSTOCK_DIR, 'vnstock_sidecar.py');
+const VNSTOCK_VENV = path.join(VNSTOCK_DIR, '.venv');
+const ROOT_VENV = path.join(REPO_ROOT, '.venv');
 const FIINQUANT_VENV = path.join(SIDECARS_DIR, 'fiinquant', '.venv');
 let scannerChild: ChildProcess | null = null;
 let scannerStarting: Promise<boolean> | null = null;
@@ -98,7 +100,16 @@ function scannerPython(): string {
 }
 
 function vnstockPython(): string {
-  return process.env.VNSTOCK_PYTHON || scannerPython();
+  if (process.env.VNSTOCK_PYTHON) return process.env.VNSTOCK_PYTHON;
+  const candidates = [VNSTOCK_VENV, ROOT_VENV];
+  if (process.env.VIRTUAL_ENV) candidates.push(process.env.VIRTUAL_ENV);
+  for (const candidate of candidates) {
+    const python = process.platform === 'win32'
+      ? path.join(candidate, 'Scripts', 'python.exe')
+      : path.join(candidate, 'bin', 'python');
+    if (existsSync(python)) return python;
+  }
+  return process.platform === 'win32' ? 'python' : 'python3';
 }
 
 async function startScannerSidecar(server?: ViteDevServer): Promise<boolean> {
