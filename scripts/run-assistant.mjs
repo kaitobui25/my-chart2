@@ -66,7 +66,7 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
-function spawnManaged(command, args, options = {}) {
+function spawnManaged(command, args, options = {}, fatal = true) {
   const child = spawn(command, args, {
     cwd: ROOT,
     stdio: 'inherit',
@@ -75,11 +75,18 @@ function spawnManaged(command, args, options = {}) {
   })
   children.push(child)
   child.on('exit', code => {
-    if (!closing && code !== 0) shutdown(code ?? 1)
+    if (!closing && code !== 0) {
+      if (fatal) shutdown(code ?? 1)
+      else console.warn(`[optional] child process exited with code ${code ?? 'unknown'}`)
+    }
   })
   child.on('error', error => {
-    console.error(error.message)
-    shutdown(1)
+    if (fatal) {
+      console.error(error.message)
+      shutdown(1)
+    } else {
+      console.warn(`[optional] ${error.message}`)
+    }
   })
   return child
 }
@@ -252,7 +259,7 @@ async function ensureFiinQuantSidecar() {
     }
     const python = resolveFiinQuantPython()
     console.log('[fiinquant] Starting sidecar...')
-    spawnManaged(python.command, [...python.prefixArgs, fiinQuantSidecarPath], { cwd: fiinQuantDir })
+    spawnManaged(python.command, [...python.prefixArgs, fiinQuantSidecarPath], { cwd: fiinQuantDir }, false)
     health = await waitForJsonHealth(fiinQuantHealthUrl, fiinQuantAuthHeaders())
   }
 
@@ -374,11 +381,15 @@ async function startOrReuseWorkstation() {
 
 try {
   await ensureAssistantSidecar()
-  let fiinQuantHealth = await ensureFiinQuantSidecar()
-  fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
 
-  if (!fiinQuantEnv.SIDECAR_TOKEN) {
-    console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+  try {
+    let fiinQuantHealth = await ensureFiinQuantSidecar()
+    fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
+    if (!fiinQuantEnv.SIDECAR_TOKEN) {
+      console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+    }
+  } catch (error) {
+    console.warn(`[fiinquant] Optional provider unavailable: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   await startOrReuseWorkstation()
