@@ -80,18 +80,23 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            examples/sidecars/fiinquant/requirements.txt
+            examples/sidecars/fiinquant/requirements-provider.txt
 
       - name: Install sidecar test dependency
         run: python -m pip install aiohttp
 
       - name: Test sidecar
-        run: npm run test:sidecar
+        run: python -m unittest discover -s examples/sidecars/fiinquant
 
       - name: Audit runtime and provider dependencies
-        run: python3.11 scripts/audit-provider.py
+        run: python scripts/audit-provider.py
 
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
