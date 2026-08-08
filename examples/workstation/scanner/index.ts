@@ -165,7 +165,6 @@ class ScannerPanel {
   }
 
   show(): void {
-    this.syncSourceToChart();
     this.overlay.hidden = false;
   }
 
@@ -210,14 +209,6 @@ class ScannerPanel {
     if (value === 'binance-spot') return 'binance_spot';
     if (value === 'binance-usdm') return 'binance_usdm';
     return undefined;
-  }
-
-  private syncSourceToChart(): void {
-    const provider = this.bridgeProvider();
-    if (provider && this.sources.some((item) => item.id === provider && item.available)) {
-      this.source.value = provider;
-      this.renderUniverse();
-    }
   }
 
   private currentSource(): ScannerSource | undefined {
