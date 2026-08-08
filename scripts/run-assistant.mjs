@@ -16,6 +16,8 @@ const fiinQuantProviderRequirementsPath = path.join(fiinQuantDir, 'requirements-
 const fiinQuantVenvDir = path.join(fiinQuantDir, '.venv')
 const ASSISTANT_HEALTH_URL = 'http://127.0.0.1:8788/health'
 const DEFAULT_WORKSTATION_PORT = 53173
+const fiinQuantAutostart = process.argv.includes('--fiinquant')
+  || /^(1|true|yes)$/i.test(process.env.FIINQUANT_AUTOSTART ?? '')
 
 if (!existsSync(viteBin)) {
   console.error('Missing node_modules. Run "npm install" once, then start this launcher again.')
@@ -382,14 +384,18 @@ async function startOrReuseWorkstation() {
 try {
   await ensureAssistantSidecar()
 
-  try {
-    let fiinQuantHealth = await ensureFiinQuantSidecar()
-    fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
-    if (!fiinQuantEnv.SIDECAR_TOKEN) {
-      console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+  if (fiinQuantAutostart) {
+    try {
+      let fiinQuantHealth = await ensureFiinQuantSidecar()
+      fiinQuantHealth = await autoLoginFiinQuant(fiinQuantHealth)
+      if (!fiinQuantEnv.SIDECAR_TOKEN) {
+        console.warn('[fiinquant] SIDECAR_TOKEN is missing from examples/sidecars/fiinquant/.env.')
+      }
+    } catch (error) {
+      console.warn(`[fiinquant] Optional provider unavailable: ${error instanceof Error ? error.message : String(error)}`)
     }
-  } catch (error) {
-    console.warn(`[fiinquant] Optional provider unavailable: ${error instanceof Error ? error.message : String(error)}`)
+  } else {
+    console.log('[fiinquant] Autostart disabled. Use "npm run dev:fiinquant" when FiinQuant is needed.')
   }
 
   await startOrReuseWorkstation()
