@@ -21,3 +21,6 @@ src/indicators/custom/*
 # Credentials for the optional reference sidecar
 examples/sidecars/fiinquant/.env
 examples/sidecars/fiinquant/.venv/
+
+# Scanner cache is local and rebuildable.
+examples/sidecars/scanner/data/
