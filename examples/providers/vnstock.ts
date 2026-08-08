@@ -269,7 +269,8 @@ export class VnstockDatafeed implements Datafeed {
             };
             if (!response.ok) continue;
             for (const subscription of batch) {
-              const candle = this.validCandle(payload.candles?.[subscription.symbol]);
+              const rawCandle = this.validCandle(payload.candles?.[subscription.symbol]);
+              const candle = rawCandle ? this.normalizePolledCandle(rawCandle, interval) : null;
               if (!candle) continue;
               await this.persistHistory(subscription.symbol, interval, [candle], this.returnedCoverage([candle], interval));
               const current = this.subscriptions.get(`${subscription.symbol}\u0000${interval}`);
@@ -284,6 +285,21 @@ export class VnstockDatafeed implements Datafeed {
     } finally {
       this.pollInFlight = false;
     }
+  }
+
+  private normalizePolledCandle(candle: Candle, interval: string): Candle {
+    if (interval !== '1d') return candle;
+    // Vnstock daily OHLCV bars are stamped 07:00 Asia/Ho_Chi_Minh (00:00 UTC).
+    // A realtime quote may carry the current clock time, so pin it to the same
+    // trading-day key before merging it with cached/history candles.
+    const shifted = new Date((candle.time + VNSTOCK_UTC_OFFSET_MINUTES * 60) * 1000);
+    const time = Math.floor(Date.UTC(
+      shifted.getUTCFullYear(),
+      shifted.getUTCMonth(),
+      shifted.getUTCDate(),
+      0, 0, 0, 0,
+    ) / 1000);
+    return { ...candle, time };
   }
 
   private async fetchHistory(
