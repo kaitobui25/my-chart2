@@ -13,6 +13,9 @@ import aiohttp
 
 from models import Candle, Instrument, MarketSnapshot, ProviderCapabilities, ProviderId
 
+FIINQUANT_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
+FIINQUANT_RECENT_DAYS = 10
+
 
 def _finite(value: Any) -> float | None:
     try:
@@ -37,7 +40,12 @@ class ScannerProvider(ABC):
     async def snapshots(self, symbols: list[str]) -> list[MarketSnapshot]: ...
 
     @abstractmethod
-    async def daily_history(self, symbols: list[str], limit: int, since_time: int | None = None) -> dict[str, list[Candle]]: ...
+    async def daily_history(
+        self,
+        symbols: list[str],
+        limit: int,
+        since_time: int | None = None,
+    ) -> dict[str, list[Candle]]: ...
 
     async def close(self) -> None:
         return None
@@ -52,10 +60,18 @@ class FiinQuantProvider(ScannerProvider):
         self._client_lock = asyncio.Lock()
         self._request_lock = asyncio.Lock()
         self.capabilities = ProviderCapabilities(
-            id='fiinquant', label='FiinQuant', market_cap=False, bulk_snapshot=True, bulk_history=True,
-            universes=('HOSE', 'HNX', 'UPCOM'), default_universes=('HOSE', 'HNX', 'UPCOM'),
-            timezone='Asia/Ho_Chi_Minh', max_history_concurrency=1, continuous_market=False,
-            snapshot_ttl_seconds=60, history_ttl_seconds=120,
+            id='fiinquant',
+            label='FiinQuant',
+            market_cap=False,
+            bulk_snapshot=True,
+            bulk_history=True,
+            universes=('HOSE', 'HNX', 'UPCOM'),
+            default_universes=('HOSE', 'HNX', 'UPCOM'),
+            timezone='Asia/Ho_Chi_Minh',
+            max_history_concurrency=1,
+            continuous_market=False,
+            snapshot_ttl_seconds=60,
+            history_ttl_seconds=120,
             available=bool(self.username and self.password),
             detail=None if self.username and self.password else 'FIINQUANT_USERNAME/PASSWORD are not configured',
         )
@@ -74,27 +90,49 @@ class FiinQuantProvider(ScannerProvider):
         from FiinQuantX import FiinSession
         return FiinSession(username=self.username, password=self.password).login()
 
-    @staticmethod
-    def _raw_records(raw: Any) -> list[dict[str, Any]]:
+    @classmethod
+    def _raw_records(cls, raw: Any) -> list[dict[str, Any]]:
+        if raw is None:
+            return []
         if hasattr(raw, 'to_dict'):
             try:
                 value = raw.to_dict('records')
                 if isinstance(value, list):
                     return [item for item in value if isinstance(item, dict)]
-            except TypeError:
-                pass
-        if hasattr(raw, 'to_dataFrame'):
-            try:
-                return FiinQuantProvider._raw_records(raw.to_dataFrame())
-            except Exception:
-                return []
+            except (TypeError, ValueError):
+                try:
+                    value = raw.to_dict()
+                    if isinstance(value, dict):
+                        return cls._raw_records(value)
+                except Exception:
+                    pass
+        for method_name in ('get_data', 'to_dataFrame'):
+            method = getattr(raw, method_name, None)
+            if callable(method):
+                try:
+                    value = method()
+                except Exception:
+                    continue
+                if value is not raw:
+                    records = cls._raw_records(value)
+                    if records:
+                        return records
+        data = getattr(raw, 'data', None)
+        if data is not None and data is not raw:
+            records = cls._raw_records(data)
+            if records:
+                return records
         if isinstance(raw, dict):
-            return [raw]
+            # Some SDK payloads nest rows below arbitrary keys.
+            symbol = cls._symbol_from_row(raw)
+            if symbol:
+                return [raw]
+            return [row for value in raw.values() for row in cls._raw_records(value)]
         if isinstance(raw, (list, tuple, set)):
-            records = []
+            records: list[dict[str, Any]] = []
             for value in raw:
                 if isinstance(value, dict):
-                    records.append(value)
+                    records.extend(cls._raw_records(value))
                 else:
                     symbol = str(value).strip().upper()
                     if symbol:
@@ -134,7 +172,7 @@ class FiinQuantProvider(ScannerProvider):
         if parsed is None:
             return None
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Ho_Chi_Minh'))
+            parsed = parsed.replace(tzinfo=FIINQUANT_TZ)
         return int(parsed.timestamp())
 
     async def list_instruments(self, universes: tuple[str, ...]) -> list[Instrument]:
@@ -144,49 +182,115 @@ class FiinQuantProvider(ScannerProvider):
         def fetch() -> list[Instrument]:
             items: dict[str, Instrument] = {}
             for universe in requested:
-                try:
-                    raw = client.TickerList(ticker=universe)
-                except TypeError:
-                    raw = client.TickerList(tickers=[universe])
+                raw = client.TickerList(tickers=[universe])
                 for row in self._raw_records(raw):
                     symbol = self._symbol_from_row(row)
                     if not symbol:
                         continue
-                    name = next((str(row.get(key) or '').strip() for key in ('name', 'organName', 'companyName', 'tickerName') if row.get(key)), '')
-                    exchange = next((str(row.get(key) or '').strip().upper() for key in ('exchange', 'comGroupCode', 'market', 'floor') if row.get(key)), universe)
-                    items[symbol] = Instrument('fiinquant', symbol, name, exchange or universe, 'STOCK', True)
+                    name = next((
+                        str(row.get(key) or '').strip()
+                        for key in ('name', 'organName', 'companyName', 'tickerName')
+                        if row.get(key)
+                    ), '')
+                    exchange = next((
+                        str(row.get(key) or '').strip().upper()
+                        for key in ('exchange', 'comGroupCode', 'market', 'floor')
+                        if row.get(key)
+                    ), universe)
+                    items[symbol] = Instrument(
+                        'fiinquant', symbol, name, exchange or universe, 'STOCK', True
+                    )
             return sorted(items.values(), key=lambda item: item.symbol)
 
         async with self._request_lock:
             return await asyncio.to_thread(fetch)
 
-    def _fetch_batch_sync(self, client: Any, symbols: list[str], period: int, fields: list[str], since_time: int | None = None) -> list[dict[str, Any]]:
-        kwargs: dict[str, Any] = {'realtime': False, 'tickers': symbols, 'fields': fields, 'adjusted': True, 'by': '1d', 'lasted': True}
+    def _fetch_batch_sync(
+        self,
+        client: Any,
+        symbols: list[str],
+        period: int,
+        fields: list[str],
+        since_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {
+            'realtime': False,
+            'tickers': symbols,
+            'fields': fields,
+            'adjusted': True,
+            'by': '1d',
+            'lasted': True,
+        }
         if since_time is None:
             kwargs['period'] = period
         else:
-            kwargs['from_date'] = datetime.fromtimestamp(since_time, ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
-            kwargs['to_date'] = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d %H:%M')
-        return self._raw_records(client.Fetch_Trading_Data(**kwargs).get_data())
+            kwargs['from_date'] = datetime.fromtimestamp(since_time, FIINQUANT_TZ).strftime('%Y-%m-%d')
+            kwargs['to_date'] = datetime.now(FIINQUANT_TZ).strftime('%Y-%m-%d %H:%M')
+        request = client.Fetch_Trading_Data(**kwargs)
+        return self._raw_records(request)
 
     async def snapshots(self, symbols: list[str]) -> list[MarketSnapshot]:
         client = await self._ensure_client()
-        result: dict[str, MarketSnapshot] = {}
+        newest: dict[str, MarketSnapshot] = {}
+        since_time = int(time.time()) - FIINQUANT_RECENT_DAYS * 86400
         async with self._request_lock:
             for batch in _chunks(symbols, self.batch_size):
-                rows = await asyncio.to_thread(self._fetch_batch_sync, client, batch, 1, ['close', 'volume'])
+                rows = await asyncio.to_thread(
+                    self._fetch_batch_sync,
+                    client,
+                    batch,
+                    FIINQUANT_RECENT_DAYS,
+                    ['close', 'volume'],
+                    since_time,
+                )
                 for row in rows:
                     symbol = self._symbol_from_row(row)
-                    if symbol:
-                        result[symbol] = MarketSnapshot(symbol, _finite(row.get('close') if 'close' in row else row.get('Close')), _finite(row.get('volume') if 'volume' in row else row.get('Volume')), None, self._timestamp_from_row(row))
-        return list(result.values())
+                    if not symbol:
+                        continue
+                    data_time = self._timestamp_from_row(row)
+                    candidate = MarketSnapshot(
+                        symbol,
+                        _finite(row.get('close') if 'close' in row else row.get('Close')),
+                        _finite(row.get('volume') if 'volume' in row else row.get('Volume')),
+                        None,
+                        data_time,
+                    )
+                    previous = newest.get(symbol)
+                    if previous is None or (candidate.data_time or 0) >= (previous.data_time or 0):
+                        newest[symbol] = candidate
+        return list(newest.values())
 
-    async def daily_history(self, symbols: list[str], limit: int, since_time: int | None = None) -> dict[str, list[Candle]]:
+    async def daily_history(
+        self,
+        symbols: list[str],
+        limit: int,
+        since_time: int | None = None,
+    ) -> dict[str, list[Candle]]:
         client = await self._ensure_client()
-        grouped: dict[str, list[Candle]] = defaultdict(list)
+        grouped: dict[str, dict[int, Candle]] = defaultdict(dict)
         async with self._request_lock:
             for batch in _chunks(symbols, self.batch_size):
-                rows = await asyncio.to_thread(self._fetch_batch_sync, client, batch, limit, ['open', 'high', 'low', 'close', 'volume'], since_time)
+                rows = await asyncio.to_thread(
+                    self._fetch_batch_sync,
+                    client,
+                    batch,
+                    limit,
+                    ['open', 'high', 'low', 'close', 'volume'],
+                    since_time,
+                )
+                # A period request may stop at the previous completed trading day.
+                # Merge a short date range so the current daily bar is available
+                # for current Week/Month HA without streaming the entire market.
+                if since_time is None:
+                    recent_since = int(time.time()) - FIINQUANT_RECENT_DAYS * 86400
+                    rows.extend(await asyncio.to_thread(
+                        self._fetch_batch_sync,
+                        client,
+                        batch,
+                        FIINQUANT_RECENT_DAYS,
+                        ['open', 'high', 'low', 'close', 'volume'],
+                        recent_since,
+                    ))
                 now = int(time.time())
                 for row in rows:
                     symbol = self._symbol_from_row(row)
@@ -198,13 +302,28 @@ class FiinQuantProvider(ScannerProvider):
                     if not symbol or ts is None or None in (open_price, high, low, close):
                         continue
                     assert open_price is not None and high is not None and low is not None and close is not None
-                    if min(open_price, high, low, close) <= 0 or high < max(open_price, low, close) or low > min(open_price, high, close):
+                    if (
+                        min(open_price, high, low, close) <= 0
+                        or high < max(open_price, low, close)
+                        or low > min(open_price, high, close)
+                    ):
                         continue
                     volume = _finite(row.get('volume') if 'volume' in row else row.get('Volume'))
-                    local = datetime.fromtimestamp(ts, ZoneInfo('Asia/Ho_Chi_Minh'))
+                    local = datetime.fromtimestamp(ts, FIINQUANT_TZ)
                     next_day = local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
-                    grouped[symbol].append(Candle(ts, open_price, high, low, close, volume, next_day <= now))
-        return {symbol: sorted(values, key=lambda item: item.time)[-limit:] for symbol, values in grouped.items()}
+                    grouped[symbol][ts] = Candle(
+                        ts,
+                        open_price,
+                        high,
+                        low,
+                        close,
+                        volume,
+                        next_day <= now,
+                    )
+        return {
+            symbol: sorted(values.values(), key=lambda item: item.time)[-limit:]
+            for symbol, values in grouped.items()
+        }
 
 
 class BinanceProvider(ScannerProvider):
@@ -215,13 +334,32 @@ class BinanceProvider(ScannerProvider):
         self._owned_session = session is None
         self.session = session
         if provider_id == 'binance_spot':
-            self.rest_base = 'https://data-api.binance.vision'; self.exchange_info_path = '/api/v3/exchangeInfo'; self.ticker_path = '/api/v3/ticker/24hr'; self.klines_path = '/api/v3/klines'; label = 'Binance Spot'; self.asset_type = 'SPOT'
+            self.rest_base = 'https://data-api.binance.vision'
+            self.exchange_info_path = '/api/v3/exchangeInfo'
+            self.ticker_path = '/api/v3/ticker/24hr'
+            self.klines_path = '/api/v3/klines'
+            label = 'Binance Spot'
+            self.asset_type = 'SPOT'
         else:
-            self.rest_base = 'https://fapi.binance.com'; self.exchange_info_path = '/fapi/v1/exchangeInfo'; self.ticker_path = '/fapi/v1/ticker/24hr'; self.klines_path = '/fapi/v1/klines'; label = 'Binance USD-M Futures'; self.asset_type = 'PERPETUAL'
+            self.rest_base = 'https://fapi.binance.com'
+            self.exchange_info_path = '/fapi/v1/exchangeInfo'
+            self.ticker_path = '/fapi/v1/ticker/24hr'
+            self.klines_path = '/fapi/v1/klines'
+            label = 'Binance USD-M Futures'
+            self.asset_type = 'PERPETUAL'
         self.capabilities = ProviderCapabilities(
-            id=provider_id, label=label, market_cap=False, bulk_snapshot=True, bulk_history=False,
-            universes=('USDT',), default_universes=('USDT',), timezone='UTC', max_history_concurrency=8,
-            continuous_market=True, snapshot_ttl_seconds=30, history_ttl_seconds=60,
+            id=provider_id,
+            label=label,
+            market_cap=False,
+            bulk_snapshot=True,
+            bulk_history=False,
+            universes=('USDT',),
+            default_universes=('USDT',),
+            timezone='UTC',
+            max_history_concurrency=8,
+            continuous_market=True,
+            snapshot_ttl_seconds=30,
+            history_ttl_seconds=60,
         )
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -254,7 +392,14 @@ class BinanceProvider(ScannerProvider):
             if not symbol:
                 continue
             base = str(row.get('baseAsset') or '').upper()
-            result.append(Instrument(self.provider_id, symbol, f'{base}/{quote}' if base and quote else symbol, 'BINANCE', f'{self.asset_type}:{quote}', True))
+            result.append(Instrument(
+                self.provider_id,
+                symbol,
+                f'{base}/{quote}' if base and quote else symbol,
+                'BINANCE',
+                f'{self.asset_type}:{quote}',
+                True,
+            ))
         return result
 
     async def snapshots(self, symbols: list[str]) -> list[MarketSnapshot]:
@@ -265,10 +410,22 @@ class BinanceProvider(ScannerProvider):
         for row in rows:
             symbol = str(row.get('symbol') or '').upper()
             if symbol in wanted:
-                result.append(MarketSnapshot(symbol, _finite(row.get('lastPrice')), _finite(row.get('volume')), None, int((_finite(row.get('closeTime')) or time.time() * 1000) / 1000)))
+                result.append(MarketSnapshot(
+                    symbol,
+                    _finite(row.get('lastPrice')),
+                    _finite(row.get('volume')),
+                    None,
+                    int((_finite(row.get('closeTime')) or time.time() * 1000) / 1000),
+                ))
         return result
 
-    async def _history_one(self, symbol: str, limit: int, semaphore: asyncio.Semaphore, since_time: int | None = None) -> tuple[str, list[Candle]]:
+    async def _history_one(
+        self,
+        symbol: str,
+        limit: int,
+        semaphore: asyncio.Semaphore,
+        since_time: int | None = None,
+    ) -> tuple[str, list[Candle]]:
         params = {'symbol': symbol, 'interval': '1d', 'limit': str(min(1000, limit))}
         if since_time is not None:
             params['startTime'] = str(max(0, int(since_time)) * 1000)
@@ -287,12 +444,28 @@ class BinanceProvider(ScannerProvider):
             open_price, high, low, close = (float(value) for value in values if value is not None)
             if min(open_price, high, low, close) <= 0:
                 continue
-            candles.append(Candle(int(float(row[0]) / 1000), open_price, high, low, close, _finite(row[5]), int(float(row[6])) < now_ms))
+            candles.append(Candle(
+                int(float(row[0]) / 1000),
+                open_price,
+                high,
+                low,
+                close,
+                _finite(row[5]),
+                int(float(row[6])) < now_ms,
+            ))
         return symbol, candles
 
-    async def daily_history(self, symbols: list[str], limit: int, since_time: int | None = None) -> dict[str, list[Candle]]:
+    async def daily_history(
+        self,
+        symbols: list[str],
+        limit: int,
+        since_time: int | None = None,
+    ) -> dict[str, list[Candle]]:
         semaphore = asyncio.Semaphore(self.capabilities.max_history_concurrency)
-        pairs = await asyncio.gather(*(self._history_one(symbol, limit, semaphore, since_time) for symbol in symbols))
+        pairs = await asyncio.gather(*(
+            self._history_one(symbol, limit, semaphore, since_time)
+            for symbol in symbols
+        ))
         return {symbol: candles for symbol, candles in pairs}
 
     async def close(self) -> None:
@@ -301,7 +474,10 @@ class BinanceProvider(ScannerProvider):
             self.session = None
 
 
-def build_providers(fiinquant_username: str, fiinquant_password: str) -> dict[ProviderId, ScannerProvider]:
+def build_providers(
+    fiinquant_username: str,
+    fiinquant_password: str,
+) -> dict[ProviderId, ScannerProvider]:
     return {
         'fiinquant': FiinQuantProvider(fiinquant_username, fiinquant_password),
         'binance_spot': BinanceProvider('binance_spot'),
