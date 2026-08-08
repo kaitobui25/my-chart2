@@ -104,6 +104,7 @@ class CafeFEodImportTests(unittest.TestCase):
         )
         self.assertTrue(result['ok'])
         self.assertEqual(result['symbols'], 2)
+        self.assertEqual(result['activeSymbols'], 2)
         self.assertEqual(result['candles'], 3)
         self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA', 'CCC'])
         coverage = self.db.snapshot_coverage('vn_eod')
@@ -119,7 +120,27 @@ class CafeFEodImportTests(unittest.TestCase):
         self.assertEqual(audit['symbol_count'], 2)
         self.assertEqual(audit['inserted_candle_count'], 3)
 
-    def test_eod_import_does_not_deactivate_symbols_missing_from_daily_file(self):
+    def test_upto_keeps_stale_history_but_only_recent_symbols_active(self):
+        payload = make_zip(
+            'CafeF.HOSE.txt',
+            '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
+            'FRESH,20260807,10,12,9,11,1000\n'
+            'EDGE,20260708,20,22,19,21,900\n'
+            'STALE,20260707,30,32,29,31,800\n'
+            'OLD,20150901,40,42,39,41,700\n',
+        )
+        result = import_archive(self.db, payload, mode='upto', source_url='bootstrap.zip')
+
+        self.assertEqual(result['symbols'], 4)
+        self.assertEqual(result['activeSymbols'], 2)
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['EDGE', 'FRESH'])
+
+        ids = self.db.instrument_ids('vn_eod', ['FRESH', 'EDGE', 'STALE', 'OLD'])
+        self.assertEqual(set(ids), {'FRESH', 'EDGE', 'STALE', 'OLD'})
+        self.assertEqual(len(self.db.read_candles(ids['STALE'])), 1)
+        self.assertEqual(len(self.db.read_candles(ids['OLD'])), 1)
+
+    def test_eod_import_does_not_deactivate_recent_symbols_missing_from_daily_file(self):
         bootstrap = make_zip(
             'CafeF.HOSE.txt',
             '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
@@ -134,6 +155,28 @@ class CafeFEodImportTests(unittest.TestCase):
         import_archive(self.db, bootstrap, mode='upto', source_url='bootstrap.zip')
         import_archive(self.db, daily, mode='eod', source_url='daily.zip')
         self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA', 'BBB'])
+
+    def test_daily_import_recalculates_freshness_for_existing_symbols(self):
+        bootstrap = make_zip(
+            'CafeF.HOSE.txt',
+            '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
+            'AAA,20260807,10,12,9,11,1000\n'
+            'BBB,20260708,20,22,19,21,1000\n',
+        )
+        daily = make_zip(
+            'CafeF.HOSE.txt',
+            '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
+            'AAA,20260808,11,13,10,12,1200\n',
+        )
+
+        import_archive(self.db, bootstrap, mode='upto', source_url='bootstrap.zip')
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA', 'BBB'])
+
+        result = import_archive(self.db, daily, mode='eod', source_url='daily.zip')
+        self.assertEqual(result['activeSymbols'], 1)
+        self.assertEqual(self.db.list_active_symbols('vn_eod'), ['AAA'])
+        bbb_id = self.db.instrument_ids('vn_eod', ['BBB'])['BBB']
+        self.assertEqual(len(self.db.read_candles(bbb_id)), 1)
 
 
 if __name__ == '__main__':
