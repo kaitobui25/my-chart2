@@ -42,11 +42,15 @@ After CafeF publishes the completed session:
 python cafef_eod.py import-latest --mode eod
 ```
 
+Every CafeF import recalculates the scanner's active VN universe from local snapshots. A symbol is active when its latest `data_time` is within 30 calendar days of the newest `vn_eod` snapshot. Older/delisted/inactive symbols stay in SQLite with their candles and snapshots for history/audit, but are excluded from scans.
+
 ### Inspect import state
 
 ```bash
 python cafef_eod.py status
 ```
+
+`status` reports `activeMaxAgeDays: 30` together with the active/snapshot coverage.
 
 ### Deterministic/manual import
 
