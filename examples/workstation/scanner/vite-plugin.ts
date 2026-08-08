@@ -437,6 +437,7 @@ window.__L2CHART_SCANNER_BRIDGE__ = Object.freeze({
   openSymbol(symbol) {
     const providerMap = {
       fiinquant: 'fiinquant',
+      vn_eod: 'fiinquant',
       vnstock: 'vnstock',
       binance_spot: 'binance-spot',
       binance_usdm: 'binance-usdm',
