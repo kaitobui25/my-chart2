@@ -54,7 +54,8 @@ class FiinQuantProvider(ScannerProvider):
         self.capabilities = ProviderCapabilities(
             id='fiinquant', label='FiinQuant', market_cap=False, bulk_snapshot=True, bulk_history=True,
             universes=('HOSE', 'HNX', 'UPCOM'), default_universes=('HOSE', 'HNX', 'UPCOM'),
-            timezone='Asia/Ho_Chi_Minh', max_history_concurrency=1, snapshot_ttl_seconds=60, history_ttl_seconds=120,
+            timezone='Asia/Ho_Chi_Minh', max_history_concurrency=1, continuous_market=False,
+            snapshot_ttl_seconds=60, history_ttl_seconds=120,
             available=bool(self.username and self.password),
             detail=None if self.username and self.password else 'FIINQUANT_USERNAME/PASSWORD are not configured',
         )
@@ -217,7 +218,11 @@ class BinanceProvider(ScannerProvider):
             self.rest_base = 'https://data-api.binance.vision'; self.exchange_info_path = '/api/v3/exchangeInfo'; self.ticker_path = '/api/v3/ticker/24hr'; self.klines_path = '/api/v3/klines'; label = 'Binance Spot'; self.asset_type = 'SPOT'
         else:
             self.rest_base = 'https://fapi.binance.com'; self.exchange_info_path = '/fapi/v1/exchangeInfo'; self.ticker_path = '/fapi/v1/ticker/24hr'; self.klines_path = '/fapi/v1/klines'; label = 'Binance USD-M Futures'; self.asset_type = 'PERPETUAL'
-        self.capabilities = ProviderCapabilities(id=provider_id, label=label, market_cap=False, bulk_snapshot=True, bulk_history=False, universes=('USDT',), default_universes=('USDT',), timezone='UTC', max_history_concurrency=8, snapshot_ttl_seconds=30, history_ttl_seconds=60)
+        self.capabilities = ProviderCapabilities(
+            id=provider_id, label=label, market_cap=False, bulk_snapshot=True, bulk_history=False,
+            universes=('USDT',), default_universes=('USDT',), timezone='UTC', max_history_concurrency=8,
+            continuous_market=True, snapshot_ttl_seconds=30, history_ttl_seconds=60,
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self.session is None:
@@ -236,13 +241,18 @@ class BinanceProvider(ScannerProvider):
         allowed_quotes = set(universes or self.capabilities.default_universes)
         result = []
         for row in payload.get('symbols', []) if isinstance(payload, dict) else []:
-            if row.get('status') != 'TRADING': continue
-            if self.provider_id == 'binance_spot' and row.get('isSpotTradingAllowed') is False: continue
-            if self.provider_id == 'binance_usdm' and row.get('contractType') != 'PERPETUAL': continue
+            if row.get('status') != 'TRADING':
+                continue
+            if self.provider_id == 'binance_spot' and row.get('isSpotTradingAllowed') is False:
+                continue
+            if self.provider_id == 'binance_usdm' and row.get('contractType') != 'PERPETUAL':
+                continue
             quote = str(row.get('quoteAsset') or '').upper()
-            if allowed_quotes and quote not in allowed_quotes: continue
+            if allowed_quotes and quote not in allowed_quotes:
+                continue
             symbol = str(row.get('symbol') or '').upper()
-            if not symbol: continue
+            if not symbol:
+                continue
             base = str(row.get('baseAsset') or '').upper()
             result.append(Instrument(self.provider_id, symbol, f'{base}/{quote}' if base and quote else symbol, 'BINANCE', f'{self.asset_type}:{quote}', True))
         return result
@@ -260,17 +270,23 @@ class BinanceProvider(ScannerProvider):
 
     async def _history_one(self, symbol: str, limit: int, semaphore: asyncio.Semaphore, since_time: int | None = None) -> tuple[str, list[Candle]]:
         params = {'symbol': symbol, 'interval': '1d', 'limit': str(min(1000, limit))}
-        if since_time is not None: params['startTime'] = str(max(0, int(since_time)) * 1000)
-        async with semaphore: payload = await self._json(self.klines_path, params)
+        if since_time is not None:
+            params['startTime'] = str(max(0, int(since_time)) * 1000)
+        async with semaphore:
+            payload = await self._json(self.klines_path, params)
         now_ms = int(time.time() * 1000)
         candles = []
-        if not isinstance(payload, list): return symbol, candles
+        if not isinstance(payload, list):
+            return symbol, candles
         for row in payload:
-            if not isinstance(row, list) or len(row) < 7: continue
+            if not isinstance(row, list) or len(row) < 7:
+                continue
             values = [_finite(row[index]) for index in (1, 2, 3, 4)]
-            if any(value is None for value in values): continue
+            if any(value is None for value in values):
+                continue
             open_price, high, low, close = (float(value) for value in values if value is not None)
-            if min(open_price, high, low, close) <= 0: continue
+            if min(open_price, high, low, close) <= 0:
+                continue
             candles.append(Candle(int(float(row[0]) / 1000), open_price, high, low, close, _finite(row[5]), int(float(row[6])) < now_ms))
         return symbol, candles
 
@@ -281,8 +297,13 @@ class BinanceProvider(ScannerProvider):
 
     async def close(self) -> None:
         if self._owned_session and self.session is not None:
-            await self.session.close(); self.session = None
+            await self.session.close()
+            self.session = None
 
 
 def build_providers(fiinquant_username: str, fiinquant_password: str) -> dict[ProviderId, ScannerProvider]:
-    return {'fiinquant': FiinQuantProvider(fiinquant_username, fiinquant_password), 'binance_spot': BinanceProvider('binance_spot'), 'binance_usdm': BinanceProvider('binance_usdm')}
+    return {
+        'fiinquant': FiinQuantProvider(fiinquant_username, fiinquant_password),
+        'binance_spot': BinanceProvider('binance_spot'),
+        'binance_usdm': BinanceProvider('binance_usdm'),
+    }
