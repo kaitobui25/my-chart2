@@ -1,15 +1,21 @@
 # Recent Meaningful Changes
 
 **Generated:** 2026-08-09  
-**Documented main:** `9244a8600162c7065b8db4d3d11c1b01ee9a8885`
+**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
 
 ## 2026-08-09
 
+### OpenCode doc sync became bounded and deterministic
+
+The current-documentation synchronization now computes a deterministic `bounded_context` with `scripts/build-current-doc-context.mjs` and passes it to the OpenCode agent. The agent is capped at `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config reads and stops immediately after its semantic edits. CI's `docs-runtime` job validates the bounded-context builder and the prompt's discovery rules.
+
+Relevant implementation: `scripts/build-current-doc-context.mjs`, `.github/workflows/daily-current-doc-sync.yml`, `.github/workflows/ci.yml`, `agent/prompts/daily-current-doc-sync.md`.
+
 ### FiinQuant timeframe switching became cache-first for daily-family data
 
-The latest documented main is merge commit `9244a8600162c7065b8db4d3d11c1b01ee9a8885` for PR #16, “Speed up FiinQuant timeframe switching”.
+The relevant implementation milestone was merge commit `9244a8600162c7065b8db4d3d11c1b01ee9a8885` for PR #16, “Speed up FiinQuant timeframe switching”.
 
 Current `examples/providers/fiinquant.ts` can return usable cached daily/week/month data immediately, refresh latest daily-family data in the background, derive calendar previews from cached daily history and warm deeper calendar history separately. A shared two-minute attempt guard prevents repeated refresh work during rapid switching.
 
