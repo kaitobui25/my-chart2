@@ -67,4 +67,13 @@ describe('lazy chart provider lifecycle', () => {
     expect(restoreBlock).toContain('void waitForFiinQuantRuntime().then((ready) => {');
     expect(restoreBlock).not.toContain('reloadAllTiles();');
   });
+
+  it('offers direct FiinQuant symbols when TickerList autocomplete omits them', async () => {
+    const code = await transformedWorkstation();
+    expect(code).toContain("const directSymbol = query.trim().toUpperCase();");
+    expect(code).toContain("activeProvider === 'fiinquant'");
+    expect(code).toContain("? { symbol: directSymbol, name: 'Direct symbol', exchange: 'FiinQuant' } satisfies SymbolSearchResult");
+    expect(code).toContain("const directSymbol = command.value.trim().toUpperCase();");
+    expect(code).toContain("const message = `không có dữ liệu ${this.symbol}`;");
+  });
 });
