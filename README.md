@@ -5,6 +5,8 @@ uses Canvas 2D, has no opinion about where market data comes from, and is
 designed to be extended by applications, brokers, exchanges, and independent
 developers.
 
+> **Current repository state:** For the implementation currently present in `my-chart2` — including workstation providers, Replay, scanner, sidecars and local EOD data flow — start with [`docs/current/README.md`](docs/current/README.md). The files under `docs/current/` are the canonical current-state documentation; `agent/plan/` remains historical design context.
+
 The project is licensed under the Apache License 2.0. You may use, modify,
 redistribute, and build commercial or non-commercial systems on top of it under
 the terms in [`LICENSE`](LICENSE).
