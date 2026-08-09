@@ -32,16 +32,21 @@ const FIINQUANT_REQUIREMENTS_PATH = path.join(FIINQUANT_DIR, 'requirements.txt')
 const FIINQUANT_PROVIDER_REQUIREMENTS_PATH = path.join(FIINQUANT_DIR, 'requirements-provider.txt');
 const FIINQUANT_VENV_DIR = path.join(FIINQUANT_DIR, '.venv');
 
-function providerRequirementVersion(packageName: string): string {
-  const requirements = readFileSync(FIINQUANT_PROVIDER_REQUIREMENTS_PATH, 'utf8');
+function pinnedRequirementVersion(filePath: string, packageName: string): string {
+  const requirements = readFileSync(filePath, 'utf8');
   const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = requirements.match(new RegExp(`^${escapedName}==([^\\s;]+)\\s*$`, 'im'));
-  if (!match) throw new Error(`Missing pinned ${packageName} in ${FIINQUANT_PROVIDER_REQUIREMENTS_PATH}`);
+  if (!match) throw new Error(`Missing pinned ${packageName} in ${filePath}`);
   return match[1];
+}
+
+function providerRequirementVersion(packageName: string): string {
+  return pinnedRequirementVersion(FIINQUANT_PROVIDER_REQUIREMENTS_PATH, packageName);
 }
 
 const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');
 const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');
+const MSGPACK_REQUIRED_VERSION = pinnedRequirementVersion(FIINQUANT_REQUIREMENTS_PATH, 'msgpack');
 
 function readSimpleEnv(filePath: string): Record<string, string> {
   if (!existsSync(filePath)) return {};
@@ -120,13 +125,13 @@ function hasCurrentFiinQuantDependencies(spec: CommandSpec): boolean {
     'import importlib.metadata as metadata',
     'import aiohttp',
     'import FiinQuantX',
-    `ok = metadata.version("fiinquantx") == ${JSON.stringify(FIINQUANT_REQUIRED_VERSION)} and metadata.version("signalrcore") == ${JSON.stringify(SIGNALRCORE_REQUIRED_VERSION)}`,
+    'import msgpack',
+    'from signalrcore.hub_connection_builder import HubConnectionBuilder',
+    `ok = metadata.version("fiinquantx") == ${JSON.stringify(FIINQUANT_REQUIRED_VERSION)} and metadata.version("signalrcore") == ${JSON.stringify(SIGNALRCORE_REQUIRED_VERSION)} and metadata.version("msgpack") == ${JSON.stringify(MSGPACK_REQUIRED_VERSION)}`,
     'raise SystemExit(0 if ok else 1)',
   ].join('; ');
   const result = runSync(spec, ['-c', versionCheck]);
-  if (result.error || result.status !== 0) return false;
-  const dependencyCheck = runSync(spec, ['-m', 'pip', 'check']);
-  return !dependencyCheck.error && dependencyCheck.status === 0;
+  return !result.error && result.status === 0;
 }
 
 function fiinQuantVenvPython(): string {
@@ -181,10 +186,15 @@ function installFiinQuantEnvironment(venv: CommandSpec): void {
   runChecked(venv, [
     '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', FIINQUANT_PROVIDER_REQUIREMENTS_PATH,
   ]);
-  runChecked(venv, ['-m', 'pip', 'check']);
+  // signalrcore 1.0.2 pins msgpack 1.1.2, which is affected by
+  // PYSEC-2026-3625. FiinQuant uses SignalR JSON here, so restore the patched
+  // msgpack after the provider resolver has installed the rest of its stack.
+  runChecked(venv, [
+    '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '--no-deps', `msgpack==${MSGPACK_REQUIRED_VERSION}`,
+  ]);
   if (!hasCurrentFiinQuantDependencies(venv)) {
     throw new Error(
-      `FiinQuant .venv does not match FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION} after install.`,
+      `FiinQuant .venv does not match FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION} / msgpack ${MSGPACK_REQUIRED_VERSION} after install.`,
     );
   }
 }
@@ -197,7 +207,7 @@ function resolveFiinQuantPython(): CommandSpec {
       return explicit;
     }
     console.warn(
-      `[fiinquant] FIINQUANT_PYTHON is not on FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION}; using the managed .venv instead.`,
+      `[fiinquant] FIINQUANT_PYTHON is not on FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION} / msgpack ${MSGPACK_REQUIRED_VERSION}; using the managed .venv instead.`,
     );
   }
 
