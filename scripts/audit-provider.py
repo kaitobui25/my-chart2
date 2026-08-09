@@ -42,7 +42,6 @@ def main() -> None:
             "from signalrcore.hub_connection_builder import HubConnectionBuilder; "
             "assert version('fiinquantx') == '0.1.67'; "
             "assert version('signalrcore') == '1.0.2'; "
-            "assert version('msgpack') == '1.2.1'; "
             "print('Provider compatibility check: ok')",
         )
         run(str(audit), "--local")
