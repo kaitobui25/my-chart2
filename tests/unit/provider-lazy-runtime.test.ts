@@ -76,4 +76,18 @@ describe('lazy chart provider lifecycle', () => {
     expect(code).toContain("const directSymbol = command.value.trim().toUpperCase();");
     expect(code).toContain("const message = `không có dữ liệu ${this.symbol}`;");
   });
+
+  it('does not spend FiinQuant ticker quota on background watchlist feeds', async () => {
+    const code = await transformedWorkstation();
+    const watchlistStart = code.indexOf('function syncWatchlistFeeds(seedSymbols: string[] = []): void {');
+    const watchlistEnd = code.indexOf('\n}', watchlistStart);
+    const watchlistBlock = code.slice(watchlistStart, watchlistEnd);
+    const clearSubscriptions = watchlistBlock.indexOf('watchlistUnsubscribers = [];');
+    const fiinQuantReturn = watchlistBlock.indexOf("if (activeProvider === 'fiinquant') return;");
+    const providerLookup = watchlistBlock.indexOf('const provider = currentFeed();');
+    expect(watchlistStart).toBeGreaterThan(-1);
+    expect(clearSubscriptions).toBeGreaterThan(-1);
+    expect(fiinQuantReturn).toBeGreaterThan(clearSubscriptions);
+    expect(providerLookup).toBeGreaterThan(fiinQuantReturn);
+  });
 });
