@@ -116,7 +116,7 @@ describe('FiinQuant fast timeframe history', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get('interval')).toBe('1d');
-    expect(url.searchParams.get('limit')).toBe('100');
+    expect(url.searchParams.get('limit')).toBe('20');
   });
 
   it('fetches calendar cold history through the daily source so the master daily cache is preserved', async () => {
