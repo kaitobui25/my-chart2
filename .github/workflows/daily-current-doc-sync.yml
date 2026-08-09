@@ -123,7 +123,7 @@ jobs:
           echo "head_branch=$head_branch"
           echo "existing_pr=$pr_number"
 
-      - name: Run OpenCode documentation agent
+      - name: Run OpenCode semantic documentation agent
         if: steps.state.outputs.should_run == 'true'
         env:
           OPENCODE_CONFIG: ${{ github.workspace }}/agent/opencode/current-doc-sync.json
@@ -138,6 +138,56 @@ jobs:
             2>&1 | tee /tmp/opencode-doc-sync.log
           status=${PIPESTATUS[0]}
           exit "$status"
+
+      - name: Detect semantic doc changes
+        if: steps.state.outputs.should_run == 'true'
+        id: semantic
+        run: |
+          set -euo pipefail
+
+          changed_paths="$(
+            {
+              git diff --name-only
+              git diff --cached --name-only
+              git ls-files --others --exclude-standard
+            } | sed '/^$/d' | sort -u
+          )"
+
+          if [ -z "$changed_paths" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "OpenCode made no semantic documentation edits."
+            exit 0
+          fi
+
+          while IFS= read -r path; do
+            case "$path" in
+              docs/current/README.md|\
+              docs/current/ARCHITECTURE.md|\
+              docs/current/FEATURES.md|\
+              docs/current/DATA_SOURCES.md|\
+              docs/current/SCANNER.md|\
+              docs/current/REPLAY.md|\
+              docs/current/OPERATIONS.md|\
+              docs/current/RECENT_CHANGES.md)
+                ;;
+              *)
+                echo "::error::OpenCode changed a forbidden path: $path"
+                exit 1
+                ;;
+            esac
+          done <<<"$changed_paths"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Synchronize snapshot metadata and headers
+        if: >-
+          steps.state.outputs.should_run == 'true' &&
+          (steps.state.outputs.target_sha != steps.state.outputs.baseline_sha ||
+          steps.semantic.outputs.changed == 'true')
+        env:
+          TARGET_SHA: ${{ steps.state.outputs.target_sha }}
+          SYNC_MODE: ${{ steps.state.outputs.mode }}
+        run: node scripts/sync-current-doc-snapshot.mjs "$TARGET_SHA" "$SYNC_MODE"
 
       - name: Validate docs-only result
         if: steps.state.outputs.should_run == 'true'
@@ -160,7 +210,7 @@ jobs:
 
           if [ -z "$changed_paths" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No documentation changes were produced."
+            echo "Full reconciliation found no correction and the snapshot is already current."
             exit 0
           fi
 
@@ -177,7 +227,7 @@ jobs:
               docs/current/_meta.json)
                 ;;
               *)
-                echo "::error::OpenCode changed a forbidden path: $path"
+                echo "::error::Documentation sync changed a forbidden path: $path"
                 exit 1
                 ;;
             esac
@@ -254,7 +304,7 @@ jobs:
               [ -n "$path" ] && echo "- \`$path\`"
             done <<<"$CHANGED_PATHS"
             echo
-            echo "The workflow enforces a hard post-run allowlist: only the nine canonical files under \`docs/current/\` may change."
+            echo "OpenCode owns semantic body edits only. Snapshot SHA/date/mode and headers are synchronized deterministically by the workflow."
           } > "$body_file"
 
           if [ "$PR_EXISTS" = "true" ]; then
