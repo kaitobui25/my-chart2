@@ -2,9 +2,7 @@
 description: Keep docs/current synchronized with the implementation on main and maintain one docs-only draft PR when meaningful changes are found.
 on:
   workflow_dispatch:
-engine:
-  id: copilot
-  model: gpt-5-mini
+engine: copilot
 strict: true
 permissions:
   contents: read
