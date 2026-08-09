@@ -41,6 +41,8 @@ export interface FiinQuantDatafeedOptions {
 const MAX_HISTORY_REQUEST = 50_000;
 const MAX_LATEST_CALENDAR_HISTORY_REQUEST = 100;
 const FIINQUANT_UTC_OFFSET_MINUTES = 420;
+const LATEST_CACHE_REFRESH_MS = 120_000;
+const CALENDAR_REFRESH_DAILY_BARS = 100;
 
 function mergeCandles(...groups: Candle[][]): Candle[] {
   const byTime = new Map<number, Candle>();
@@ -48,6 +50,43 @@ function mergeCandles(...groups: Candle[][]): Candle[] {
     for (const candle of group) byTime.set(candle.time, candle);
   }
   return [...byTime.values()].sort((left, right) => left.time - right.time);
+}
+
+function calendarSourceLimit(interval: string, limit: number): number {
+  if (interval === '1w') return Math.min(MAX_HISTORY_REQUEST, Math.max(60, limit * 8 + 14));
+  if (interval === '1M') return Math.min(MAX_HISTORY_REQUEST, Math.max(60, limit * 35 + 35));
+  return limit;
+}
+
+function minimumCalendarPreview(interval: string, requestedLimit: number): number {
+  const preferred = interval === '1M' ? 12 : 20;
+  return Math.min(requestedLimit, preferred);
+}
+
+function aggregateCalendarCandles(candles: Candle[], interval: string): Candle[] {
+  const result: Candle[] = [];
+  for (const candle of candles) {
+    const bucket = intervalStart(candle.time, interval, FIINQUANT_UTC_OFFSET_MINUTES);
+    const previous = result[result.length - 1];
+    if (!previous || previous.time !== bucket) {
+      result.push({ ...candle, time: bucket });
+      continue;
+    }
+    previous.high = Math.max(previous.high, candle.high);
+    previous.low = Math.min(previous.low, candle.low);
+    previous.close = candle.close;
+    if (previous.volume !== undefined || candle.volume !== undefined) {
+      previous.volume = Number(previous.volume ?? 0) + Number(candle.volume ?? 0);
+    }
+  }
+  return result;
+}
+
+function completeCalendarTail(candles: Candle[], interval: string): Candle[] {
+  const aggregated = aggregateCalendarCandles(candles, interval);
+  // A small latest-daily refresh may start in the middle of a week/month. Never
+  // overwrite a previously complete cached bucket with that leading partial bar.
+  return aggregated.length > 1 ? aggregated.slice(1) : [];
 }
 
 function formatHistoryDate(time: number): string {
@@ -71,6 +110,9 @@ export class FiinQuantDatafeed implements Datafeed {
     interval: string;
     listeners: Set<(candle: Candle) => void>;
   }>();
+  private readonly latestRefreshes = new Set<string>();
+  private readonly latestRefreshAttemptAt = new Map<string, number>();
+  private readonly calendarWarmups = new Set<string>();
   private streamSocket: WebSocket | null = null;
   private streamAuthenticated = false;
   private streamRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -146,14 +188,47 @@ export class FiinQuantDatafeed implements Datafeed {
         interval,
         requestedLimit,
       );
+
+      if ((interval === '1d' || isCalendarInterval(interval)) && cached.length > 0) {
+        if (isCalendarInterval(interval)) {
+          const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
+          if (cached.length < targetLimit) {
+            this.scheduleCalendarWarmup(normalizedSymbol, interval, targetLimit);
+          } else {
+            this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+          }
+        } else {
+          this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+        }
+        return cached.slice(-requestedLimit);
+      }
+
+      if (isCalendarInterval(interval)) {
+        const derived = await this.calendarHistoryFromDailyCache(
+          normalizedSymbol,
+          interval,
+          requestedLimit,
+        );
+        if (derived.length >= minimumCalendarPreview(interval, requestedLimit)) {
+          void this.cache.write(
+            FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+            normalizedSymbol,
+            interval,
+            derived,
+          );
+          const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
+          if (derived.length < targetLimit) {
+            this.scheduleCalendarWarmup(normalizedSymbol, interval, targetLimit);
+          } else {
+            this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+          }
+          return derived.slice(-requestedLimit);
+        }
+      }
+
       try {
-        // Large single-organization requests regularly time out at FiinGroup's
-        // gateway. Range requests still backfill older data when Replay needs it.
-        const remoteLimit = interval === '1d' || isCalendarInterval(interval)
-          ? Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST)
-          : requestedLimit;
-        const remote = await this.fetchHistory(normalizedSymbol, interval, remoteLimit);
-        await this.persistHistory(normalizedSymbol, interval, remote, this.returnedCoverage(remote, interval));
+        const remote = await this.fetchAndPersistLatest(normalizedSymbol, interval, requestedLimit);
+        this.latestRefreshAttemptAt.set(this.latestRefreshKey(normalizedSymbol, interval), Date.now());
         return mergeCandles(cached, remote).slice(-requestedLimit);
       } catch (error) {
         if (cached.length > 0) return cached;
@@ -278,6 +353,9 @@ export class FiinQuantDatafeed implements Datafeed {
     this.disposed = true;
     this.streamSubscriptions.clear();
     this.realtimeConnectedListeners.clear();
+    this.latestRefreshes.clear();
+    this.latestRefreshAttemptAt.clear();
+    this.calendarWarmups.clear();
     if (this.streamRetryTimer) clearTimeout(this.streamRetryTimer);
     this.streamRetryTimer = null;
     this.streamSocket?.close();
@@ -288,6 +366,110 @@ export class FiinQuantDatafeed implements Datafeed {
   onRealtimeConnected(listener: () => void): () => void {
     this.realtimeConnectedListeners.add(listener);
     return () => this.realtimeConnectedListeners.delete(listener);
+  }
+
+  private latestRefreshKey(symbol: string, interval: string): string {
+    return interval === '1d' || isCalendarInterval(interval)
+      ? `${symbol}\u0000daily-family`
+      : `${symbol}\u0000${interval}`;
+  }
+
+  private scheduleLatestRefresh(symbol: string, interval: string, requestedLimit: number): void {
+    const key = this.latestRefreshKey(symbol, interval);
+    const now = Date.now();
+    if (this.latestRefreshes.has(key)) return;
+    if (now - (this.latestRefreshAttemptAt.get(key) ?? 0) < LATEST_CACHE_REFRESH_MS) return;
+    this.latestRefreshAttemptAt.set(key, now);
+    this.latestRefreshes.add(key);
+
+    void this.refreshCachedLatest(symbol, interval, requestedLimit)
+      .catch(() => undefined)
+      .finally(() => this.latestRefreshes.delete(key));
+  }
+
+  private scheduleCalendarWarmup(symbol: string, interval: string, targetLimit: number): void {
+    const key = `${symbol}\u0000warm:${interval}`;
+    const now = Date.now();
+    if (this.calendarWarmups.has(key)) return;
+    if (now - (this.latestRefreshAttemptAt.get(key) ?? 0) < LATEST_CACHE_REFRESH_MS) return;
+    this.latestRefreshAttemptAt.set(key, now);
+    this.calendarWarmups.add(key);
+    void this.fetchCalendarFromDailySource(symbol, interval, targetLimit)
+      .catch(() => undefined)
+      .finally(() => this.calendarWarmups.delete(key));
+  }
+
+  private async refreshCachedLatest(symbol: string, interval: string, requestedLimit: number): Promise<void> {
+    if (interval === '1d' || isCalendarInterval(interval)) {
+      const daily = await this.fetchHistory(
+        symbol,
+        '1d',
+        Math.min(CALENDAR_REFRESH_DAILY_BARS, Math.max(1, requestedLimit)),
+      );
+      await this.persistHistory(symbol, '1d', daily, this.returnedCoverage(daily, '1d'));
+      for (const calendarInterval of ['1w', '1M']) {
+        const derived = completeCalendarTail(daily, calendarInterval);
+        await this.cache.write(
+          FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+          symbol,
+          calendarInterval,
+          derived,
+        );
+      }
+      return;
+    }
+
+    const remote = await this.fetchHistory(symbol, interval, requestedLimit);
+    await this.persistHistory(symbol, interval, remote, this.returnedCoverage(remote, interval));
+  }
+
+  private async fetchAndPersistLatest(
+    symbol: string,
+    interval: string,
+    requestedLimit: number,
+  ): Promise<Candle[]> {
+    if (isCalendarInterval(interval)) {
+      const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
+      return this.fetchCalendarFromDailySource(symbol, interval, targetLimit);
+    }
+
+    // Large single-organization daily requests regularly time out at FiinGroup's
+    // gateway. Keep the first visible load small; deeper daily history is reused
+    // when Replay or a calendar warm-up has already populated it.
+    const remoteLimit = interval === '1d'
+      ? Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST)
+      : requestedLimit;
+    const remote = await this.fetchHistory(symbol, interval, remoteLimit);
+    await this.persistHistory(symbol, interval, remote, this.returnedCoverage(remote, interval));
+    return remote;
+  }
+
+  private async fetchCalendarFromDailySource(
+    symbol: string,
+    interval: string,
+    targetLimit: number,
+  ): Promise<Candle[]> {
+    const sourceLimit = calendarSourceLimit(interval, targetLimit);
+    const daily = await this.fetchHistory(symbol, '1d', sourceLimit);
+    await this.persistHistory(symbol, '1d', daily, this.returnedCoverage(daily, '1d'));
+    const calendar = aggregateCalendarCandles(daily, interval).slice(-targetLimit);
+    await this.persistHistory(symbol, interval, calendar, this.returnedCoverage(calendar, interval));
+    return calendar;
+  }
+
+  private async calendarHistoryFromDailyCache(
+    symbol: string,
+    interval: string,
+    requestedLimit: number,
+  ): Promise<Candle[]> {
+    const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
+    const daily = await this.cache.readLatest(
+      FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+      symbol,
+      '1d',
+      calendarSourceLimit(interval, targetLimit),
+    );
+    return completeCalendarTail(daily, interval).slice(-targetLimit);
   }
 
   private async fetchHistory(
@@ -462,6 +644,18 @@ export class FiinQuantDatafeed implements Datafeed {
       if (!subscription) return;
       const candle = this.validCandle(msg.candle);
       if (!candle) return;
+      void this.cache.write(
+        FIINQUANT_ADJUSTED_HISTORY_SOURCE,
+        subscription.symbol,
+        subscription.interval,
+        [candle],
+      );
+      if (subscription.interval === '1d' || isCalendarInterval(subscription.interval)) {
+        this.latestRefreshAttemptAt.set(
+          this.latestRefreshKey(subscription.symbol, subscription.interval),
+          Date.now(),
+        );
+      }
       for (const listener of subscription.listeners) listener(candle);
     } catch {
       /* Ignore malformed sidecar frames. */
