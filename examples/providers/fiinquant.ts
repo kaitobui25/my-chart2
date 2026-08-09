@@ -82,6 +82,13 @@ function aggregateCalendarCandles(candles: Candle[], interval: string): Candle[]
   return result;
 }
 
+function completeCalendarTail(candles: Candle[], interval: string): Candle[] {
+  const aggregated = aggregateCalendarCandles(candles, interval);
+  // A small latest-daily refresh may start in the middle of a week/month. Never
+  // overwrite a previously complete cached bucket with that leading partial bar.
+  return aggregated.length > 1 ? aggregated.slice(1) : [];
+}
+
 function formatHistoryDate(time: number): string {
   return new Date(time * 1000).toISOString().slice(0, 10);
 }
@@ -183,7 +190,16 @@ export class FiinQuantDatafeed implements Datafeed {
       );
 
       if ((interval === '1d' || isCalendarInterval(interval)) && cached.length > 0) {
-        this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+        if (isCalendarInterval(interval)) {
+          const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
+          if (cached.length < targetLimit) {
+            this.scheduleCalendarWarmup(normalizedSymbol, interval, targetLimit);
+          } else {
+            this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+          }
+        } else {
+          this.scheduleLatestRefresh(normalizedSymbol, interval, requestedLimit);
+        }
         return cached.slice(-requestedLimit);
       }
 
@@ -194,11 +210,11 @@ export class FiinQuantDatafeed implements Datafeed {
           requestedLimit,
         );
         if (derived.length >= minimumCalendarPreview(interval, requestedLimit)) {
-          void this.persistHistory(
+          void this.cache.write(
+            FIINQUANT_ADJUSTED_HISTORY_SOURCE,
             normalizedSymbol,
             interval,
             derived,
-            this.returnedCoverage(derived, interval),
           );
           const targetLimit = Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST);
           if (derived.length < targetLimit) {
@@ -372,8 +388,11 @@ export class FiinQuantDatafeed implements Datafeed {
   }
 
   private scheduleCalendarWarmup(symbol: string, interval: string, targetLimit: number): void {
-    const key = `${symbol}\u0000${interval}`;
+    const key = `${symbol}\u0000warm:${interval}`;
+    const now = Date.now();
     if (this.calendarWarmups.has(key)) return;
+    if (now - (this.latestRefreshAttemptAt.get(key) ?? 0) < LATEST_CACHE_REFRESH_MS) return;
+    this.latestRefreshAttemptAt.set(key, now);
     this.calendarWarmups.add(key);
     void this.fetchCalendarFromDailySource(symbol, interval, targetLimit)
       .catch(() => undefined)
@@ -389,12 +408,12 @@ export class FiinQuantDatafeed implements Datafeed {
       );
       await this.persistHistory(symbol, '1d', daily, this.returnedCoverage(daily, '1d'));
       for (const calendarInterval of ['1w', '1M']) {
-        const derived = aggregateCalendarCandles(daily, calendarInterval);
-        await this.persistHistory(
+        const derived = completeCalendarTail(daily, calendarInterval);
+        await this.cache.write(
+          FIINQUANT_ADJUSTED_HISTORY_SOURCE,
           symbol,
           calendarInterval,
           derived,
-          this.returnedCoverage(derived, calendarInterval),
         );
       }
       return;
@@ -450,7 +469,7 @@ export class FiinQuantDatafeed implements Datafeed {
       '1d',
       calendarSourceLimit(interval, targetLimit),
     );
-    return aggregateCalendarCandles(daily, interval).slice(-targetLimit);
+    return completeCalendarTail(daily, interval).slice(-targetLimit);
   }
 
   private async fetchHistory(
