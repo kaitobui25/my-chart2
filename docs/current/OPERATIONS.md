@@ -1,7 +1,7 @@
 # Current Operations
 
 **Generated:** 2026-08-09  
-**Documented main:** `9244a8600162c7065b8db4d3d11c1b01ee9a8885`
+**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -304,9 +304,11 @@ It has separate jobs for:
 - core TypeScript/unit/build/package/npm audit;
 - browser Playwright tests;
 - Python sidecars/provider dependency audit;
-- tracked-secret scan.
+- tracked-secret scan;
+- current documentation validation (`docs` runs `scripts/check-current-docs.mjs`);
+- OpenCode documentation-sync runtime validation (`docs-runtime`).
 
-The current documentation-sync branch adds a deterministic current-doc checker as a separate lightweight CI responsibility; that is not part of the documented `main` SHA until merged.
+The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow (manual `workflow_dispatch`) runs the OpenCode current-documentation synchronization and publishes the rolling `[docs-sync]` documentation PR.
 
 ## Persistent local state
 

@@ -1,7 +1,7 @@
 # my-chart2 — Current State
 
 **Generated:** 2026-08-09  
-**Documented main:** `9244a8600162c7065b8db4d3d11c1b01ee9a8885`  
+**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
 **Documentation role:** canonical snapshot of the implementation at the commit above.
 
 `docs/current/` describes what the repository currently implements. Historical design and build plans under `agent/plan/` are useful context but are not implementation evidence.
@@ -110,7 +110,7 @@ See `docs/current/OPERATIONS.md` before changing startup/runtime behavior.
 - `vn_eod` freshness depends on importing CafeF EOD packages; scanning itself is local but data ingestion is not automatic OS scheduling.
 - Replay requires all visible replay participants to use the same symbol. A replay range estimated above 20,000 raw source bars is rejected rather than silently truncated.
 - The current workstation contains layered Vite transform patches under `examples/workstation/scanner/vite-plugin-v*.ts` for FiinQuant startup/quota/direct-symbol behavior. They work as runtime integration code but are an architectural maintenance hotspot.
-- GitHub Agentic Workflow documentation sync introduced on the documentation branch is not part of this documented `main` SHA; this snapshot intentionally describes main before that automation is merged.
+- `docs/current/**` is the canonical snapshot maintained by the current-documentation synchronization automation, which is now part of the documented `main` SHA (`agent/prompts/daily-current-doc-sync.md`, `scripts/sync-current-doc-snapshot.mjs`, `scripts/check-current-docs.mjs`).
 
 ## Where to read next
 
