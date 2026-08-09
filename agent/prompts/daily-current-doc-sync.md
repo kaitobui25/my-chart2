@@ -2,7 +2,7 @@
 
 Maintain the factual body content of the eight human-facing files in `docs/current/` against the repository implementation at `target_sha`.
 
-Runtime context supplies `target_sha`, `baseline_sha`, and `synchronization_mode` (`incremental` or `full-reconciliation`).
+Runtime context supplies `target_sha`, `baseline_sha`, `synchronization_mode` (`incremental` or `full-reconciliation`) and a `bounded_context` JSON object generated deterministically by `scripts/build-current-doc-context.mjs`.
 
 ## Hard boundaries
 
@@ -21,7 +21,27 @@ Do not edit `docs/current/_meta.json`. Do not edit the `Generated` or `Documente
 
 Do not create files, commit, push, manage pull requests, change Git configuration, or use the web.
 
-For navigation/search, prefer the built-in Read, Glob and Grep tools. If bash is useful, run one allowed Git command per tool call. Do not combine commands with pipes, `&&`, redirects, environment-variable prefixes, `head`, `grep`, `ls`, or other shell utilities.
+For navigation/search, prefer the built-in Read, Glob and Grep tools. If bash is useful, run one allowed Git command per tool call. Do not combine commands with pipes, `&&`, redirects, environment-variable prefixes, `head`, `grep`, `ls`, `git ls-files`, or other shell utilities.
+
+## Bounded discovery rules
+
+Treat `bounded_context` as the discovery boundary. It contains:
+
+- `changed_paths`: meaningful repository paths changed between baseline and target;
+- `semantic_review_docs`: canonical pages whose bodies should be read/reviewed;
+- `source_verification_docs`: pages for which implementation evidence should be inspected;
+- `evidence_paths`: existing implementation files already cited by canonical docs, sampled deterministically for reconciliation;
+- `max_implementation_source_files`: a hard cap on implementation/test/config files you may read during this run.
+
+Hard rules:
+
+1. Never read more implementation/test/config files than `max_implementation_source_files` (currently 25). The eight canonical docs do not count toward this budget.
+2. Start source verification with `changed_paths`. Use `evidence_paths` only when needed to verify a claim in `source_verification_docs`.
+3. Nearby tests/config may be read only when directly necessary to understand one changed path, and they still count toward the same source-file budget.
+4. Do not perform broad repository discovery. In particular, do not use broad Glob patterns such as `**/*`, `examples/**`, `src/**` or `tests/**`.
+5. Do not enumerate the whole repository or repeatedly search for additional evidence after the relevant claim is already supported.
+6. If the source-file budget is reached, stop discovery. Prefer a smaller, well-supported correction over an exhaustive audit.
+7. A page not listed in `source_verification_docs` should not trigger source exploration unless its own text contains an obvious contradiction with `bounded_context`.
 
 ## Truth hierarchy
 
@@ -36,22 +56,26 @@ A plan is never proof that a feature is implemented.
 
 ## Incremental mode
 
-Start with these as separate bash calls:
+Use `bounded_context.changed_paths` and `bounded_context.source_verification_docs` as the primary scope. Do not independently rediscover the complete diff unless the supplied context is internally inconsistent.
 
-```bash
-git diff --name-status <baseline_sha>..<target_sha>
-git log --oneline <baseline_sha>..<target_sha>
-```
-
-Identify meaningful implementation changes, then read the complete affected implementation and nearby tests/configuration before editing documentation. Changes only under `docs/current/**` or historical `agent/plan/**` do not by themselves prove application behavior changed.
+Read the complete affected implementation file and only the nearby tests/config needed to understand its behavior before editing the routed canonical page. Changes only under `docs/current/**` or historical `agent/plan/**` do not by themselves prove application behavior changed.
 
 Developer automation under `.github/workflows/**`, `agent/opencode/**`, `agent/prompts/**`, or relevant scripts is implementation evidence for `OPERATIONS.md` when it materially changes repository operation or maintenance.
 
 ## Full-reconciliation mode
 
-Audit the semantic claims in all eight canonical pages against current source/tests/config at `target_sha`. Focus on claims likely to become stale: ownership boundaries, runtime flows, provider/cache behavior, scanner/replay behavior, startup/operations and current limitations.
+Read the body of each page in `bounded_context.semantic_review_docs` once. This is a semantic drift check, not a license to audit the entire repository.
 
-Do not spend time mechanically rewriting unchanged text. If a page body is already accurate, leave its body alone. Snapshot metadata/header refresh is not your job.
+For source verification:
+
+1. inspect changed implementation/automation paths first;
+2. inspect only the pages in `bounded_context.source_verification_docs` against those changes;
+3. use `bounded_context.evidence_paths` for spot verification of existing claims, staying within the source-file budget;
+4. if a page has no drift signal after that review, leave it unchanged.
+
+If `changed_paths` are only documentation-sync/CI automation, focus source verification on `OPERATIONS.md`, `README.md` and `RECENT_CHANGES.md`. Do not inspect scanner, replay, provider or trading implementation merely because those pages exist.
+
+Do not spend time mechanically rewriting unchanged text. Snapshot metadata/header refresh is not your job.
 
 ## Routing guidance
 
@@ -67,7 +91,7 @@ Do not spend time mechanically rewriting unchanged text. If a page body is alrea
 - `.github/workflows/**`, `agent/opencode/**`, `agent/prompts/**` -> `OPERATIONS.md` for meaningful automation changes.
 - scanner migrations -> `SCANNER.md` and, when storage/source meaning changes, `DATA_SOURCES.md`.
 
-Always consider whether `README.md`, `FEATURES.md` and `RECENT_CHANGES.md` need a semantic body update.
+Always consider whether `README.md`, `FEATURES.md` and `RECENT_CHANGES.md` need a semantic body update, but do not open unrelated source files solely to justify that consideration.
 
 ## Documentation rules
 
@@ -81,4 +105,12 @@ Always consider whether `README.md`, `FEATURES.md` and `RECENT_CHANGES.md` need 
 - Keep evidence paths concrete and current.
 - Keep `RECENT_CHANGES.md` meaningful and bounded; do not turn it into a commit dump.
 
-Before finishing, review only the semantic body edits you made for unsupported or duplicated claims. If no semantic correction/addition is needed, make no edits.
+## Stop condition
+
+As soon as the needed semantic edits are complete:
+
+1. review only the diff of the canonical files you edited;
+2. correct unsupported or duplicated claims in that diff if necessary;
+3. stop immediately.
+
+Do not start another repository audit, another evidence hunt, or a broad "final verification" pass after the edits are already supported. If no semantic correction/addition is needed, make no edits and finish immediately.

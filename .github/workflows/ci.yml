@@ -31,6 +31,7 @@ jobs:
         run: |
           node --check scripts/check-current-docs.mjs
           node --check scripts/sync-current-doc-snapshot.mjs
+          node --check scripts/build-current-doc-context.mjs
           node scripts/check-current-docs.mjs
 
   docs-runtime:
@@ -39,6 +40,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -85,13 +88,29 @@ jobs:
           test -f agent/prompts/daily-current-doc-sync.md
           test -f .github/workflows/daily-current-doc-sync.yml
           test -f scripts/sync-current-doc-snapshot.mjs
+          test -f scripts/build-current-doc-context.mjs
           test ! -e .github/workflows/daily-current-doc-sync.md
           test ! -e .github/workflows/daily-current-doc-sync.lock.yml
 
           grep -Fq 'OPENCODE_MODEL: opencode/deepseek-v4-flash-free' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'OPENCODE_VERSION: 1.18.15' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'DOC_SYNC_MAX_SOURCE_FILES: 25' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'build-current-doc-context.mjs' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'sync-current-doc-snapshot.mjs' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'node scripts/check-current-docs.mjs' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'Never read more implementation/test/config files than `max_implementation_source_files`' agent/prompts/daily-current-doc-sync.md
+          grep -Fq 'Do not perform broad repository discovery.' agent/prompts/daily-current-doc-sync.md
+          grep -Fq 'stop immediately' agent/prompts/daily-current-doc-sync.md
+
+          baseline_sha="$(jq -r '.documented_sha' docs/current/_meta.json)"
+          target_sha="$(git rev-parse HEAD)"
+          context_json="$(node scripts/build-current-doc-context.mjs "$baseline_sha" "$target_sha" incremental 25)"
+          node -e '
+            const context = JSON.parse(process.argv[1]);
+            if (context.max_implementation_source_files !== 25) throw new Error("source-file budget drifted");
+            if (!Array.isArray(context.changed_paths)) throw new Error("changed_paths missing");
+            if (!Array.isArray(context.source_verification_docs)) throw new Error("source_verification_docs missing");
+          ' "$context_json"
 
   core:
     runs-on: ubuntu-latest
