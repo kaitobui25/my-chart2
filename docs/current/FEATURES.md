@@ -54,7 +54,7 @@ Status vocabulary used here:
 | Scanner Week/Month Heikin Ashi | Verified | `examples/sidecars/scanner/heikin_ashi.py`, scanner HA tests |
 | Scanner current vs closed HA candle | Verified | request model + HA engine + UI |
 | Scanner green / no-lower-wick / HA-close-change filters | Verified | scanner UI/model/engine and tests |
-| CafeF adjusted EOD importer | Verified at parser/DB level | `examples/sidecars/scanner/cafef_eod.py`, `tests/test_cafef_eod.py` |
+| CafeF adjusted EOD importer | Verified at parser/DB level | `examples/sidecars/scanner/cafef_eod.py`, `examples/sidecars/scanner/tests/test_cafef_eod.py` |
 | CafeF local zero-network scan execution | Verified | `vn_eod` preloaded provider plus engine tests; local provider throws on attempted provider network methods |
 | CafeF import audit metadata | Verified | `002_eod_import.sql`, DB/import APIs/tests |
 | VN security-type classification | Verified at repository test level | `examples/sidecars/scanner/security_classifier.py`, CafeF/import tests |
