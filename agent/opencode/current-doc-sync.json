@@ -3,7 +3,14 @@
   "permission": {
     "edit": {
       "*": "deny",
-      "docs/current/**": "allow"
+      "docs/current/README.md": "allow",
+      "docs/current/ARCHITECTURE.md": "allow",
+      "docs/current/FEATURES.md": "allow",
+      "docs/current/DATA_SOURCES.md": "allow",
+      "docs/current/SCANNER.md": "allow",
+      "docs/current/REPLAY.md": "allow",
+      "docs/current/OPERATIONS.md": "allow",
+      "docs/current/RECENT_CHANGES.md": "allow"
     },
     "bash": {
       "*": "deny",
@@ -13,9 +20,7 @@
       "git status*": "allow",
       "git rev-parse*": "allow",
       "git cat-file*": "allow",
-      "git merge-base*": "allow",
-      "date *": "allow",
-      "node scripts/check-current-docs.mjs": "allow"
+      "git merge-base*": "allow"
     },
     "webfetch": "deny",
     "websearch": "deny",
