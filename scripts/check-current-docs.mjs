@@ -42,6 +42,7 @@ const RUNTIME_ONLY_PATHS = new Set([
   'examples/sidecars/fiinquant/.venv',
   'examples/sidecars/vnstock/.venv',
   'examples/sidecars/scanner/data/scanner.db',
+  'agent/experiments/ssi-probe/results/latest.json',
 ]);
 
 const failures = [];
