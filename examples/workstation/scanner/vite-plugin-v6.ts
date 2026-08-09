@@ -21,7 +21,8 @@ function patchFiinQuantWatchlistQuota(original: string): string {
   // consuming that quota before the user opened a chart. For FiinQuant, keep
   // the watchlist passive: visible chart tiles still publish their own candles
   // into MarketHub, but background watchlist history/realtime requests are not
-  // allowed to allocate additional FiinQuant symbols.
+  // allowed to allocate additional FiinQuant symbols. This makes FiinQuant
+  // chart-first: opening a chart owns quota; merely watching a row does not.
   code = replaceRequired(
     code,
     lines(
