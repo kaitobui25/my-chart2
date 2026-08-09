@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -58,6 +59,18 @@ function readRequired(relativePath) {
   return readFileSync(fullPath, 'utf8');
 }
 
+function git(args) {
+  return spawnSync('git', args, {
+    cwd: ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function gitSucceeds(args) {
+  return git(args).status === 0;
+}
+
 for (const filename of REQUIRED_DOCS) {
   readRequired(path.join('docs', 'current', filename));
 }
@@ -75,6 +88,7 @@ if (existsSync(META_PATH)) {
   }
 }
 
+let generatedDate = null;
 if (meta) {
   if (meta.schema_version !== 1) fail('docs/current/_meta.json schema_version must be 1');
   if (meta.source_branch !== 'main') fail('docs/current/_meta.json source_branch must be "main"');
@@ -84,13 +98,34 @@ if (meta) {
   if (!VALID_MODES.has(meta.mode)) {
     fail(`docs/current/_meta.json mode must be one of: ${[...VALID_MODES].join(', ')}`);
   }
-  const generatedAt = Date.parse(String(meta.generated_at ?? ''));
-  if (!Number.isFinite(generatedAt)) fail('docs/current/_meta.json generated_at must be an ISO date/time');
+
+  const generatedAtText = String(meta.generated_at ?? '');
+  const generatedAt = Date.parse(generatedAtText);
+  if (!Number.isFinite(generatedAt)) {
+    fail('docs/current/_meta.json generated_at must be an ISO date/time');
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\+09:00$/.test(generatedAtText)) {
+      fail('docs/current/_meta.json generated_at must use an explicit +09:00 Japan-time offset');
+    }
+    generatedDate = generatedAtText.slice(0, 10);
+  }
 }
 
 const documentedSha = meta && /^[0-9a-f]{40}$/.test(String(meta.documented_sha ?? ''))
   ? String(meta.documented_sha)
   : null;
+
+if (documentedSha) {
+  if (!gitSucceeds(['cat-file', '-e', `${documentedSha}^{commit}`])) {
+    fail(`docs/current/_meta.json documented_sha does not exist as a git commit: ${documentedSha}`);
+  } else {
+    const hasOriginMain = gitSucceeds(['rev-parse', '--verify', 'origin/main^{commit}']);
+    const targetRef = hasOriginMain ? 'origin/main' : 'HEAD';
+    if (!gitSucceeds(['merge-base', '--is-ancestor', documentedSha, targetRef])) {
+      fail(`docs/current/_meta.json documented_sha is not an ancestor of ${targetRef}: ${documentedSha}`);
+    }
+  }
+}
 
 function normalizeEvidenceToken(token) {
   return token
@@ -135,6 +170,15 @@ for (const filename of REQUIRED_DOCS) {
 
   if (documentedSha && !content.includes(`**Documented main:** \`${documentedSha}\``)) {
     fail(`${relative}: documented main SHA does not match docs/current/_meta.json`);
+  }
+
+  if (generatedDate) {
+    const generatedHeader = content.match(/^\*\*Generated:\*\*\s*(\d{4}-\d{2}-\d{2})\s*$/m)?.[1] ?? null;
+    if (!generatedHeader) {
+      fail(`${relative}: missing **Generated:** YYYY-MM-DD header`);
+    } else if (generatedHeader !== generatedDate) {
+      fail(`${relative}: generated date ${generatedHeader} does not match docs/current/_meta.json (${generatedDate})`);
+    }
   }
 
   validateEvidencePaths(relative, content);
