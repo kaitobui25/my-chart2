@@ -124,6 +124,8 @@ function patchFiinQuantStartupGate(original: string): string {
     lines(
       '  } else if (isBinanceProvider(activeProvider)) {',
       '    renderBinanceProviderStatus(activeProvider);',
+      "  } else if (activeProvider === 'vnstock') {",
+      '    renderVnstockProviderStatus();',
       '  } else {',
       '    void reportFiinQuantHealth();',
       '  }',
@@ -131,6 +133,8 @@ function patchFiinQuantStartupGate(original: string): string {
     lines(
       '  } else if (isBinanceProvider(activeProvider)) {',
       '    renderBinanceProviderStatus(activeProvider);',
+      "  } else if (activeProvider === 'vnstock') {",
+      '    renderVnstockProviderStatus();',
       '  } else {',
       '    if (fiinQuantRuntimeReadyForData) void reportFiinQuantHealth();',
       "    else providerStatus.textContent = tr('Đang khởi động FiinQuant sidecar...');",
