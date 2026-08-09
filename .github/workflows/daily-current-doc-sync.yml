@@ -2,6 +2,9 @@ name: Canonical documentation synchronization
 
 on:
   workflow_dispatch:
+  schedule:
+    # 05:37 Asia/Tokyo (JST) = 20:37 UTC on the previous calendar day.
+    - cron: '37 20 * * *'
 
 permissions:
   contents: write
