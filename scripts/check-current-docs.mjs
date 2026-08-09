@@ -36,6 +36,12 @@ const EVIDENCE_ROOT_FILES = new Set([
   'RELEASING.md',
   'open-ai-chart.bat',
 ]);
+const RUNTIME_ONLY_PATHS = new Set([
+  'examples/sidecars/fiinquant/.env',
+  'examples/sidecars/fiinquant/.venv',
+  'examples/sidecars/vnstock/.venv',
+  'examples/sidecars/scanner/data/scanner.db',
+]);
 
 const failures = [];
 
@@ -98,11 +104,17 @@ function isEvidencePath(token) {
     || EVIDENCE_PREFIXES.some((prefix) => token.startsWith(prefix));
 }
 
+function isRuntimeOnlyPath(token) {
+  return RUNTIME_ONLY_PATHS.has(token)
+    || token.includes('/.venv/');
+}
+
 function validateEvidencePaths(filename, content) {
   const codeSpan = /`([^`\n]+)`/g;
   for (const match of content.matchAll(codeSpan)) {
     const token = normalizeEvidenceToken(match[1]);
     if (!isEvidencePath(token)) continue;
+    if (isRuntimeOnlyPath(token)) continue;
     if (/[*?{}\[\]]/.test(token)) continue;
     if (/\s/.test(token)) continue;
     const resolved = path.resolve(ROOT, token);
