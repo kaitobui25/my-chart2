@@ -91,4 +91,24 @@ describe('lazy chart provider lifecycle', () => {
     expect(providerLookup).toBeGreaterThan(fiinQuantReturn);
     expect(bulkSubscription).toBeGreaterThan(providerLookup);
   });
+
+  it('upgrades a stale managed FiinQuant environment to the pinned provider stack', () => {
+    const providerRequirements = readFileSync(
+      path.resolve('examples/sidecars/fiinquant/requirements-provider.txt'),
+      'utf8',
+    );
+    const runtime = readFileSync(
+      path.resolve('examples/workstation/provider-runtime/vite-plugin.ts'),
+      'utf8',
+    );
+
+    expect(providerRequirements).toContain('fiinquantx==0.1.67');
+    expect(providerRequirements).toContain('signalrcore==1.0.2');
+    expect(runtime).toContain("const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');");
+    expect(runtime).toContain("const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');");
+    expect(runtime).toContain('function hasCurrentFiinQuantDependencies(spec: CommandSpec): boolean {');
+    expect(runtime).toContain('Updating local Python environment to FiinQuantX ${FIINQUANT_REQUIRED_VERSION}');
+    expect(runtime).toContain("'-m', 'pip', 'check'");
+    expect(runtime).not.toContain("'--no-deps'");
+  });
 });
