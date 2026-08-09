@@ -19,6 +19,7 @@ jobs:
       OPENCODE_MODEL: opencode/deepseek-v4-flash-free
       OPENCODE_VERSION: 1.18.15
       DOC_SYNC_BRANCH: docs-sync/current
+      DOC_SYNC_MAX_SOURCE_FILES: 25
       GH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN || github.token }}
 
     steps:
@@ -132,9 +133,19 @@ jobs:
           SYNC_MODE: ${{ steps.state.outputs.mode }}
         run: |
           set -o pipefail
+
+          bounded_context="$(
+            node scripts/build-current-doc-context.mjs \
+              "$BASELINE_SHA" \
+              "$TARGET_SHA" \
+              "$SYNC_MODE" \
+              "$DOC_SYNC_MAX_SOURCE_FILES"
+          )"
+          echo "OpenCode bounded context: $bounded_context"
+
           timeout 1200s opencode run --auto \
             --model "$OPENCODE_MODEL" \
-            "Read and follow agent/prompts/daily-current-doc-sync.md exactly. Runtime context: target_sha=${TARGET_SHA}; baseline_sha=${BASELINE_SHA}; synchronization_mode=${SYNC_MODE}. Work only in this checked-out repository. Do not commit, push, create PRs, or use the web." \
+            "Read and follow agent/prompts/daily-current-doc-sync.md exactly. Runtime context: target_sha=${TARGET_SHA}; baseline_sha=${BASELINE_SHA}; synchronization_mode=${SYNC_MODE}; bounded_context=${bounded_context}. Work only in this checked-out repository. Do not commit, push, create PRs, or use the web. Respect the bounded discovery budget and stop immediately after reviewing the semantic diff you actually edited." \
             2>&1 | tee /tmp/opencode-doc-sync.log
           status=${PIPESTATUS[0]}
           exit "$status"
