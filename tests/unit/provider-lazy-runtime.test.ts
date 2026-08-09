@@ -93,6 +93,10 @@ describe('lazy chart provider lifecycle', () => {
   });
 
   it('upgrades a stale managed FiinQuant environment to the pinned provider stack', () => {
+    const baseRequirements = readFileSync(
+      path.resolve('examples/sidecars/fiinquant/requirements.txt'),
+      'utf8',
+    );
     const providerRequirements = readFileSync(
       path.resolve('examples/sidecars/fiinquant/requirements-provider.txt'),
       'utf8',
@@ -102,13 +106,15 @@ describe('lazy chart provider lifecycle', () => {
       'utf8',
     );
 
+    expect(baseRequirements).toContain('msgpack==1.2.1');
     expect(providerRequirements).toContain('fiinquantx==0.1.67');
     expect(providerRequirements).toContain('signalrcore==1.0.2');
     expect(runtime).toContain("const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');");
     expect(runtime).toContain("const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');");
+    expect(runtime).toContain("const MSGPACK_REQUIRED_VERSION = pinnedRequirementVersion(FIINQUANT_REQUIREMENTS_PATH, 'msgpack');");
     expect(runtime).toContain('function hasCurrentFiinQuantDependencies(spec: CommandSpec): boolean {');
     expect(runtime).toContain('Updating local Python environment to FiinQuantX ${FIINQUANT_REQUIRED_VERSION}');
-    expect(runtime).toContain("'-m', 'pip', 'check'");
-    expect(runtime).not.toContain("'--no-deps'");
+    expect(runtime).toContain("'--no-deps', `msgpack==${MSGPACK_REQUIRED_VERSION}`");
+    expect(runtime).not.toContain("'-m', 'pip', 'check'");
   });
 });
