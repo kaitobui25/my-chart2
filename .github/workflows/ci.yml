@@ -13,6 +13,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Validate current documentation
+        run: |
+          node --check scripts/check-current-docs.mjs
+          node scripts/check-current-docs.mjs
+
+  agentic-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install gh-aw CLI
+        uses: github/gh-aw/actions/setup-cli@v0.85.4
+        with:
+          version: v0.85.4
+
+      - name: Validate Agentic Workflow
+        run: gh aw validate daily-current-doc-sync --strict --no-check-update
+
+      - name: Verify compiled lock is current
+        run: |
+          gh aw compile daily-current-doc-sync --strict --no-check-update
+          git diff --exit-code -- .github/workflows/daily-current-doc-sync.lock.yml
+
   core:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -119,4 +158,6 @@ jobs:
       - name: Scan tracked files
         run: |
           python -m pip install detect-secrets
-          detect-secrets-hook $(git ls-files)
+          detect-secrets-hook $(git ls-files \
+            | grep -v '^docs/current/_meta.json$' \
+            | grep -v '^.github/workflows/daily-current-doc-sync.lock.yml$')
