@@ -30,6 +30,7 @@ jobs:
       - name: Validate current documentation
         run: |
           node --check scripts/check-current-docs.mjs
+          node --check scripts/sync-current-doc-snapshot.mjs
           node scripts/check-current-docs.mjs
 
   docs-runtime:
@@ -53,9 +54,25 @@ jobs:
           const config = JSON.parse(fs.readFileSync('agent/opencode/current-doc-sync.json', 'utf8'));
           const edit = config.permission?.edit ?? {};
           const bash = config.permission?.bash ?? {};
+          const allowed = [
+            'docs/current/README.md',
+            'docs/current/ARCHITECTURE.md',
+            'docs/current/FEATURES.md',
+            'docs/current/DATA_SOURCES.md',
+            'docs/current/SCANNER.md',
+            'docs/current/REPLAY.md',
+            'docs/current/OPERATIONS.md',
+            'docs/current/RECENT_CHANGES.md',
+          ];
 
-          if (edit['*'] !== 'deny' || edit['docs/current/**'] !== 'allow') {
-            throw new Error('OpenCode edit permissions must deny all paths except docs/current/**');
+          if (edit['*'] !== 'deny') {
+            throw new Error('OpenCode edit permissions must default to deny');
+          }
+          for (const path of allowed) {
+            if (edit[path] !== 'allow') throw new Error(`OpenCode must allow semantic edits to ${path}`);
+          }
+          if (edit['docs/current/_meta.json'] === 'allow' || edit['docs/current/**'] === 'allow') {
+            throw new Error('OpenCode must not own _meta.json or a wildcard docs/current edit permission');
           }
           if (config.permission?.webfetch !== 'deny' || config.permission?.websearch !== 'deny') {
             throw new Error('OpenCode docs-sync runtime must not have web access');
@@ -67,11 +84,13 @@ jobs:
 
           test -f agent/prompts/daily-current-doc-sync.md
           test -f .github/workflows/daily-current-doc-sync.yml
+          test -f scripts/sync-current-doc-snapshot.mjs
           test ! -e .github/workflows/daily-current-doc-sync.md
           test ! -e .github/workflows/daily-current-doc-sync.lock.yml
 
           grep -Fq 'OPENCODE_MODEL: opencode/deepseek-v4-flash-free' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'OPENCODE_VERSION: 1.18.15' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'sync-current-doc-snapshot.mjs' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'node scripts/check-current-docs.mjs' .github/workflows/daily-current-doc-sync.yml
 
   core:
