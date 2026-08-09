@@ -26,7 +26,7 @@ describe('lazy chart provider lifecycle', () => {
   it('starts FiinQuant runtime from the browser use flow', async () => {
     const code = await transformedWorkstation();
     expect(code).toContain("fetch('/provider-runtime/fiinquant/ensure'");
-    expect(code).toContain('if (!await ensureFiinQuantRuntime()) return null;');
+    expect(code).toContain('if (!await waitForFiinQuantRuntime()) return null;');
     expect(code).toContain("FiinQuant chưa kết nối. Bấm Dùng để khởi động sidecar.");
   });
 
@@ -50,5 +50,21 @@ describe('lazy chart provider lifecycle', () => {
     const switchProvider = code.indexOf('setActiveProvider(targetProvider, true);');
     expect(stageSymbol).toBeGreaterThan(-1);
     expect(switchProvider).toBeGreaterThan(stageSymbol);
+  });
+
+  it('gates persisted FiinQuant startup before chart and watchlist data requests', async () => {
+    const code = await transformedWorkstation();
+    expect(code).toContain('let fiinQuantRuntimeGate: Promise<boolean> | null = null;');
+    expect(code).toContain("if (providerAtLoadStart === 'fiinquant' && !(await waitForFiinQuantRuntime())) return;");
+    expect(code).toContain("if (activeProvider === 'fiinquant' && !fiinQuantRuntimeReadyForData) {");
+    expect(code).toContain('if (!fiinQuantRuntimeReadyForData && !(await waitForFiinQuantRuntime())) return;');
+    expect(code).toContain("if (targetProvider === 'fiinquant' && !(await waitForFiinQuantRuntime())) return;");
+    expect(code).not.toContain('void ensureFiinQuantRuntime().then((ready) => {');
+
+    const restoreStart = code.indexOf("if (activeProvider === 'fiinquant') {");
+    const restoreEnd = code.indexOf("} else if (activeProvider === 'vnstock') {", restoreStart);
+    const restoreBlock = code.slice(restoreStart, restoreEnd);
+    expect(restoreBlock).toContain('void waitForFiinQuantRuntime().then((ready) => {');
+    expect(restoreBlock).not.toContain('reloadAllTiles();');
   });
 });
