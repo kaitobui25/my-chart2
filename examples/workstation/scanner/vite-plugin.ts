@@ -156,7 +156,7 @@ async function startVnstockSidecar(server?: ViteDevServer): Promise<boolean> {
 
   if (!vnstockChild) {
     const python = vnstockPython();
-    console.log(`[vnstock] Starting sidecar with ${python} on port 8740`);
+    console.log(`[vnstock] Starting sidecar lazily with ${python} on port 8740`);
     vnstockChild = spawn(python, [VNSTOCK_SCRIPT], {
       cwd: VNSTOCK_DIR,
       stdio: 'inherit',
@@ -274,7 +274,8 @@ function integrateVnstockMain(original: string): string {
   code = replaceRequired(
     code,
     "import { FiinQuantDatafeed, type FiinQuantHealth } from '../providers/fiinquant';",
-    "import { FiinQuantDatafeed, type FiinQuantHealth } from '../providers/fiinquant';\nimport { VnstockDatafeed, type VnstockHealth } from '../providers/vnstock';",
+    "import { FiinQuantDatafeed, type FiinQuantHealth } from '../providers/fiinquant';\
+import { VnstockDatafeed, type VnstockHealth } from '../providers/vnstock';",
   );
   code = replaceRequired(
     code,
@@ -288,33 +289,171 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "    || stored === 'fiinquant'\n    || stored === 'binance-spot'",
-    "    || stored === 'fiinquant'\n    || stored === 'vnstock'\n    || stored === 'binance-spot'",
+    "    || stored === 'fiinquant'\
+    || stored === 'binance-spot'",
+    "    || stored === 'fiinquant'\
+    || stored === 'vnstock'\
+    || stored === 'binance-spot'",
   );
   code = replaceRequired(
     code,
-    "const demoFeed = new SampleDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
-    "const demoFeed = new SampleDatafeed();\nconst vnstockFeed = new VnstockDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
+    "const demoFeed = new SampleDatafeed();\
+const binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
+    "const demoFeed = new SampleDatafeed();\
+const vnstockFeed = new VnstockDatafeed();\
+const binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
   );
   code = replaceRequired(
     code,
-    "function pollFiinQuantHealth(): void {\n  if (activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n",
-    `function pollFiinQuantHealth(): void {\n  if (activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n\ntype VnstockConnectionState = 'checking' | 'connected' | 'offline';\nlet vnstockConnectionState: VnstockConnectionState = 'checking';\nlet vnstockHealthSnapshot: VnstockHealth | null = null;\nlet vnstockHealthRequest = 0;\nconst VNSTOCK_HEALTH_POLL_MS = 15_000;\n\nfunction renderVnstockProviderStatus(): void {\n  delete providerStatus.dataset.tone;\n  if (vnstockConnectionState === 'checking') {\n    providerStatus.textContent = tr('Đang kiểm tra Vnstock sidecar...');\n    return;\n  }\n  if (vnstockConnectionState === 'offline') {\n    providerStatus.dataset.tone = 'error';\n    providerStatus.textContent = tr('Vnstock sidecar không khả dụng. Kiểm tra Python/vnstock hoặc examples/sidecars/vnstock/requirements.txt.');\n    return;\n  }\n  providerStatus.dataset.tone = 'success';\n  const routing = vnstockHealthSnapshot?.routing ?? 'KBS/VCI';\n  const seconds = vnstockHealthSnapshot?.pollIntervalSeconds ?? 5;\n  providerStatus.textContent = \`Vnstock sẵn sàng · \${routing} · polling \${seconds}s · cache \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'không khả dụng'}\`;\n}\n\nasync function reportVnstockHealth(showChecking = true): Promise<void> {\n  const request = ++vnstockHealthRequest;\n  if (showChecking) {\n    vnstockConnectionState = 'checking';\n    renderProviderSourceState();\n  }\n  try {\n    const health = await vnstockFeed.health();\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = health;\n    vnstockConnectionState = health.ok ? 'connected' : 'offline';\n  } catch {\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = null;\n    vnstockConnectionState = 'offline';\n  } finally {\n    if (request === vnstockHealthRequest) {\n      renderProviderSourceState();\n      if (!providerOverlay.hidden && selectedProviderPanel === 'vnstock') renderVnstockProviderStatus();\n    }\n  }\n}\n\nfunction pollVnstockHealth(): void {\n  if (activeProvider !== 'vnstock' || document.hidden) return;\n  void reportVnstockHealth(false);\n}\n`,
+    "function pollFiinQuantHealth(): void {\
+  if (activeProvider !== 'fiinquant' || document.hidden) return;\
+  void reportFiinQuantHealth(false);\
+}\
+",
+    `function pollFiinQuantHealth(): void {\
+  if (activeProvider !== 'fiinquant' || document.hidden) return;\
+  void reportFiinQuantHealth(false);\
+}\
+\
+type VnstockConnectionState = 'idle' | 'checking' | 'connected' | 'offline';\
+let vnstockConnectionState: VnstockConnectionState = 'idle';\
+let vnstockHealthSnapshot: VnstockHealth | null = null;\
+let vnstockHealthRequest = 0;\
+const VNSTOCK_HEALTH_POLL_MS = 15_000;\
+\
+function renderVnstockProviderStatus(): void {\
+  delete providerStatus.dataset.tone;\
+  if (vnstockConnectionState === 'idle') {\
+    providerStatus.textContent = tr('Vnstock chưa kết nối. Bấm Dùng để khởi động sidecar.');\
+    return;\
+  }\
+  if (vnstockConnectionState === 'checking') {\
+    providerStatus.textContent = tr('Đang khởi động Vnstock sidecar...');\
+    return;\
+  }\
+  if (vnstockConnectionState === 'offline') {\
+    providerStatus.dataset.tone = 'error';\
+    providerStatus.textContent = tr('Vnstock sidecar không khả dụng. Kiểm tra Python/vnstock hoặc examples/sidecars/vnstock/requirements.txt.');\
+    return;\
+  }\
+  providerStatus.dataset.tone = 'success';\
+  const routing = vnstockHealthSnapshot?.routing ?? 'KBS/VCI';\
+  const seconds = vnstockHealthSnapshot?.pollIntervalSeconds ?? 5;\
+  providerStatus.textContent = \`Vnstock sẵn sàng · \${routing} · polling \${seconds}s · cache \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'không khả dụng'}\`;\
+}\
+\
+async function reportVnstockHealth(showChecking = true): Promise<boolean> {\
+  const request = ++vnstockHealthRequest;\
+  if (showChecking) {\
+    vnstockConnectionState = 'checking';\
+    renderProviderSourceState();\
+    renderVnstockProviderStatus();\
+  }\
+  let connected = false;\
+  try {\
+    const health = await vnstockFeed.health();\
+    if (request !== vnstockHealthRequest) return false;\
+    vnstockHealthSnapshot = health;\
+    connected = health.ok;\
+    vnstockConnectionState = connected ? 'connected' : 'offline';\
+  } catch {\
+    if (request !== vnstockHealthRequest) return false;\
+    vnstockHealthSnapshot = null;\
+    vnstockConnectionState = 'offline';\
+  } finally {\
+    if (request === vnstockHealthRequest) {\
+      renderProviderSourceState();\
+      if (!providerOverlay.hidden && selectedProviderPanel === 'vnstock') renderVnstockProviderStatus();\
+    }\
+  }\
+  return connected;\
+}\
+\
+function pollVnstockHealth(): void {\
+  if (activeProvider !== 'vnstock' || document.hidden) return;\
+  void reportVnstockHealth(false);\
+}\
+`,
   );
   code = replaceRequired(
     code,
-    "function reportProviderLoadSuccess(provider: PriceProviderId): void {\n  if (provider !== 'fiinquant' || activeProvider !== provider) return;\n  fiinQuantConnectionState = 'connected';\n  renderProviderSourceState();\n}",
-    "function reportProviderLoadSuccess(provider: PriceProviderId): void {\n  if (activeProvider !== provider) return;\n  if (provider === 'vnstock') {\n    vnstockConnectionState = 'connected';\n    renderProviderSourceState();\n    return;\n  }\n  if (provider !== 'fiinquant') return;\n  fiinQuantConnectionState = 'connected';\n  renderProviderSourceState();\n}",
+    "async function getAuthorizedFiinQuantHealth(): Promise<FiinQuantHealth | null> {\
+  fiinQuantHealthRequest += 1;",
+    `async function ensureFiinQuantRuntime(): Promise<boolean> {\
+  fiinQuantConnectionState = 'checking';\
+  renderProviderSourceState();\
+  delete providerStatus.dataset.tone;\
+  providerStatus.textContent = tr('Đang khởi động FiinQuant sidecar...');\
+  try {\
+    const response = await fetch('/provider-runtime/fiinquant/ensure', {\
+      method: 'POST',\
+      headers: { Accept: 'application/json' },\
+    });\
+    const payload = await response.json().catch(() => null) as { message?: string } | null;\
+    if (!response.ok) {\
+      fiinQuantConnectionState = 'offline';\
+      renderProviderSourceState();\
+      providerStatus.dataset.tone = 'error';\
+      providerStatus.textContent = payload?.message ?? tr('Không thể khởi động FiinQuant sidecar.');\
+      return false;\
+    }\
+    return true;\
+  } catch (error) {\
+    fiinQuantConnectionState = 'offline';\
+    renderProviderSourceState();\
+    providerStatus.dataset.tone = 'error';\
+    providerStatus.textContent = \`${tr('Không thể khởi động FiinQuant sidecar')}: \${error instanceof Error ? error.message : String(error)}\`;\
+    return false;\
+  }\
+}\
+\
+async function getAuthorizedFiinQuantHealth(): Promise<FiinQuantHealth | null> {\
+  if (!await ensureFiinQuantRuntime()) return null;\
+  fiinQuantHealthRequest += 1;`,
   );
   code = replaceRequired(
     code,
-    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (provider !== 'fiinquant' || activeProvider !== provider) return;",
-    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (activeProvider !== provider) return;\n  if (provider === 'vnstock') {\n    if (/cannot reach|failed to fetch|network|sidecar/i.test(message)) vnstockConnectionState = 'offline';\n    renderProviderSourceState();\n    return;\n  }\n  if (provider !== 'fiinquant') return;",
+    "function reportProviderLoadSuccess(provider: PriceProviderId): void {\
+  if (provider !== 'fiinquant' || activeProvider !== provider) return;\
+  fiinQuantConnectionState = 'connected';\
+  renderProviderSourceState();\
+}",
+    "function reportProviderLoadSuccess(provider: PriceProviderId): void {\
+  if (activeProvider !== provider) return;\
+  if (provider === 'vnstock') {\
+    vnstockConnectionState = 'connected';\
+    renderProviderSourceState();\
+    return;\
+  }\
+  if (provider !== 'fiinquant') return;\
+  fiinQuantConnectionState = 'connected';\
+  renderProviderSourceState();\
+}",
   );
   code = replaceRequired(
     code,
-    "  if (activeProvider === 'binance-spot') {\n    return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };\n  }",
-    "  if (activeProvider === 'vnstock') {\n    return { feed: vnstockFeed, label: 'Vnstock', unavailable: null };\n  }\n  if (activeProvider === 'binance-spot') {\n    return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };\n  }",
+    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\
+  if (provider !== 'fiinquant' || activeProvider !== provider) return;",
+    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\
+  if (activeProvider !== provider) return;\
+  if (provider === 'vnstock') {\
+    if (/cannot reach|failed to fetch|network|sidecar/i.test(message)) vnstockConnectionState = 'offline';\
+    renderProviderSourceState();\
+    return;\
+  }\
+  if (provider !== 'fiinquant') return;",
+  );
+  code = replaceRequired(
+    code,
+    "  if (activeProvider === 'binance-spot') {\
+    return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };\
+  }",
+    "  if (activeProvider === 'vnstock') {\
+    return { feed: vnstockFeed, label: 'Vnstock', unavailable: null };\
+  }\
+  if (activeProvider === 'binance-spot') {\
+    return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };\
+  }",
   );
   code = replaceRequired(
     code,
@@ -323,13 +462,45 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;",
-    `\n  if (provider === 'vnstock') {\n    return {\n      service: vnstockConnectionState === 'connected'\n        ? tr('Trực tuyến')\n        : vnstockConnectionState === 'checking'\n          ? tr('Đang kiểm tra')\n          : tr('Không khả dụng'),\n      realtime: vnstockConnectionState === 'connected'\n        ? \`REST polling · \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'no cache'}\`\n        : tr('Không khả dụng'),\n      serviceTone: vnstockConnectionState === 'connected' ? 'success' : vnstockConnectionState === 'checking' ? 'warning' : 'error',\n      realtimeTone: vnstockConnectionState === 'connected' ? 'success' : 'idle',\n    };\n  }\n\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;`,
+    "\
+  if (isBinanceProvider(provider)) {\
+    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;",
+    `\
+  if (provider === 'vnstock') {\
+    return {\
+      service: vnstockConnectionState === 'connected'\
+        ? tr('Trực tuyến')\
+        : vnstockConnectionState === 'checking'\
+          ? tr('Đang kiểm tra')\
+          : vnstockConnectionState === 'offline'\
+            ? tr('Không khả dụng')\
+            : tr('Chưa kết nối'),\
+      realtime: vnstockConnectionState === 'connected'\
+        ? \`REST polling · \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'no cache'}\`\
+        : vnstockConnectionState === 'idle'\
+          ? tr('Chưa mở kết nối')\
+          : tr('Không khả dụng'),\
+      serviceTone: vnstockConnectionState === 'connected'\
+        ? 'success'\
+        : vnstockConnectionState === 'checking'\
+          ? 'warning'\
+          : vnstockConnectionState === 'offline'\
+            ? 'error'\
+            : 'idle',\
+      realtimeTone: vnstockConnectionState === 'connected' ? 'success' : 'idle',\
+    };\
+  }\
+\
+  if (isBinanceProvider(provider)) {\
+    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;`,
   );
   code = replaceRequired(
     code,
-    "    fiinquant: 'FiinQuant',\n    'binance-spot': 'Binance Spot',",
-    "    fiinquant: 'FiinQuant',\n    vnstock: 'Vnstock',\n    'binance-spot': 'Binance Spot',",
+    "    fiinquant: 'FiinQuant',\
+    'binance-spot': 'Binance Spot',",
+    "    fiinquant: 'FiinQuant',\
+    vnstock: 'Vnstock',\
+    'binance-spot': 'Binance Spot',",
   );
   code = replaceRequired(
     code,
@@ -338,58 +509,141 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "    } else if (provider === 'dnse') {\n      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\n      action.classList.toggle('primary', !!dnseFeed);\n    } else {",
-    "    } else if (provider === 'dnse') {\n      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\n      action.classList.toggle('primary', !!dnseFeed);\n    } else if (provider === 'vnstock') {\n      action.textContent = tr('Dùng');\n      action.classList.toggle('primary', vnstockConnectionState !== 'offline');\n    } else {",
+    "    } else if (provider === 'dnse') {\
+      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\
+      action.classList.toggle('primary', !!dnseFeed);\
+    } else {",
+    "    } else if (provider === 'dnse') {\
+      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\
+      action.classList.toggle('primary', !!dnseFeed);\
+    } else if (provider === 'vnstock') {\
+      action.textContent = tr('Dùng');\
+      action.classList.add('primary');\
+    } else {",
   );
   code = replaceRequired(
     code,
-    "  if (provider === 'fiinquant') return 'FiinQuant';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
-    "  if (provider === 'fiinquant') return 'FiinQuant';\n  if (provider === 'vnstock') return 'Vnstock';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
+    "  if (provider === 'fiinquant') return 'FiinQuant';\
+  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
+    "  if (provider === 'fiinquant') return 'FiinQuant';\
+  if (provider === 'vnstock') return 'Vnstock';\
+  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
   );
   code = replaceRequired(
     code,
-    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'binance-spot'",
-    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'vnstock'\n          ? vnstockConnectionState === 'connected' ? 'REST polling' : vnstockConnectionState === 'checking' ? tr('đang kiểm tra') : tr('ngoại tuyến')\n        : activeProvider === 'binance-spot'",
+    "      : activeProvider === 'fiinquant'\
+        ? fiinState\
+        : activeProvider === 'binance-spot'",
+    "      : activeProvider === 'fiinquant'\
+        ? fiinState\
+        : activeProvider === 'vnstock'\
+          ? vnstockConnectionState === 'connected' ? 'REST polling' : vnstockConnectionState === 'checking' ? tr('đang kiểm tra') : vnstockConnectionState === 'offline' ? tr('ngoại tuyến') : tr('chưa kết nối')\
+        : activeProvider === 'binance-spot'",
   );
   code = replaceRequired(
     code,
-    "    isBinanceProvider(activeProvider)\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
-    "    isBinanceProvider(activeProvider)\n      || (activeProvider === 'vnstock' && vnstockConnectionState === 'connected')\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
+    "    isBinanceProvider(activeProvider)\
+      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
+    "    isBinanceProvider(activeProvider)\
+      || (activeProvider === 'vnstock' && vnstockConnectionState === 'connected')\
+      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
   );
   code = replaceRequired(
     code,
-    "    (activeProvider === 'fiinquant' && (fiinQuantConnectionState === 'offline' || fiinQuantConnectionState === 'signed-out'))\n      || (activeProvider === 'dnse' && dnseRealtimeState === 'error'),",
-    "    (activeProvider === 'fiinquant' && (fiinQuantConnectionState === 'offline' || fiinQuantConnectionState === 'signed-out'))\n      || (activeProvider === 'vnstock' && vnstockConnectionState === 'offline')\n      || (activeProvider === 'dnse' && dnseRealtimeState === 'error'),",
+    "    (activeProvider === 'fiinquant' && (fiinQuantConnectionState === 'offline' || fiinQuantConnectionState === 'signed-out'))\
+      || (activeProvider === 'dnse' && dnseRealtimeState === 'error'),",
+    "    (activeProvider === 'fiinquant' && (fiinQuantConnectionState === 'offline' || fiinQuantConnectionState === 'signed-out'))\
+      || (activeProvider === 'vnstock' && vnstockConnectionState === 'offline')\
+      || (activeProvider === 'dnse' && dnseRealtimeState === 'error'),",
   );
   code = replaceRequired(
     code,
-    "  } else if (isBinanceProvider(activeProvider)) {\n    renderBinanceProviderStatus(activeProvider);\n  } else {",
-    "  } else if (isBinanceProvider(activeProvider)) {\n    renderBinanceProviderStatus(activeProvider);\n  } else if (activeProvider === 'vnstock') {\n    renderVnstockProviderStatus();\n    void reportVnstockHealth(false);\n  } else {",
+    "  } else if (isBinanceProvider(activeProvider)) {\
+    renderBinanceProviderStatus(activeProvider);\
+  } else {",
+    "  } else if (isBinanceProvider(activeProvider)) {\
+    renderBinanceProviderStatus(activeProvider);\
+  } else if (activeProvider === 'vnstock') {\
+    renderVnstockProviderStatus();\
+  } else {",
   );
   code = replaceRequired(
     code,
-    "  } else if (isBinanceProvider(provider)) {\n    renderBinanceProviderStatus(provider);\n  } else {",
-    "  } else if (isBinanceProvider(provider)) {\n    renderBinanceProviderStatus(provider);\n  } else if (provider === 'vnstock') {\n    renderVnstockProviderStatus();\n    void reportVnstockHealth(false);\n  } else {",
+    "  } else if (isBinanceProvider(provider)) {\
+    renderBinanceProviderStatus(provider);\
+  } else {",
+    "  } else if (isBinanceProvider(provider)) {\
+    renderBinanceProviderStatus(provider);\
+  } else if (provider === 'vnstock') {\
+    renderVnstockProviderStatus();\
+  } else {",
   );
   code = replaceRequired(
     code,
-    "  if (isBinanceProvider(provider)) {\n    setActiveProvider(provider);\n    return;\n  }\n  if (provider === 'dnse') {",
-    "  if (isBinanceProvider(provider)) {\n    setActiveProvider(provider);\n    return;\n  }\n  if (provider === 'vnstock') {\n    setActiveProvider('vnstock');\n    void reportVnstockHealth(false);\n    return;\n  }\n  if (provider === 'dnse') {",
+    "  if (isBinanceProvider(provider)) {\
+    setActiveProvider(provider);\
+    return;\
+  }\
+  if (provider === 'dnse') {",
+    "  if (isBinanceProvider(provider)) {\
+    setActiveProvider(provider);\
+    return;\
+  }\
+  if (provider === 'vnstock') {\
+    if (await reportVnstockHealth()) setActiveProvider('vnstock');\
+    return;\
+  }\
+  if (provider === 'dnse') {",
   );
   code = replaceRequired(
     code,
-    "    const provider: PriceProviderId = value === 'fiinquant'\n      || value === 'dnse'",
-    "    const provider: PriceProviderId = value === 'fiinquant'\n      || value === 'vnstock'\n      || value === 'dnse'",
+    "    const provider: PriceProviderId = value === 'fiinquant'\
+      || value === 'dnse'",
+    "    const provider: PriceProviderId = value === 'fiinquant'\
+      || value === 'vnstock'\
+      || value === 'dnse'",
   );
   code = replaceRequired(
     code,
     "document.getElementById('binance-usdm-use')!.addEventListener('click', () => setActiveProvider('binance-usdm'));",
-    `document.getElementById('binance-usdm-use')!.addEventListener('click', () => setActiveProvider('binance-usdm'));\ndocument.getElementById('vnstock-use')!.addEventListener('click', () => {\n  setActiveProvider('vnstock');\n  void reportVnstockHealth(false);\n});\ndocument.getElementById('vnstock-cache-clear')!.addEventListener('click', () => {\n  const button = document.getElementById('vnstock-cache-clear') as HTMLButtonElement;\n  button.disabled = true;\n  providerStatus.textContent = tr('Đang xóa cache Vnstock...');\n  void vnstockFeed.clearCache().then(() => {\n    providerStatus.dataset.tone = 'success';\n    providerStatus.textContent = tr('Đã xóa cache Vnstock.');\n  }).finally(() => {\n    button.disabled = false;\n  });\n});`,
+    `document.getElementById('binance-usdm-use')!.addEventListener('click', () => setActiveProvider('binance-usdm'));\
+document.getElementById('vnstock-use')!.addEventListener('click', () => {\
+  void reportVnstockHealth().then((ready) => {\
+    if (ready) setActiveProvider('vnstock');\
+  });\
+});\
+document.getElementById('vnstock-cache-clear')!.addEventListener('click', () => {\
+  const button = document.getElementById('vnstock-cache-clear') as HTMLButtonElement;\
+  button.disabled = true;\
+  providerStatus.textContent = tr('Đang xóa cache Vnstock...');\
+  void vnstockFeed.clearCache().then(() => {\
+    providerStatus.dataset.tone = 'success';\
+    providerStatus.textContent = tr('Đã xóa cache Vnstock.');\
+  }).finally(() => {\
+    button.disabled = false;\
+  });\
+});`,
   );
   code = replaceRequired(
     code,
-    "bindDnseRealtimeStatus();\nrefreshProviderUi();\nwindow.setInterval(pollFiinQuantHealth, FIINQUANT_HEALTH_POLL_MS);",
-    "bindDnseRealtimeStatus();\nrefreshProviderUi();\nvoid reportVnstockHealth(false);\nwindow.setInterval(pollFiinQuantHealth, FIINQUANT_HEALTH_POLL_MS);\nwindow.setInterval(pollVnstockHealth, VNSTOCK_HEALTH_POLL_MS);",
+    "bindDnseRealtimeStatus();\
+refreshProviderUi();\
+window.setInterval(pollFiinQuantHealth, FIINQUANT_HEALTH_POLL_MS);",
+    `bindDnseRealtimeStatus();\
+refreshProviderUi();\
+if (activeProvider === 'fiinquant') {\
+  void ensureFiinQuantRuntime().then((ready) => {\
+    if (!ready) return;\
+    void reportFiinQuantHealth(false);\
+    reloadAllTiles();\
+  });\
+} else if (activeProvider === 'vnstock') {\
+  void reportVnstockHealth(false).then((ready) => {\
+    if (ready) reloadAllTiles();\
+  });\
+}\
+window.setInterval(pollFiinQuantHealth, FIINQUANT_HEALTH_POLL_MS);\
+window.setInterval(pollVnstockHealth, VNSTOCK_HEALTH_POLL_MS);`,
   );
   return code;
 }
@@ -397,13 +651,24 @@ function integrateVnstockMain(original: string): string {
 function integrateVnstockHtml(original: string): string {
   let html = replaceRequired(
     original,
-    '<button data-provider-tab="dnse">DNSE</button>\n          <button data-provider-tab="fiinquant">FiinQuant</button>',
-    '<button data-provider-tab="dnse">DNSE</button>\n          <button data-provider-tab="vnstock">Vnstock</button>\n          <button data-provider-tab="fiinquant">FiinQuant</button>',
+    '<button data-provider-tab="dnse">DNSE</button>\
+          <button data-provider-tab="fiinquant">FiinQuant</button>',
+    '<button data-provider-tab="dnse">DNSE</button>\
+          <button data-provider-tab="vnstock">Vnstock</button>\
+          <button data-provider-tab="fiinquant">FiinQuant</button>',
   );
   html = replaceRequired(
     html,
     '        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>',
-    `        <section class="provider-panel" data-provider-panel="vnstock" hidden>\n          <span class="provider-note">Vnstock 4 dùng nguồn dữ liệu Việt Nam công khai qua sidecar Python. Market data được Unified UI định tuyến KBS/VCI; lịch sử được cache trong IndexedDB.</span>\n          <div class="provider-actions">\n            <button id="vnstock-cache-clear" type="button">Xóa cache Vnstock</button>\n            <span class="spacer"></span>\n            <button id="vnstock-use" type="button">Dùng Vnstock</button>\n          </div>\n        </section>\n        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
+    `        <section class="provider-panel" data-provider-panel="vnstock" hidden>\
+          <span class="provider-note">Vnstock 4 dùng nguồn dữ liệu Việt Nam công khai qua sidecar Python. Sidecar chỉ khởi động sau khi bấm Dùng; lịch sử được cache trong IndexedDB.</span>\
+          <div class="provider-actions">\
+            <button id="vnstock-cache-clear" type="button">Xóa cache Vnstock</button>\
+            <span class="spacer"></span>\
+            <button id="vnstock-use" type="button">Dùng Vnstock</button>\
+          </div>\
+        </section>\
+        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
   );
   return html;
 }
@@ -416,13 +681,11 @@ export function scannerIntegration(): Plugin {
       installScannerProxy(server.middlewares, () => ensureScannerSidecar(server));
       installVnstockProxy(server.middlewares, () => ensureVnstockSidecar(server));
       void ensureScannerSidecar(server);
-      void ensureVnstockSidecar(server);
     },
     configurePreviewServer(server) {
       installScannerProxy(server.middlewares, () => ensureScannerSidecar());
       installVnstockProxy(server.middlewares, () => ensureVnstockSidecar());
       void ensureScannerSidecar();
-      void ensureVnstockSidecar();
     },
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
@@ -434,7 +697,7 @@ export function scannerIntegration(): Plugin {
       const bridge = `
 window.__L2CHART_SCANNER_BRIDGE__ = Object.freeze({
   getProvider() { return activeProvider; },
-  openSymbol(symbol) {
+  async openSymbol(symbol) {
     const providerMap = {
       fiinquant: 'fiinquant',
       vn_eod: 'fiinquant',
@@ -444,12 +707,15 @@ window.__L2CHART_SCANNER_BRIDGE__ = Object.freeze({
     };
     const scannerSource = document.getElementById('scanner-source')?.value ?? '';
     const targetProvider = providerMap[String(scannerSource)];
+    if (targetProvider === 'fiinquant' && !(await ensureFiinQuantRuntime())) return;
+    if (targetProvider === 'vnstock' && !(await reportVnstockHealth(false))) return;
     if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider);
     activeTile?.setSymbol(String(symbol ?? ''));
   },
 });
 `;
-      transformed = `${transformed}\n${bridge}`;
+      transformed = `${transformed}\
+${bridge}`;
       return { code: transformed, map: null };
     },
     transformIndexHtml(html) {
