@@ -41,11 +41,17 @@ jobs:
           gh aw validate daily-current-doc-sync --strict --no-check-update
           gh aw compile daily-current-doc-sync --strict --no-check-update
 
-      - name: Commit compiler output
+      - name: Stage compiler output outside workflows
+        run: |
+          mkdir -p agent/generated
+          cp .github/workflows/daily-current-doc-sync.md agent/generated/daily-current-doc-sync.md
+          cp .github/workflows/daily-current-doc-sync.lock.yml agent/generated/daily-current-doc-sync.lock.yml
+
+      - name: Commit staged compiler output
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/workflows/daily-current-doc-sync.md .github/workflows/daily-current-doc-sync.lock.yml
+          git add agent/generated/daily-current-doc-sync.md agent/generated/daily-current-doc-sync.lock.yml
           git diff --cached --check
-          git commit -m "Pin agentic docs to Claude Sonnet 4.6 [skip temp-pin]"
+          git commit -m "Stage Claude Sonnet 4.6 agentic workflow output [skip temp-pin]"
           git push origin HEAD:agent/fix-agentic-supported-model
