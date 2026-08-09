@@ -1,7 +1,7 @@
 # my-chart2 — Current State
 
 **Generated:** 2026-08-09  
-**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
+**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
 **Documentation role:** canonical snapshot of the implementation at the commit above.
 
 `docs/current/` describes what the repository currently implements. Historical design and build plans under `agent/plan/` are useful context but are not implementation evidence.
@@ -110,7 +110,7 @@ See `docs/current/OPERATIONS.md` before changing startup/runtime behavior.
 - `vn_eod` freshness depends on importing CafeF EOD packages; scanning itself is local but data ingestion is not automatic OS scheduling.
 - Replay requires all visible replay participants to use the same symbol. A replay range estimated above 20,000 raw source bars is rejected rather than silently truncated.
 - The current workstation contains layered Vite transform patches under `examples/workstation/scanner/vite-plugin-v*.ts` for FiinQuant startup/quota/direct-symbol behavior. They work as runtime integration code but are an architectural maintenance hotspot.
-- `docs/current/**` is the canonical snapshot maintained by the current-documentation synchronization automation, which is now part of the documented `main` SHA (`agent/prompts/daily-current-doc-sync.md`, `scripts/sync-current-doc-snapshot.mjs`, `scripts/check-current-docs.mjs`).
+- `docs/current/**` is the canonical snapshot maintained by the current-documentation synchronization automation, which is now part of the documented `main` SHA (`agent/prompts/daily-current-doc-sync.md`, `scripts/build-current-doc-context.mjs`, `scripts/sync-current-doc-snapshot.mjs`, `scripts/check-current-docs.mjs`).
 
 ## Where to read next
 

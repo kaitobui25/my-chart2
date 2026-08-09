@@ -1,11 +1,17 @@
 # Recent Meaningful Changes
 
 **Generated:** 2026-08-09  
-**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
+**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
 
 ## 2026-08-09
+
+### OpenCode doc sync became bounded and deterministic
+
+The current-documentation synchronization now computes a deterministic `bounded_context` with `scripts/build-current-doc-context.mjs` and passes it to the OpenCode agent. The agent is capped at `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config reads and stops immediately after its semantic edits. CI's `docs-runtime` job validates the bounded-context builder and the prompt's discovery rules.
+
+Relevant implementation: `scripts/build-current-doc-context.mjs`, `.github/workflows/daily-current-doc-sync.yml`, `.github/workflows/ci.yml`, `agent/prompts/daily-current-doc-sync.md`.
 
 ### FiinQuant timeframe switching became cache-first for daily-family data
 

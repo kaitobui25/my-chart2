@@ -1,7 +1,7 @@
 # Current Operations
 
 **Generated:** 2026-08-09  
-**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
+**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -309,6 +309,8 @@ It has separate jobs for:
 - OpenCode documentation-sync runtime validation (`docs-runtime`).
 
 The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow (manual `workflow_dispatch`) runs the OpenCode current-documentation synchronization and publishes the rolling `[docs-sync]` documentation PR.
+
+The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs and its output has the expected shape.
 
 ## Persistent local state
 

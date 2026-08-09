@@ -1,7 +1,7 @@
 # Current Scanner
 
 **Generated:** 2026-08-09  
-**Documented main:** `a65ead7073114a2418f29b779633390b47fb2995`  
+**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
 
 The scanner is an application subsystem outside the stable chart package. It combines a browser UI with a local Python/aiohttp sidecar and SQLite cache/database.
 
