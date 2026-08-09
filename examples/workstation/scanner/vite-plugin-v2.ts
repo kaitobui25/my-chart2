@@ -451,6 +451,44 @@ function patchLazyProviderLifecycle(original: string): string {
   code = replaceRequired(
     code,
     lines(
+      "  } else if (provider === 'vnstock') {",
+      '    renderVnstockProviderStatus();',
+      '  } else {',
+      '    void reportFiinQuantHealth();',
+      '  }',
+      '  renderProviderConnectionSummary();',
+    ),
+    lines(
+      "  } else if (provider === 'vnstock') {",
+      '    renderVnstockProviderStatus();',
+      '  } else {',
+      "    if (activeProvider === 'fiinquant') void reportFiinQuantHealth();",
+      "    else providerStatus.textContent = tr('FiinQuant chưa kết nối. Bấm Dùng để khởi động sidecar.');",
+      '  }',
+      '  renderProviderConnectionSummary();',
+    ),
+  );
+
+  code = replaceRequired(
+    code,
+    lines(
+      '  if (selectedProviderPanel === provider) {',
+      "    if (provider === 'dnse') renderDnseProviderStatus();",
+      '    else void reportFiinQuantHealth();',
+      '  }',
+    ),
+    lines(
+      '  if (selectedProviderPanel === provider) {',
+      "    if (provider === 'dnse') renderDnseProviderStatus();",
+      "    else if (activeProvider === 'fiinquant') void reportFiinQuantHealth();",
+      "    else providerStatus.textContent = tr('FiinQuant chưa kết nối. Bấm Dùng để khởi động sidecar.');",
+      '  }',
+    ),
+  );
+
+  code = replaceRequired(
+    code,
+    lines(
       "  if (provider === 'vnstock') {",
       "    setActiveProvider('vnstock');",
       '    void reportVnstockHealth(false);',
@@ -596,7 +634,7 @@ function runStableTransform(
   context: unknown,
   code: string,
   id: string,
-): string | { code: string; map?: unknown } | null {
+): any {
   const hook = stable.transform as unknown as ((this: unknown, source: string, moduleId: string) => unknown) | undefined;
   if (!hook) return null;
   const result = hook.call(context, code, id) as string | { code: string; map?: unknown } | null;
