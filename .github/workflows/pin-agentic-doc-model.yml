@@ -1,0 +1,59 @@
+name: Pin Agentic Docs Model
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/pin-agentic-doc-model.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Pin Copilot model
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/daily-current-doc-sync.md')
+          text = path.read_text()
+          old = 'engine: copilot\n'
+          new = 'engine:\n  id: copilot\n  model: gpt-5-mini\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+          elif 'model: gpt-5-mini' not in text:
+              raise SystemExit('Could not find engine: copilot and gpt-5-mini is not already pinned')
+          PY
+
+      - name: Install gh-aw CLI
+        uses: github/gh-aw/actions/setup-cli@v0.85.4
+        with:
+          version: v0.85.4
+
+      - name: Compile strict Agentic Workflow
+        run: gh aw compile daily-current-doc-sync --strict --no-check-update
+
+      - name: Validate strict Agentic Workflow
+        run: gh aw validate daily-current-doc-sync --strict --no-check-update
+
+      - name: Stage generated files for promotion
+        shell: bash
+        run: |
+          mkdir -p agent/generated
+          cp .github/workflows/daily-current-doc-sync.md agent/generated/daily-current-doc-sync.md
+          cp .github/workflows/daily-current-doc-sync.lock.yml agent/generated/daily-current-doc-sync.lock.yml
+          git add agent/generated/daily-current-doc-sync.md agent/generated/daily-current-doc-sync.lock.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "stage gpt-5-mini agentic workflow files"
+          git push origin HEAD:main
