@@ -1,7 +1,7 @@
 # Current Operations
 
-**Generated:** 2026-08-09  
-**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
+**Generated:** 2026-08-10  
+**Documented main:** `15cff0e61ca04534487683f3f4f946a34ac3a1fd`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -217,6 +217,24 @@ CAFEF_DOWNLOAD_PAGE
 
 The repository does not currently install a cron/Windows Task Scheduler job for CafeF ingestion. Daily import scheduling remains an operator responsibility.
 
+## SSI real API probe (experiment)
+
+SSI is not yet an integrated provider or data source. The repository contains a pre-integration experiment that measures the real SSI FastConnect REST API latency, paging, rate-limit headers and OHLC response shape before any SSI provider code is written.
+
+Primary files:
+
+- `scripts/ssi-probe.mjs`
+- `agent/experiments/ssi-probe/README.md`
+- `agent/experiments/ssi-probe/ssi-probe.env.example`
+
+Run it from the repository root with Node 20+ and a local credential file:
+
+```bash
+node --env-file=.env.ssi-probe scripts/ssi-probe.mjs
+```
+
+Create `.env.ssi-probe` from `agent/experiments/ssi-probe/ssi-probe.env.example`. The report is written to `agent/experiments/ssi-probe/results/latest.json`; the check script treats that generated report as runtime-only data (never committed). The probe never writes the API key, API secret, Authorization header, access token or refresh token.
+
 ## Build commands
 
 Workstation production build:
@@ -308,7 +326,7 @@ It has separate jobs for:
 - current documentation validation (`docs` runs `scripts/check-current-docs.mjs`);
 - OpenCode documentation-sync runtime validation (`docs-runtime`).
 
-The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow (manual `workflow_dispatch`) runs the OpenCode current-documentation synchronization and publishes the rolling `[docs-sync]` documentation PR.
+The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow runs the OpenCode current-documentation synchronization and publishes the rolling `[docs-sync]` documentation PR. It is scheduled daily at 05:37 Asia/Tokyo (cron `37 20 * * *`) and can also be triggered manually with `workflow_dispatch`.
 
 The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs and its output has the expected shape.
 

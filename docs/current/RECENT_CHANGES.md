@@ -1,7 +1,7 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-09  
-**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
+**Generated:** 2026-08-10  
+**Documented main:** `15cff0e61ca04534487683f3f4f946a34ac3a1fd`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
 
@@ -20,6 +20,16 @@ The relevant implementation milestone was merge commit `9244a8600162c7065b8db4d3
 Current `examples/providers/fiinquant.ts` can return usable cached daily/week/month data immediately, refresh latest daily-family data in the background, derive calendar previews from cached daily history and warm deeper calendar history separately. A shared two-minute attempt guard prevents repeated refresh work during rapid switching.
 
 This changes the practical FiinQuant chart path from “every timeframe switch waits for a fresh provider request” toward “render from trusted browser cache first, refresh separately when possible”.
+
+### Current-doc sync gained a daily schedule
+
+`.github/workflows/daily-current-doc-sync.yml` now runs on a daily schedule at 05:37 Asia/Tokyo in addition to manual `workflow_dispatch`. The rolling `[docs-sync]` documentation PR updates automatically without needing a manual trigger.
+
+### SSI real API probe added as a pre-integration experiment
+
+SSI is not yet an integrated provider. A new experiment measures the real SSI FastConnect REST API — auth, DNS/TLS, OHLC latency, paging page sizes, rate-limit headers and response shape — before any SSI provider code is written.
+
+The probe script is `scripts/ssi-probe.mjs`, with a runbook at `agent/experiments/ssi-probe/README.md` and env example at `agent/experiments/ssi-probe/ssi-probe.env.example`. Its generated report at `agent/experiments/ssi-probe/results/latest.json` is treated as runtime-only data by `scripts/check-current-docs.mjs` and is never committed.
 
 ## 2026-08-08
 

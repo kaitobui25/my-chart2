@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "source_branch": "main",
-  "documented_sha": "9063e77e13e19bc885c1731e844314aa582fe1f8",
-  "generated_at": "2026-08-09T23:47:37+09:00",
-  "mode": "full-reconciliation"
+  "documented_sha": "15cff0e61ca04534487683f3f4f946a34ac3a1fd",
+  "generated_at": "2026-08-10T07:47:03+09:00",
+  "mode": "incremental"
 }
