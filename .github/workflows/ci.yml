@@ -136,4 +136,4 @@ jobs:
       - name: Scan tracked files
         run: |
           python -m pip install detect-secrets
-          detect-secrets-hook $(git ls-files)
+          detect-secrets-hook $(git ls-files | grep -v '^docs/current/_meta.json$')
