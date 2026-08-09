@@ -10,7 +10,8 @@ WORKDIR /app
 
 COPY requirements.txt requirements-provider.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt \
-    && python -m pip install --no-cache-dir --no-deps -r requirements-provider.txt \
+    && python -m pip install --no-cache-dir --upgrade -r requirements-provider.txt \
+    && python -m pip check \
     && adduser --disabled-password --gecos "" --uid 10001 app
 
 COPY --chown=app:app fiinquant_sidecar.py ./
