@@ -30,6 +30,26 @@ jobs:
           node --check scripts/check-current-docs.mjs
           node scripts/check-current-docs.mjs
 
+  agentic-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install gh-aw CLI
+        uses: github/gh-aw/actions/setup-cli@v0.85.4
+        with:
+          version: v0.85.4
+
+      - name: Validate Agentic Workflow
+        run: gh aw validate daily-current-doc-sync --strict --no-check-update
+
+      - name: Verify compiled lock is current
+        run: |
+          gh aw compile daily-current-doc-sync --strict --no-check-update
+          git diff --exit-code -- .github/workflows/daily-current-doc-sync.lock.yml
+
   core:
     runs-on: ubuntu-latest
     timeout-minutes: 15
