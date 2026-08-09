@@ -33,18 +33,27 @@ and is not stored in this repository or in the npm package. Its wheel metadata
 does not currently declare a software license. Confirm provider usage and
 redistribution terms before publishing a prebuilt sidecar image.
 
-FiinQuantX pins `signalrcore==0.9.5`, whose metadata pins the vulnerable
-`msgpack==1.0.2`. This example installs `msgpack==1.2.1` first and then installs
-the two provider packages with `--no-deps`. The adapter uses SignalR JSON, and
-the compatibility override is covered by a signalrcore import check and sidecar
-protocol smoke tests. Keep this override until the provider dependency chain is
-updated upstream.
+This example pins `FiinQuantX==0.1.67` and `signalrcore==0.9.71`. FiinQuant's
+realtime endpoint returns the legacy negotiation shape without a
+`negotiateVersion`; SignalR 1.x rejects that response, while 0.9.71 remains
+compatible. Provider requirements are first installed with their normal
+dependencies. SignalR 0.9.71 declares `msgpack==1.0.2`, but that release is affected by
+`PYSEC-2026-3625`; after the provider install this example deliberately replaces
+it with patched `msgpack==1.2.1`. The sidecar uses SignalR's JSON path rather
+than its MessagePack hub protocol. CI treats only that one metadata mismatch as
+an allowed override, verifies the exact package versions/imports, and still
+fails on any other dependency conflict.
+
+The workstation's lazy provider runtime checks the exact FiinQuantX,
+signalrcore, and msgpack versions before starting the sidecar. If the managed
+`.venv` is stale, it upgrades that environment on first use instead of silently
+reusing an older importable SDK.
 
 CI installs the full provider environment in an isolated Python 3.11 virtual
-environment and runs `pip-audit --local`. `signalrcore` and its transitive
-dependencies are audited normally. `FiinQuantX` is hosted on the provider index,
-not PyPI, so `pip-audit` cannot map it to advisories; its source, release process,
-and license remain a manual trust decision rather than a successful audit.
+environment, validates the controlled msgpack override, and runs
+`pip-audit --local`. `FiinQuantX` is hosted on the provider index, not PyPI, so
+`pip-audit` cannot map it to advisories; its source, release process, and license
+remain a manual trust decision rather than a successful audit.
 
 ## Docker quick start
 
@@ -102,7 +111,8 @@ Python 3.11 is recommended:
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pip install --no-deps -r requirements-provider.txt
+python -m pip install --upgrade -r requirements-provider.txt
+python -m pip install --upgrade --no-deps msgpack==1.2.1
 cp .env.example .env
 python fiinquant_sidecar.py
 ```

@@ -10,6 +10,8 @@ output/
 *.local
 .DS_Store
 .playwright-cli/
+.playwright-mcp/
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/

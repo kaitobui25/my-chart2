@@ -50,7 +50,6 @@
   ],
   "scripts": {
     "dev": "node scripts/run-assistant.mjs",
-    "dev:fiinquant": "node scripts/run-assistant.mjs --fiinquant",
     "build": "npm run build:demo",
     "build:demo": "vite build --config examples/workstation/vite.config.ts",
     "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.build.json",
@@ -62,8 +61,8 @@
     "test:browser": "playwright test",
     "test:browser:serve": "vite --config tests/browser/vite.config.ts",
     "test:package": "node scripts/verify-package.mjs",
-    "test:sidecar": "python3.11 -m unittest discover -s examples/sidecars/fiinquant",
-    "test:scanner-sidecar": "python3.11 -m unittest discover -s examples/sidecars/scanner/tests -v",
+    "test:sidecar": "node scripts/run-python-unittest.mjs examples/sidecars/fiinquant",
+    "test:scanner-sidecar": "node scripts/run-python-unittest.mjs examples/sidecars/scanner/tests -v",
     "verify": "npm run typecheck && npm run build:demo && npm test && npm run test:browser",
     "verify:release": "node scripts/verify-release.mjs",
     "prepublishOnly": "npm run verify:release && npm run typecheck && npm run test:unit && npm run test:package",

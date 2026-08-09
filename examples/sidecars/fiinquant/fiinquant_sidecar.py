@@ -8,6 +8,7 @@ See README.md for installation and security boundaries.
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import json
 import math
 import os
@@ -34,6 +35,19 @@ SUPPORTED_INTERVALS = set(INTERVAL_SECONDS) | CALENDAR_INTERVALS
 TTL_INTRADAY = 15.0
 TTL_DAILY = 120.0
 STREAM_AUTH_TIMEOUT_SECONDS = 5.0
+
+
+def dependency_versions() -> dict[str, str | None]:
+    versions: dict[str, str | None] = {}
+    for package in ("fiinquantx", "signalrcore", "msgpack"):
+        try:
+            versions[package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            versions[package] = None
+    return versions
+
+
+DEPENDENCY_VERSIONS = dependency_versions()
 
 
 def load_env() -> None:
@@ -283,16 +297,13 @@ class FiinQuantGateway:
     def make_stream(self, tickers: list[str], callback):
         client = self._ensure_client()
         stream = client.Trading_Data_Stream(tickers=tickers, callback=callback)
-        self._disable_sdk_reconnect(stream)
+        self._use_outer_stream_reconnect(stream)
         return stream
 
     @staticmethod
-    def _disable_sdk_reconnect(stream) -> None:
-        """Let TickHub own retries; FiinQuantX currently starts two retry loops."""
-        try:
-            from signalrcore.hub_connection_builder import HubConnectionBuilder
-        except ImportError:
-            return
+    def _use_outer_stream_reconnect(stream) -> None:
+        """Let TickHub retry one stream instead of running two SDK retry loops."""
+        from signalrcore.hub_connection_builder import HubConnectionBuilder
 
         def build_connection():
             return HubConnectionBuilder().with_url(stream.url, options={
@@ -305,9 +316,9 @@ class FiinQuantGateway:
             original_disconnect()
             stream._stop_event.set()
 
-        # FiinQuantX 0.1.64 combines signalrcore automatic reconnect with its
-        # own reconnect loop. A disconnect can therefore multiply sockets and
-        # threads. TickHub performs one bounded retry instead.
+        # FiinQuantX 0.1.67 combines signalrcore automatic reconnect with its
+        # own reconnect loop. Stop both when the upstream socket closes;
+        # TickHub observes the stream thread ending and performs one retry.
         stream._build_connection = build_connection
         stream._handle_disconnect = lambda: None
         stream._on_disconnect = on_disconnect
@@ -920,6 +931,7 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
         return web.json_response(
             {"ok": True, "loggedIn": bool(current_gateway and current_gateway.logged_in),
              "configured": current_gateway is not None,
+             "dependencies": DEPENDENCY_VERSIONS,
              "tokenConfigured": token_configured,
              "authorized": authorized,
              "stream": current_hub.status() if authorized and current_hub is not None else None}

@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
+import { fiinQuantProxyToken, providerRuntimeIntegration } from './provider-runtime/vite-plugin';
 import { scannerIntegration } from './scanner/vite-plugin';
 
 const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
@@ -328,10 +329,16 @@ export default defineConfig(({ mode }) => {
     apiKey: env.DNSE_API_KEY?.trim() ?? '',
     apiSecret: env.DNSE_API_SECRET?.trim() ?? '',
   };
-  const proxies = providerProxy(env.FIINQUANT_SIDECAR_TOKEN?.trim() ?? '');
+  const proxies = providerProxy(fiinQuantProxyToken());
   return {
     root: WORKSTATION_ROOT,
-    plugins: [dnseRestProxy(credentials), assistantApiProxy(), assistantIntegration(), scannerIntegration()],
+    plugins: [
+      providerRuntimeIntegration(),
+      dnseRestProxy(credentials),
+      assistantApiProxy(),
+      assistantIntegration(),
+      scannerIntegration(),
+    ],
     build: {
       outDir: '../../dist',
       emptyOutDir: true,

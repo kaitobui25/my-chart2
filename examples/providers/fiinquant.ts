@@ -13,6 +13,11 @@ export interface FiinQuantHealth {
   ok: boolean;
   configured: boolean;
   loggedIn: boolean;
+  dependencies?: {
+    fiinquantx: string | null;
+    signalrcore: string | null;
+    msgpack: string | null;
+  };
   tokenConfigured?: boolean;
   authorized?: boolean;
   stream?: {
@@ -34,6 +39,7 @@ export interface FiinQuantDatafeedOptions {
 }
 
 const MAX_HISTORY_REQUEST = 50_000;
+const MAX_LATEST_CALENDAR_HISTORY_REQUEST = 100;
 const FIINQUANT_UTC_OFFSET_MINUTES = 420;
 
 function mergeCandles(...groups: Candle[][]): Candle[] {
@@ -141,7 +147,12 @@ export class FiinQuantDatafeed implements Datafeed {
         requestedLimit,
       );
       try {
-        const remote = await this.fetchHistory(normalizedSymbol, interval, requestedLimit);
+        // Large single-organization requests regularly time out at FiinGroup's
+        // gateway. Range requests still backfill older data when Replay needs it.
+        const remoteLimit = interval === '1d' || isCalendarInterval(interval)
+          ? Math.min(requestedLimit, MAX_LATEST_CALENDAR_HISTORY_REQUEST)
+          : requestedLimit;
+        const remote = await this.fetchHistory(normalizedSymbol, interval, remoteLimit);
         await this.persistHistory(normalizedSymbol, interval, remote, this.returnedCoverage(remote, interval));
         return mergeCandles(cached, remote).slice(-requestedLimit);
       } catch (error) {
@@ -297,9 +308,12 @@ export class FiinQuantDatafeed implements Datafeed {
     try {
       res = await this.fetchImpl(url, {
         headers: this.sidecarHeaders(),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(60_000),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new Error('FiinQuant history request timed out while waiting for the upstream provider. Try again.');
+      }
       throw new Error(`Cannot reach the FiinQuant sidecar at ${this.baseUrl}. Start the reference sidecar in examples/sidecars/fiinquant.`);
     }
     const payload = await res.json().catch(() => ({}));

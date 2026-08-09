@@ -5,19 +5,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const directory = mkdtempSync(join(tmpdir(), 'l2chart-package-'));
+const npmCli = process.env.npm_execpath;
+
+function runNpm(args, options) {
+  if (npmCli) return execFileSync(process.execPath, [npmCli, ...args], options);
+  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return execFileSync(command, args, options);
+}
 
 try {
-  execFileSync('npm', ['run', 'build:lib'], { stdio: 'inherit' });
-  const packed = JSON.parse(execFileSync(
-    'npm',
+  runNpm(['run', 'build:lib'], { stdio: 'inherit' });
+  const packed = JSON.parse(runNpm(
     ['pack', '--ignore-scripts', '--json', '--pack-destination', directory],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
   ));
   const tarball = join(directory, packed[0].filename);
 
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-  execFileSync(
-    'npm',
+  runNpm(
     ['install', '--ignore-scripts', '--no-audit', '--no-fund', tarball],
     { cwd: directory, stdio: 'inherit' },
   );

@@ -10,7 +10,9 @@ WORKDIR /app
 
 COPY requirements.txt requirements-provider.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt \
-    && python -m pip install --no-cache-dir --no-deps -r requirements-provider.txt \
+    && python -m pip install --no-cache-dir --upgrade -r requirements-provider.txt \
+    && python -m pip install --no-cache-dir --upgrade --no-deps msgpack==1.2.1 \
+    && python -c "from importlib.metadata import version; from signalrcore.hub_connection_builder import HubConnectionBuilder; assert version('fiinquantx') == '0.1.67'; assert version('signalrcore') == '0.9.71'; assert version('msgpack') == '1.2.1'" \
     && adduser --disabled-password --gecos "" --uid 10001 app
 
 COPY --chown=app:app fiinquant_sidecar.py ./
