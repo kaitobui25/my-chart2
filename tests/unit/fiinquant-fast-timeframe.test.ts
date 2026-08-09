@@ -147,10 +147,10 @@ describe('FiinQuant fast timeframe history', () => {
     expect(cachedDaily).toEqual(remoteDaily);
   });
 
-  it('refreshes cached monthly history with a small daily request instead of another heavy monthly fetch', async () => {
-    const monthly = dailyCandles(18, Date.UTC(2024, 0, 1) / 1000).map((candle, index) => ({
+  it('refreshes a full cached monthly history with a small daily request instead of another heavy monthly fetch', async () => {
+    const monthly = dailyCandles(100, Date.UTC(2018, 0, 1) / 1000).map((candle, index) => ({
       ...candle,
-      time: Date.UTC(2024, index, 1) / 1000,
+      time: Date.UTC(2018, index, 1) / 1000,
     }));
     const cache = keyedMemoryCache([{ symbol: 'SSI', interval: '1M', candles: monthly }]);
     const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
