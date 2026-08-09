@@ -1,0 +1,270 @@
+name: Canonical documentation synchronization
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: current-doc-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPENCODE_MODEL: opencode/deepseek-v4-flash-free
+      OPENCODE_VERSION: 1.18.15
+      DOC_SYNC_BRANCH: docs-sync/current
+      GH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN || github.token }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN || github.token }}
+
+      - name: Fetch remote branches
+        run: git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Install OpenCode
+        run: |
+          set -euo pipefail
+          npm install -g "opencode-ai@${OPENCODE_VERSION}"
+          opencode --version
+
+      - name: Resolve target, baseline and rolling PR
+        id: state
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          target_sha="$(git rev-parse origin/main)"
+
+          matching_prs="$(
+            gh pr list \
+              --state open \
+              --base main \
+              --limit 100 \
+              --json number,title,headRefName,labels \
+              --jq '[.[] |
+                select(.title | startswith("[docs-sync] ")) |
+                select(any(.labels[]; .name == "documentation"))
+              ]'
+          )"
+
+          pr_count="$(jq 'length' <<<"$matching_prs")"
+          if [ "$pr_count" -gt 1 ]; then
+            echo "::error::More than one open [docs-sync] PR targets main. Clean up the ambiguous rolling state first."
+            exit 1
+          fi
+
+          pr_exists=false
+          pr_number=""
+          remote_branch_exists=false
+
+          if [ "$pr_count" -eq 1 ]; then
+            pr_exists=true
+            pr_number="$(jq -r '.[0].number' <<<"$matching_prs")"
+            head_branch="$(jq -r '.[0].headRefName' <<<"$matching_prs")"
+
+            git fetch origin "$head_branch"
+            git switch -C "$head_branch" "origin/$head_branch"
+            git rebase origin/main
+          else
+            head_branch="$DOC_SYNC_BRANCH"
+            if git show-ref --verify --quiet "refs/remotes/origin/$head_branch"; then
+              remote_branch_exists=true
+            fi
+            git switch -C "$head_branch" origin/main
+          fi
+
+          baseline_sha="$(jq -r '.documented_sha' docs/current/_meta.json)"
+          mode="incremental"
+          should_run=true
+          japan_day="$(TZ=Asia/Tokyo date +%u)"
+
+          if [ "$japan_day" = "7" ]; then
+            mode="full-reconciliation"
+          elif [ "$baseline_sha" = "$target_sha" ]; then
+            should_run=false
+          elif ! git cat-file -e "${baseline_sha}^{commit}" 2>/dev/null \
+            || ! git merge-base --is-ancestor "$baseline_sha" origin/main; then
+            mode="full-reconciliation"
+          fi
+
+          {
+            echo "target_sha=$target_sha"
+            echo "baseline_sha=$baseline_sha"
+            echo "mode=$mode"
+            echo "should_run=$should_run"
+            echo "pr_exists=$pr_exists"
+            echo "pr_number=$pr_number"
+            echo "head_branch=$head_branch"
+            echo "remote_branch_exists=$remote_branch_exists"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "target_sha=$target_sha"
+          echo "baseline_sha=$baseline_sha"
+          echo "mode=$mode"
+          echo "should_run=$should_run"
+          echo "head_branch=$head_branch"
+          echo "existing_pr=$pr_number"
+
+      - name: Run OpenCode documentation agent
+        if: steps.state.outputs.should_run == 'true'
+        env:
+          OPENCODE_CONFIG: ${{ github.workspace }}/agent/opencode/current-doc-sync.json
+          TARGET_SHA: ${{ steps.state.outputs.target_sha }}
+          BASELINE_SHA: ${{ steps.state.outputs.baseline_sha }}
+          SYNC_MODE: ${{ steps.state.outputs.mode }}
+        run: |
+          set -o pipefail
+          timeout 1200s opencode run --auto \
+            --model "$OPENCODE_MODEL" \
+            "Read and follow agent/prompts/daily-current-doc-sync.md exactly. Runtime context: target_sha=${TARGET_SHA}; baseline_sha=${BASELINE_SHA}; synchronization_mode=${SYNC_MODE}. Work only in this checked-out repository. Do not commit, push, create PRs, or use the web." \
+            2>&1 | tee /tmp/opencode-doc-sync.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Validate docs-only result
+        if: steps.state.outputs.should_run == 'true'
+        id: validate
+        env:
+          TARGET_SHA: ${{ steps.state.outputs.target_sha }}
+          SYNC_MODE: ${{ steps.state.outputs.mode }}
+        run: |
+          set -euo pipefail
+
+          node scripts/check-current-docs.mjs
+
+          changed_paths="$(
+            {
+              git diff --name-only
+              git diff --cached --name-only
+              git ls-files --others --exclude-standard
+            } | sed '/^$/d' | sort -u
+          )"
+
+          if [ -z "$changed_paths" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No documentation changes were produced."
+            exit 0
+          fi
+
+          while IFS= read -r path; do
+            case "$path" in
+              docs/current/README.md|\
+              docs/current/ARCHITECTURE.md|\
+              docs/current/FEATURES.md|\
+              docs/current/DATA_SOURCES.md|\
+              docs/current/SCANNER.md|\
+              docs/current/REPLAY.md|\
+              docs/current/OPERATIONS.md|\
+              docs/current/RECENT_CHANGES.md|\
+              docs/current/_meta.json)
+                ;;
+              *)
+                echo "::error::OpenCode changed a forbidden path: $path"
+                exit 1
+                ;;
+            esac
+          done <<<"$changed_paths"
+
+          documented_sha="$(jq -r '.documented_sha' docs/current/_meta.json)"
+          documented_mode="$(jq -r '.mode' docs/current/_meta.json)"
+
+          if [ "$documented_sha" != "$TARGET_SHA" ]; then
+            echo "::error::docs/current/_meta.json documented_sha=$documented_sha but target=$TARGET_SHA"
+            exit 1
+          fi
+
+          if [ "$documented_mode" != "$SYNC_MODE" ]; then
+            echo "::error::docs/current/_meta.json mode=$documented_mode but expected=$SYNC_MODE"
+            exit 1
+          fi
+
+          {
+            echo "changed=true"
+            echo "changed_paths<<EOF"
+            echo "$changed_paths"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish rolling docs PR
+        if: steps.state.outputs.should_run == 'true' && steps.validate.outputs.changed == 'true'
+        env:
+          TARGET_SHA: ${{ steps.state.outputs.target_sha }}
+          BASELINE_SHA: ${{ steps.state.outputs.baseline_sha }}
+          SYNC_MODE: ${{ steps.state.outputs.mode }}
+          HEAD_BRANCH: ${{ steps.state.outputs.head_branch }}
+          PR_EXISTS: ${{ steps.state.outputs.pr_exists }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          REMOTE_BRANCH_EXISTS: ${{ steps.state.outputs.remote_branch_exists }}
+          CHANGED_PATHS: ${{ steps.validate.outputs.changed_paths }}
+        run: |
+          set -euo pipefail
+
+          short_sha="${TARGET_SHA:0:7}"
+
+          git add \
+            docs/current/README.md \
+            docs/current/ARCHITECTURE.md \
+            docs/current/FEATURES.md \
+            docs/current/DATA_SOURCES.md \
+            docs/current/SCANNER.md \
+            docs/current/REPLAY.md \
+            docs/current/OPERATIONS.md \
+            docs/current/RECENT_CHANGES.md \
+            docs/current/_meta.json
+
+          git commit -m "docs: sync current documentation through ${short_sha}"
+
+          if [ "$PR_EXISTS" = "true" ] || [ "$REMOTE_BRANCH_EXISTS" = "true" ]; then
+            git push --force-with-lease origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          else
+            git push -u origin "HEAD:refs/heads/${HEAD_BRANCH}"
+          fi
+
+          body_file="$(mktemp)"
+          {
+            echo "Automated current-documentation synchronization."
+            echo
+            echo "- Runtime: OpenCode ${OPENCODE_VERSION}"
+            echo "- Model: \`${OPENCODE_MODEL}\`"
+            echo "- Baseline: \`${BASELINE_SHA}\`"
+            echo "- Target main: \`${TARGET_SHA}\`"
+            echo "- Mode: \`${SYNC_MODE}\`"
+            echo "- Validation: \`node scripts/check-current-docs.mjs\` passed"
+            echo
+            echo "Changed canonical files:"
+            while IFS= read -r path; do
+              [ -n "$path" ] && echo "- \`$path\`"
+            done <<<"$CHANGED_PATHS"
+            echo
+            echo "The workflow enforces a hard post-run allowlist: only the nine canonical files under \`docs/current/\` may change."
+          } > "$body_file"
+
+          if [ "$PR_EXISTS" = "true" ]; then
+            gh pr edit "$PR_NUMBER" --body-file "$body_file"
+          else
+            gh pr create \
+              --draft \
+              --base main \
+              --head "$HEAD_BRANCH" \
+              --title "[docs-sync] sync main through ${short_sha}" \
+              --label documentation \
+              --body-file "$body_file"
+          fi
