@@ -80,14 +80,15 @@ describe('lazy chart provider lifecycle', () => {
   it('does not spend FiinQuant ticker quota on background watchlist feeds', async () => {
     const code = await transformedWorkstation();
     const watchlistStart = code.indexOf('function syncWatchlistFeeds(seedSymbols: string[] = []): void {');
-    const watchlistEnd = code.indexOf('\n}', watchlistStart);
-    const watchlistBlock = code.slice(watchlistStart, watchlistEnd);
+    expect(watchlistStart).toBeGreaterThan(-1);
+    const watchlistBlock = code.slice(watchlistStart, watchlistStart + 4000);
     const clearSubscriptions = watchlistBlock.indexOf('watchlistUnsubscribers = [];');
     const fiinQuantReturn = watchlistBlock.indexOf("if (activeProvider === 'fiinquant') return;");
     const providerLookup = watchlistBlock.indexOf('const provider = currentFeed();');
-    expect(watchlistStart).toBeGreaterThan(-1);
+    const bulkSubscription = watchlistBlock.indexOf('provider.feed.subscribeMany');
     expect(clearSubscriptions).toBeGreaterThan(-1);
     expect(fiinQuantReturn).toBeGreaterThan(clearSubscriptions);
     expect(providerLookup).toBeGreaterThan(fiinQuantReturn);
+    expect(bulkSubscription).toBeGreaterThan(providerLookup);
   });
 });
