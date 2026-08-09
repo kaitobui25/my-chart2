@@ -282,35 +282,10 @@ class FiinQuantGateway:
 
     def make_stream(self, tickers: list[str], callback):
         client = self._ensure_client()
-        stream = client.Trading_Data_Stream(tickers=tickers, callback=callback)
-        self._disable_sdk_reconnect(stream)
-        return stream
-
-    @staticmethod
-    def _disable_sdk_reconnect(stream) -> None:
-        """Let TickHub own retries; FiinQuantX currently starts two retry loops."""
-        try:
-            from signalrcore.hub_connection_builder import HubConnectionBuilder
-        except ImportError:
-            return
-
-        def build_connection():
-            return HubConnectionBuilder().with_url(stream.url, options={
-                "access_token_factory": lambda: stream.access_token()
-            }).build()
-
-        original_disconnect = stream._on_disconnect
-
-        def on_disconnect() -> None:
-            original_disconnect()
-            stream._stop_event.set()
-
-        # FiinQuantX 0.1.64 combines signalrcore automatic reconnect with its
-        # own reconnect loop. A disconnect can therefore multiply sockets and
-        # threads. TickHub performs one bounded retry instead.
-        stream._build_connection = build_connection
-        stream._handle_disconnect = lambda: None
-        stream._on_disconnect = on_disconnect
+        # FiinQuantX 0.1.67 owns its SignalR connection lifecycle. Do not
+        # replace private stream methods with the 0.1.64 workaround: that old
+        # builder is incompatible with signalrcore 1.x negotiation validation.
+        return client.Trading_Data_Stream(tickers=tickers, callback=callback)
 
 
 class HistoryCache:
