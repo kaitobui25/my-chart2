@@ -89,14 +89,15 @@ describe('FiinQuant fast timeframe history', () => {
   it('returns cached daily history immediately while remote refresh runs in background', async () => {
     const cached = dailyCandles(40);
     const cache = keyedMemoryCache([{ symbol: 'PGI', interval: '1d', candles: cached }]);
-    const fetchImpl = vi.fn(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
     const result = await resolvesQuickly(feed.getHistory('PGI', '1d', 500));
 
     expect(result).toEqual(cached);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get('interval')).toBe('1d');
     expect(url.searchParams.get('limit')).toBe('100');
   });
@@ -104,15 +105,16 @@ describe('FiinQuant fast timeframe history', () => {
   it('uses cached daily candles to build weekly history without waiting for FiinQuant', async () => {
     const daily = dailyCandles(220);
     const cache = keyedMemoryCache([{ symbol: 'PGI', interval: '1d', candles: daily }]);
-    const fetchImpl = vi.fn(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
     const weekly = await resolvesQuickly(feed.getHistory('PGI', '1w', 20));
 
     expect(weekly).toHaveLength(20);
     expect(weekly.every((candle, index) => index === 0 || candle.time > weekly[index - 1].time)).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get('interval')).toBe('1d');
     expect(url.searchParams.get('limit')).toBe('100');
   });
@@ -120,7 +122,7 @@ describe('FiinQuant fast timeframe history', () => {
   it('fetches calendar cold history through the daily source so the master daily cache is preserved', async () => {
     const remoteDaily = dailyCandles(174);
     const cache = keyedMemoryCache();
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       expect(url.searchParams.get('interval')).toBe('1d');
       expect(url.searchParams.get('limit')).toBe('174');
@@ -128,7 +130,8 @@ describe('FiinQuant fast timeframe history', () => {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
-    }) as unknown as typeof fetch;
+    });
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
     const weekly = await feed.getHistory('PGI', '1w', 20);
@@ -139,7 +142,7 @@ describe('FiinQuant fast timeframe history', () => {
       500,
     );
 
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(weekly).toHaveLength(20);
     expect(cachedDaily).toEqual(remoteDaily);
   });
@@ -150,14 +153,15 @@ describe('FiinQuant fast timeframe history', () => {
       time: Date.UTC(2024, index, 1) / 1000,
     }));
     const cache = keyedMemoryCache([{ symbol: 'SSI', interval: '1M', candles: monthly }]);
-    const fetchImpl = vi.fn(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
     const result = await resolvesQuickly(feed.getHistory('SSI', '1M', 100));
 
     expect(result).toEqual(monthly);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get('interval')).toBe('1d');
     expect(url.searchParams.get('limit')).toBe('100');
   });
