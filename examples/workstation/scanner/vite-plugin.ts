@@ -1,1 +1,1 @@
-export { scannerIntegration } from './vite-plugin-v2';
+export { scannerIntegration } from './vite-plugin-v3';

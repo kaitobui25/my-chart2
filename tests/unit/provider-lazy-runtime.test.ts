@@ -38,4 +38,17 @@ describe('lazy chart provider lifecycle', () => {
     expect(code).toContain("if (activeProvider === 'fiinquant') {");
     expect(code).toContain("} else if (activeProvider === 'vnstock') {");
   });
+
+  it('opens scanner results without loading hidden or stale symbols', async () => {
+    const code = await transformedWorkstation();
+    expect(code).toContain('for (const tile of visibleTilesForLayout(activeLayout)) void tile.load();');
+    expect(code).not.toContain('for (const tile of tiles) void tile.load();');
+    expect(code).toContain('function setActiveProvider(provider: PriceProviderId, preserveActiveSymbol = false): void {');
+    expect(code).toContain('if (activeSymbolBeforeProviderSwitch) activeTile?.setSymbol(activeSymbolBeforeProviderSwitch, false);');
+
+    const stageSymbol = code.indexOf('activeTile?.setSymbol(nextSymbol, false);');
+    const switchProvider = code.indexOf('setActiveProvider(targetProvider, true);');
+    expect(stageSymbol).toBeGreaterThan(-1);
+    expect(switchProvider).toBeGreaterThan(stageSymbol);
+  });
 });
