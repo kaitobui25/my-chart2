@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import type { Plugin } from 'vite';
@@ -31,6 +31,17 @@ const FIINQUANT_SIDECAR_PATH = path.join(FIINQUANT_DIR, 'fiinquant_sidecar.py');
 const FIINQUANT_REQUIREMENTS_PATH = path.join(FIINQUANT_DIR, 'requirements.txt');
 const FIINQUANT_PROVIDER_REQUIREMENTS_PATH = path.join(FIINQUANT_DIR, 'requirements-provider.txt');
 const FIINQUANT_VENV_DIR = path.join(FIINQUANT_DIR, '.venv');
+
+function providerRequirementVersion(packageName: string): string {
+  const requirements = readFileSync(FIINQUANT_PROVIDER_REQUIREMENTS_PATH, 'utf8');
+  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = requirements.match(new RegExp(`^${escapedName}==([^\\s;]+)\\s*$`, 'im'));
+  if (!match) throw new Error(`Missing pinned ${packageName} in ${FIINQUANT_PROVIDER_REQUIREMENTS_PATH}`);
+  return match[1];
+}
+
+const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');
+const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');
 
 function readSimpleEnv(filePath: string): Record<string, string> {
   if (!existsSync(filePath)) return {};
@@ -104,9 +115,18 @@ function canRunPython(spec: CommandSpec): boolean {
   return !result.error && result.status === 0;
 }
 
-function hasFiinQuantDependencies(spec: CommandSpec): boolean {
-  const result = runSync(spec, ['-c', 'import aiohttp; import FiinQuantX']);
-  return !result.error && result.status === 0;
+function hasCurrentFiinQuantDependencies(spec: CommandSpec): boolean {
+  const versionCheck = [
+    'import importlib.metadata as metadata',
+    'import aiohttp',
+    'import FiinQuantX',
+    `ok = metadata.version("fiinquantx") == ${JSON.stringify(FIINQUANT_REQUIRED_VERSION)} and metadata.version("signalrcore") == ${JSON.stringify(SIGNALRCORE_REQUIRED_VERSION)}`,
+    'raise SystemExit(0 if ok else 1)',
+  ].join('; ');
+  const result = runSync(spec, ['-c', versionCheck]);
+  if (result.error || result.status !== 0) return false;
+  const dependencyCheck = runSync(spec, ['-m', 'pip', 'check']);
+  return !dependencyCheck.error && dependencyCheck.status === 0;
 }
 
 function fiinQuantVenvPython(): string {
@@ -115,14 +135,11 @@ function fiinQuantVenvPython(): string {
     : path.join(FIINQUANT_VENV_DIR, 'bin', 'python');
 }
 
-function pythonCandidates(): CommandSpec[] {
+function bootstrapPythonCandidates(): CommandSpec[] {
   const candidates: CommandSpec[] = [];
   if (process.env.FIINQUANT_PYTHON) {
     candidates.push(commandSpec(process.env.FIINQUANT_PYTHON, [], 'FIINQUANT_PYTHON'));
   }
-
-  const venvPython = fiinQuantVenvPython();
-  if (existsSync(venvPython)) candidates.push(commandSpec(venvPython, [], 'FiinQuant .venv'));
 
   if (process.env.VIRTUAL_ENV) {
     const activeVenvPython = process.platform === 'win32'
@@ -157,34 +174,58 @@ function runChecked(spec: CommandSpec, args: string[]): void {
   }
 }
 
+function installFiinQuantEnvironment(venv: CommandSpec): void {
+  runChecked(venv, [
+    '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', FIINQUANT_REQUIREMENTS_PATH,
+  ]);
+  runChecked(venv, [
+    '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', FIINQUANT_PROVIDER_REQUIREMENTS_PATH,
+  ]);
+  runChecked(venv, ['-m', 'pip', 'check']);
+  if (!hasCurrentFiinQuantDependencies(venv)) {
+    throw new Error(
+      `FiinQuant .venv does not match FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION} after install.`,
+    );
+  }
+}
+
 function resolveFiinQuantPython(): CommandSpec {
-  for (const candidate of pythonCandidates()) {
-    if (canRunPython(candidate) && hasFiinQuantDependencies(candidate)) {
-      console.log(`[fiinquant] Using ${candidate.label}`);
-      return candidate;
+  if (process.env.FIINQUANT_PYTHON) {
+    const explicit = commandSpec(process.env.FIINQUANT_PYTHON, [], 'FIINQUANT_PYTHON');
+    if (canRunPython(explicit) && hasCurrentFiinQuantDependencies(explicit)) {
+      console.log(`[fiinquant] Using FIINQUANT_PYTHON (FiinQuantX ${FIINQUANT_REQUIRED_VERSION})`);
+      return explicit;
     }
+    console.warn(
+      `[fiinquant] FIINQUANT_PYTHON is not on FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION}; using the managed .venv instead.`,
+    );
   }
 
-  console.log('[fiinquant] Preparing local Python environment on first use...');
-  const bootstrap = pythonCandidates().find(canRunPython);
+  const venvPython = fiinQuantVenvPython();
+  if (existsSync(venvPython)) {
+    const existing = commandSpec(venvPython, [], 'FiinQuant .venv');
+    if (canRunPython(existing) && hasCurrentFiinQuantDependencies(existing)) {
+      console.log(`[fiinquant] Using FiinQuant .venv (FiinQuantX ${FIINQUANT_REQUIRED_VERSION})`);
+      return existing;
+    }
+    if (canRunPython(existing)) {
+      console.log(`[fiinquant] Updating local Python environment to FiinQuantX ${FIINQUANT_REQUIRED_VERSION}...`);
+      installFiinQuantEnvironment(existing);
+      return existing;
+    }
+    console.warn('[fiinquant] Recreating unusable local Python environment...');
+    rmSync(FIINQUANT_VENV_DIR, { recursive: true, force: true });
+  }
+
+  console.log(`[fiinquant] Preparing local Python environment with FiinQuantX ${FIINQUANT_REQUIRED_VERSION}...`);
+  const bootstrap = bootstrapPythonCandidates().find(canRunPython);
   if (!bootstrap) {
     throw new Error('Python 3.11+ was not found. Install Python 3.11 and run npm run dev again.');
   }
 
-  const venvPython = fiinQuantVenvPython();
-  if (!existsSync(venvPython)) {
-    runChecked(bootstrap, ['-m', 'venv', FIINQUANT_VENV_DIR]);
-  }
-
-  const venv = commandSpec(venvPython, [], 'FiinQuant .venv');
-  runChecked(venv, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', FIINQUANT_REQUIREMENTS_PATH]);
-  runChecked(venv, [
-    '-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps', '-r', FIINQUANT_PROVIDER_REQUIREMENTS_PATH,
-  ]);
-
-  if (!hasFiinQuantDependencies(venv)) {
-    throw new Error('FiinQuant Python environment was created but aiohttp/FiinQuantX cannot be imported.');
-  }
+  runChecked(bootstrap, ['-m', 'venv', FIINQUANT_VENV_DIR]);
+  const venv = commandSpec(fiinQuantVenvPython(), [], 'FiinQuant .venv');
+  installFiinQuantEnvironment(venv);
   return venv;
 }
 
