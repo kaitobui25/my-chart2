@@ -33,9 +33,11 @@ and is not stored in this repository or in the npm package. Its wheel metadata
 does not currently declare a software license. Confirm provider usage and
 redistribution terms before publishing a prebuilt sidecar image.
 
-This example pins `FiinQuantX==0.1.67` and `signalrcore==1.0.2`. Provider
-requirements are first installed with their normal dependencies. SignalR 1.0.2
-currently declares `msgpack==1.1.2`, but that release is affected by
+This example pins `FiinQuantX==0.1.67` and `signalrcore==0.9.71`. FiinQuant's
+realtime endpoint returns the legacy negotiation shape without a
+`negotiateVersion`; SignalR 1.x rejects that response, while 0.9.71 remains
+compatible. Provider requirements are first installed with their normal
+dependencies. SignalR 0.9.71 declares `msgpack==1.0.2`, but that release is affected by
 `PYSEC-2026-3625`; after the provider install this example deliberately replaces
 it with patched `msgpack==1.2.1`. The sidecar uses SignalR's JSON path rather
 than its MessagePack hub protocol. CI treats only that one metadata mismatch as

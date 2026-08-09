@@ -40,6 +40,43 @@ function memoryCache(): BrowserHistoryCacheApi {
 }
 
 describe('FiinQuantDatafeed browser history cache', () => {
+  it('reports an upstream timeout instead of claiming the sidecar is unreachable', async () => {
+    const timeout = new Error('timed out');
+    timeout.name = 'TimeoutError';
+    const fetchImpl = vi.fn(async () => {
+      throw timeout;
+    }) as unknown as typeof fetch;
+    const feed = new FiinQuantDatafeed('/fiinquant-api', '', {
+      cache: memoryCache(),
+      fetchImpl,
+    });
+
+    await expect(feed.getHistory('ACB', '1d', 500))
+      .rejects.toThrow('timed out while waiting for the upstream provider');
+  });
+
+  it('allows a slow first provider history response to exceed fifteen seconds', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    try {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({ candles: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+      const fetchImpl = fetchMock as unknown as typeof fetch;
+      const feed = new FiinQuantDatafeed('/fiinquant-api', '', {
+        cache: memoryCache(),
+        fetchImpl,
+      });
+
+      await expect(feed.getHistory('VCB', '1d', 500)).resolves.toEqual([]);
+      expect(timeout).toHaveBeenCalledWith(60_000);
+      const requestedUrl = new URL(String(fetchMock.mock.calls[0][0]));
+      expect(requestedUrl.searchParams.get('limit')).toBe('100');
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it('reuses a previous recent download for Replay without an old range request', async () => {
     const day = 86_400;
     const candles: Candle[] = [

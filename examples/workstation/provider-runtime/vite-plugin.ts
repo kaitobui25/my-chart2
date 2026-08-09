@@ -48,6 +48,14 @@ const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');
 const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');
 const MSGPACK_REQUIRED_VERSION = pinnedRequirementVersion(FIINQUANT_REQUIREMENTS_PATH, 'msgpack');
 
+export function hasCurrentFiinQuantRuntime(dependencies: unknown): boolean {
+  if (!dependencies || typeof dependencies !== 'object') return false;
+  const installed = dependencies as Record<string, unknown>;
+  return installed.fiinquantx === FIINQUANT_REQUIRED_VERSION
+    && installed.signalrcore === SIGNALRCORE_REQUIRED_VERSION
+    && installed.msgpack === MSGPACK_REQUIRED_VERSION;
+}
+
 function readSimpleEnv(filePath: string): Record<string, string> {
   if (!existsSync(filePath)) return {};
   const values: Record<string, string> = {};
@@ -186,7 +194,7 @@ function installFiinQuantEnvironment(venv: CommandSpec): void {
   runChecked(venv, [
     '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', FIINQUANT_PROVIDER_REQUIREMENTS_PATH,
   ]);
-  // signalrcore 1.0.2 pins msgpack 1.1.2, which is affected by
+  // signalrcore 0.9.71 pins msgpack 1.0.2, which is affected by
   // PYSEC-2026-3625. FiinQuant uses SignalR JSON here, so restore the patched
   // msgpack after the provider resolver has installed the rest of its stack.
   runChecked(venv, [
@@ -348,6 +356,11 @@ async function ensureFiinQuantReady(): Promise<JsonRecord> {
       if (!health?.ok) {
         throw new Error(`FiinQuant sidecar did not become ready at ${FIINQUANT_HEALTH_URL}`);
       }
+      if (!hasCurrentFiinQuantRuntime(health.dependencies)) {
+        throw new Error(
+          `Running FiinQuant sidecar is not on FiinQuantX ${FIINQUANT_REQUIRED_VERSION} / signalrcore ${SIGNALRCORE_REQUIRED_VERSION} / msgpack ${MSGPACK_REQUIRED_VERSION}. Stop the old sidecar once and try Use again.`,
+        );
+      }
       const token = fiinQuantProxyToken();
       if (token && health.tokenConfigured === true && health.authorized === false) {
         throw new Error('Running FiinQuant sidecar uses a different SIDECAR_TOKEN. Stop the old sidecar once and try Use again.');
@@ -361,8 +374,28 @@ async function ensureFiinQuantReady(): Promise<JsonRecord> {
 }
 
 function installProviderRuntimeRoutes(middlewares: {
-  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
+  use(route: string, handler: (
+    req: IncomingMessage,
+    res: ServerResponse,
+    next: (error?: unknown) => void,
+  ) => void | Promise<void>): void;
 }): void {
+  middlewares.use('/fiinquant-api', async (_req, res, next) => {
+    const startup = fiinQuantStarting;
+    if (!startup) {
+      next();
+      return;
+    }
+    try {
+      await startup;
+      next();
+    } catch (error) {
+      sendJson(res, 503, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   middlewares.use('/provider-runtime/health', (req, res) => {
     if (!isAllowedBrowserRequest(req)) {
       sendJson(res, 403, { ok: false, message: 'Cross-site requests are not allowed' });

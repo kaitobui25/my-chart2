@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SIDECAR = ROOT / "examples" / "sidecars" / "fiinquant"
 ALLOWED_MSGPACK_MISMATCH = re.compile(
-    r"^signalrcore 1\.0\.2 has requirement msgpack==1\.1\.2, "
+    r"^signalrcore 0\.9\.71 has requirement msgpack==1\.0\.2, "
     r"but you have msgpack 1\.2\.1\.?$",
     re.IGNORECASE,
 )
@@ -64,7 +64,7 @@ def main() -> None:
             str(SIDECAR / "requirements.txt"))
         run(str(python), "-m", "pip", "install", "--quiet", "--upgrade", "-r",
             str(SIDECAR / "requirements-provider.txt"))
-        # signalrcore 1.0.2 pins msgpack 1.1.2, which is affected by
+        # signalrcore 0.9.71 pins msgpack 1.0.2, which is affected by
         # PYSEC-2026-3625. The sidecar uses SignalR's JSON protocol, so keep the
         # transport stack but force the patched msgpack release afterwards.
         run(str(python), "-m", "pip", "install", "--quiet", "--upgrade",
@@ -76,7 +76,7 @@ def main() -> None:
             "from importlib.metadata import version; "
             "from signalrcore.hub_connection_builder import HubConnectionBuilder; "
             "assert version('fiinquantx') == '0.1.67'; "
-            "assert version('signalrcore') == '1.0.2'; "
+            "assert version('signalrcore') == '0.9.71'; "
             "assert version('msgpack') == '1.2.1'; "
             "print('Provider compatibility check: ok')",
         )

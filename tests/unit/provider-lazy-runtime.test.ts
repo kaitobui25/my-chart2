@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { scannerIntegration } from '../../examples/workstation/scanner/vite-plugin';
+import { hasCurrentFiinQuantRuntime } from '../../examples/workstation/provider-runtime/vite-plugin';
 
 async function transformedWorkstation(): Promise<string> {
   const sourcePath = path.resolve('examples/workstation/main.ts');
@@ -15,6 +16,20 @@ async function transformedWorkstation(): Promise<string> {
 }
 
 describe('lazy chart provider lifecycle', () => {
+  it('rejects an already-running FiinQuant sidecar with a stale dependency stack', () => {
+    expect(hasCurrentFiinQuantRuntime({
+      fiinquantx: '0.1.67',
+      signalrcore: '0.9.71',
+      msgpack: '1.2.1',
+    })).toBe(true);
+    expect(hasCurrentFiinQuantRuntime({
+      fiinquantx: '0.1.67',
+      signalrcore: '1.0.2',
+      msgpack: '1.1.2',
+    })).toBe(false);
+    expect(hasCurrentFiinQuantRuntime(undefined)).toBe(false);
+  });
+
   it('keeps Vnstock idle until explicitly used', async () => {
     const code = await transformedWorkstation();
     expect(code).toContain("type VnstockConnectionState = 'idle' | 'checking' | 'connected' | 'offline';");
@@ -108,13 +123,15 @@ describe('lazy chart provider lifecycle', () => {
 
     expect(baseRequirements).toContain('msgpack==1.2.1');
     expect(providerRequirements).toContain('fiinquantx==0.1.67');
-    expect(providerRequirements).toContain('signalrcore==1.0.2');
+    expect(providerRequirements).toContain('signalrcore==0.9.71');
     expect(runtime).toContain("const FIINQUANT_REQUIRED_VERSION = providerRequirementVersion('fiinquantx');");
     expect(runtime).toContain("const SIGNALRCORE_REQUIRED_VERSION = providerRequirementVersion('signalrcore');");
     expect(runtime).toContain("const MSGPACK_REQUIRED_VERSION = pinnedRequirementVersion(FIINQUANT_REQUIREMENTS_PATH, 'msgpack');");
     expect(runtime).toContain('function hasCurrentFiinQuantDependencies(spec: CommandSpec): boolean {');
     expect(runtime).toContain('Updating local Python environment to FiinQuantX ${FIINQUANT_REQUIRED_VERSION}');
     expect(runtime).toContain("'--no-deps', `msgpack==${MSGPACK_REQUIRED_VERSION}`");
+    expect(runtime).toContain("middlewares.use('/fiinquant-api'");
+    expect(runtime).toContain('await startup;');
     expect(runtime).not.toContain("'-m', 'pip', 'check'");
   });
 });

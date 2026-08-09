@@ -288,6 +288,15 @@ class StreamEndpointTests(AioHTTPTestCase):
             await socket.receive_json(),
         )
 
+    async def test_health_reports_dependency_versions(self) -> None:
+        response = await self.client.get("/health")
+        payload = await response.json()
+
+        self.assertEqual(
+            {"fiinquantx", "signalrcore", "msgpack"},
+            set(payload["dependencies"]),
+        )
+
 
 class HistoryCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_small_cache_does_not_satisfy_larger_history_request(self) -> None:

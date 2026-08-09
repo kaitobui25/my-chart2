@@ -1,4 +1,4 @@
 --extra-index-url https://fiinquant.github.io/fiinquantx/simple
 
 fiinquantx==0.1.67
-signalrcore==1.0.2
+signalrcore==0.9.71
