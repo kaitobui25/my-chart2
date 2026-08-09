@@ -15,7 +15,7 @@ Relevant implementation: `scripts/build-current-doc-context.mjs`, `.github/workf
 
 ### FiinQuant timeframe switching became cache-first for daily-family data
 
-The latest documented main is merge commit `9244a8600162c7065b8db4d3d11c1b01ee9a8885` for PR #16, “Speed up FiinQuant timeframe switching”.
+The relevant implementation milestone was merge commit `9244a8600162c7065b8db4d3d11c1b01ee9a8885` for PR #16, “Speed up FiinQuant timeframe switching”.
 
 Current `examples/providers/fiinquant.ts` can return usable cached daily/week/month data immediately, refresh latest daily-family data in the background, derive calendar previews from cached daily history and warm deeper calendar history separately. A shared two-minute attempt guard prevents repeated refresh work during rapid switching.
 
