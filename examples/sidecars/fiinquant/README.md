@@ -34,18 +34,24 @@ does not currently declare a software license. Confirm provider usage and
 redistribution terms before publishing a prebuilt sidecar image.
 
 This example pins `FiinQuantX==0.1.67` and `signalrcore==1.0.2`. Provider
-requirements are installed with their dependencies so the SignalR/WebSocket
-transport stays compatible with the selected SDK. The workstation's lazy
-provider runtime also checks these pinned versions before starting the sidecar;
-if the managed `.venv` is stale, it upgrades that environment on first use
-instead of silently reusing an older importable SDK.
+requirements are first installed with their normal dependencies. SignalR 1.0.2
+currently declares `msgpack==1.1.2`, but that release is affected by
+`PYSEC-2026-3625`; after the provider install this example deliberately replaces
+it with patched `msgpack==1.2.1`. The sidecar uses SignalR's JSON path rather
+than its MessagePack hub protocol. CI treats only that one metadata mismatch as
+an allowed override, verifies the exact package versions/imports, and still
+fails on any other dependency conflict.
+
+The workstation's lazy provider runtime checks the exact FiinQuantX,
+signalrcore, and msgpack versions before starting the sidecar. If the managed
+`.venv` is stale, it upgrades that environment on first use instead of silently
+reusing an older importable SDK.
 
 CI installs the full provider environment in an isolated Python 3.11 virtual
-environment, runs `pip check`, and runs `pip-audit --local`. `signalrcore` and
-its transitive dependencies are audited normally. `FiinQuantX` is hosted on the
-provider index, not PyPI, so `pip-audit` cannot map it to advisories; its source,
-release process, and license remain a manual trust decision rather than a
-successful audit.
+environment, validates the controlled msgpack override, and runs
+`pip-audit --local`. `FiinQuantX` is hosted on the provider index, not PyPI, so
+`pip-audit` cannot map it to advisories; its source, release process, and license
+remain a manual trust decision rather than a successful audit.
 
 ## Docker quick start
 
@@ -104,7 +110,7 @@ python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m pip install --upgrade -r requirements-provider.txt
-python -m pip check
+python -m pip install --upgrade --no-deps msgpack==1.2.1
 cp .env.example .env
 python fiinquant_sidecar.py
 ```
