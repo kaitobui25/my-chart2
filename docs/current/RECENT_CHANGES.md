@@ -1,7 +1,7 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
 
@@ -20,6 +20,18 @@ Relevant implementation: `.github/workflows/daily-current-doc-sync.yml`, `.githu
 An experiment was added to measure the real path to SSI FastConnect before integration: `scripts/ssi-probe.mjs` plus `agent/experiments/ssi-probe/` runbook and env example. It records auth latency, DNS/TLS baseline, cold/warm 500-candle daily latency, REST paging behavior, intraday `5m`/`1h` latency, board lists and `X-RATELIMIT-*` headers, and stores a redacted report at `agent/experiments/ssi-probe/results/latest.json`. The docs checker treats that report as runtime-only. SSI is still an experiment, not a chart provider.
 
 Relevant implementation: `scripts/ssi-probe.mjs`, `agent/experiments/ssi-probe/README.md`, `agent/experiments/ssi-probe/ssi-probe.env.example`, `scripts/check-current-docs.mjs`.
+
+### Scanner UI refresh and CafeF EOD update card
+
+The workstation scanner was restyled with a Vietnamese sidebar layout (chips, segmented controls, result count) and gained a local EOD status card when `vn_eod` is selected: latest trade date, active stock count, per-symbol retention and a freshness badge with a **Cập nhật EOD** button. The scanner sidecar added `GET /eod/status` and `POST /eod/import-latest`, reusing the same CafeF importer service as the CLI (`cafef_eod._import_latest`) instead of a second Python process; only one EOD update may run at a time. Scanner filter preferences moved to `l2chart.scanner.filters.v2`.
+
+Relevant implementation: `examples/sidecars/scanner/scanner_sidecar.py`, `examples/sidecars/scanner/README.md`, `examples/workstation/scanner/`.
+
+### FiinQuant sidecar hardened historical-range caching
+
+The sidecar `HistoryCache` now coalesces concurrent identical explicit-range history requests into one upstream call and applies a 30-second per-symbol/interval cooldown after FiinQuant upstream 504 gateway timeouts before allowing retries.
+
+Relevant implementation: `examples/sidecars/fiinquant/fiinquant_sidecar.py`.
 
 ## 2026-08-09
 

@@ -1,7 +1,7 @@
 # Current Scanner
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 The scanner is an application subsystem outside the stable chart package. It combines a browser UI with a local Python/aiohttp sidecar and SQLite cache/database.
 
@@ -43,11 +43,15 @@ Current endpoints in `examples/sidecars/scanner/scanner_sidecar.py`:
 
 - `GET /health`
 - `GET /sources`
+- `GET /eod/status`
+- `POST /eod/import-latest`
 - `POST /scan`
 - `GET /runs/{run_id}`
 - `POST /backup`
 
 Scans are asynchronous. `POST /scan` creates a run and returns HTTP 202; the UI polls the run endpoint until completion/error.
+
+`GET /eod/status` reports CafeF local coverage: latest imported trade date, active/snapshot symbol counts, per-symbol retention and active-max-age constants, plus whether an EOD update is running. `POST /eod/import-latest` runs the same CafeF import used by the CLI; it returns HTTP 409 while an update is already running and HTTP 502 on import failure.
 
 ## UI filters
 
@@ -272,6 +276,12 @@ rebuild/update local active stock universe
 ```
 
 The importer supports daily EOD and historical Upto packages. It accepts deterministic local-file or explicit-URL imports in addition to discovering the latest package.
+
+### Scanner UI status card and EOD update
+
+When `VN EOD (CafeF)` is selected, the workstation scanner panel shows a compact local-data status card: latest imported trade date, active stock count, per-symbol retention and a freshness badge. Its **Cập nhật EOD** button calls `POST /eod/import-latest`, which reuses the same importer service as the CLI (`cafef_eod._import_latest`, equivalent to `python cafef_eod.py import-latest --mode eod`) rather than spawning a second Python process.
+
+The network download and ZIP parsing run off the aiohttp event loop. Only one CafeF EOD update may run at a time; a concurrent `POST /eod/import-latest` returns HTTP 409. The UI disables scan/update controls while its own update is active.
 
 ### Validation boundary
 

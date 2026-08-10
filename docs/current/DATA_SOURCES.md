@@ -1,7 +1,7 @@
 # Current Data Sources
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 This page separates chart datafeeds from scanner sources. They are different application boundaries even when they use the same upstream provider name.
 
@@ -218,6 +218,8 @@ Reclassify an existing database without downloading data again:
 ```bash
 python examples/sidecars/scanner/cafef_eod.py reclassify
 ```
+
+The scanner sidecar exposes the same importer over HTTP: `GET /eod/status` reports local CafeF coverage and `POST /eod/import-latest` runs the daily `eod` update (HTTP 409 while an update is already running).
 
 The importer persists canonical adjusted daily OHLCV. Week/Month candles and Heikin Ashi are derived locally rather than duplicated as imported source history.
 

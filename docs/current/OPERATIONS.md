@@ -1,7 +1,7 @@
 # Current Operations
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -190,6 +190,8 @@ python examples/sidecars/scanner/cafef_eod.py import-latest --mode upto
 python examples/sidecars/scanner/cafef_eod.py import-latest --mode eod
 ```
 
+This is the same importer invoked by the scanner UI's **Cập nhật EOD** button through the sidecar `POST /eod/import-latest` endpoint. The scanner sidecar also exposes `GET /eod/status` to inspect local CafeF coverage (latest trade date, active/snapshot counts, retention). Only one EOD update may run at a time; the download and ZIP parsing run off the aiohttp event loop, and a concurrent `POST /eod/import-latest` returns HTTP 409.
+
 ### Inspect local state
 
 ```bash
@@ -346,7 +348,7 @@ Important application-local storage includes:
 ### Scanner
 
 - SQLite: `examples/sidecars/scanner/data/scanner.db` by default;
-- scanner filters stored in browser localStorage as `l2chart.scanner.filters.v1`.
+- scanner filters stored in browser localStorage as `l2chart.scanner.filters.v2`.
 
 Treat scanner SQLite as rebuildable operational data, but remember that import audit/run audit can be useful for debugging and provenance.
 

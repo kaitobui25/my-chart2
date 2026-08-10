@@ -1,7 +1,7 @@
 # Current Feature Inventory
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 Status vocabulary used here:
 

@@ -1,7 +1,7 @@
 # my-chart2 — Current State
 
-**Generated:** 2026-08-10  
-**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 **Documentation role:** canonical snapshot of the implementation at the commit above.
 
 `docs/current/` describes what the repository currently implements. Historical design and build plans under `agent/plan/` are useful context but are not implementation evidence.
