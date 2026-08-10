@@ -351,15 +351,15 @@
 .scanner-table td:first-child { padding-left: 16px; text-align: left; }
 .scanner-table tbody tr { cursor: pointer; transition: background .12s ease; }
 .scanner-table tbody tr:hover { background: color-mix(in srgb, var(--scanner-accent) 6%, transparent); }
-.scanner-symbol-cell { display: grid; gap: 2px; }
-.scanner-symbol-cell strong { font-size: 12px; }
-.scanner-symbol-cell small { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--scanner-muted); font-size: 9px; }
+.scanner-symbol-cell strong { display: block; font-size: 12px; }
+.scanner-symbol-cell small { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--scanner-muted); font-size: 9px; }
 .scanner-positive { color: #31c48d; }
 .scanner-negative { color: #ff7474; }
 .scanner-fresh { color: #31c48d; }
 .scanner-stale { color: #eab651; }
 .scanner-null { opacity: .38; }
-.scanner-signal-cell { display: flex; justify-content: flex-end; gap: 5px; }
+.scanner-signal-cell { text-align: right; }
+.scanner-signal-cell .scanner-mini-badge + .scanner-mini-badge { margin-left: 5px; }
 .scanner-mini-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 0 6px; border-radius: 999px; font-size: 9px; font-weight: 700; }
 .scanner-mini-badge.is-positive { color: #31c48d; background: color-mix(in srgb, #31c48d 10%, transparent); }
 .scanner-mini-badge.is-negative { color: #ff7474; background: color-mix(in srgb, #ff7474 10%, transparent); }
