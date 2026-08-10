@@ -1,9 +1,25 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-09  
-**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
+**Generated:** 2026-08-10  
+**Documented main:** `f9be0da8a542a7f42f5000d4f70050d9cccbcfc6`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
+
+## 2026-08-10
+
+### Current-doc sync became scheduled and commits directly to main
+
+The `.github/workflows/daily-current-doc-sync.yml` workflow now runs on a schedule (daily at 05:37 JST) in addition to manual `workflow_dispatch`. When validated documentation changes exist, it commits them directly to `main` instead of maintaining the rolling `[docs-sync]` pull request.
+
+Sunday runs and runs whose baseline is not an ancestor of target use `full-reconciliation`; otherwise the mode is `incremental`. The run is skipped when `scripts/build-current-doc-context.mjs` reports zero meaningful changed paths or the documented SHA already equals target. CI's `docs-runtime` job now also enforces that the workflow stays direct-to-main: no `gh pr`, no `pull-requests: write` permission, no rolling `docs-sync/current` branch.
+
+Relevant implementation: `.github/workflows/daily-current-doc-sync.yml`, `.github/workflows/ci.yml`, `agent/prompts/daily-current-doc-sync.md`.
+
+### SSI FastConnect real-API probe experiment
+
+An experiment was added to measure the real path to SSI FastConnect before integration: `scripts/ssi-probe.mjs` plus `agent/experiments/ssi-probe/` runbook and env example. It records auth latency, DNS/TLS baseline, cold/warm 500-candle daily latency, REST paging behavior, intraday `5m`/`1h` latency, board lists and `X-RATELIMIT-*` headers, and stores a redacted report at `agent/experiments/ssi-probe/results/latest.json`. The docs checker treats that report as runtime-only. SSI is still an experiment, not a chart provider.
+
+Relevant implementation: `scripts/ssi-probe.mjs`, `agent/experiments/ssi-probe/README.md`, `agent/experiments/ssi-probe/ssi-probe.env.example`, `scripts/check-current-docs.mjs`.
 
 ## 2026-08-09
 
