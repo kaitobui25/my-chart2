@@ -34,6 +34,7 @@ SUPPORTED_INTERVALS = set(INTERVAL_SECONDS) | CALENDAR_INTERVALS
 # Expired entries are returned immediately and refreshed in the background.
 TTL_INTRADAY = 15.0
 TTL_DAILY = 120.0
+HISTORY_GATEWAY_COOLDOWN_SECONDS = 30.0
 STREAM_AUTH_TIMEOUT_SECONDS = 5.0
 
 
@@ -332,6 +333,10 @@ class HistoryCache:
         self._store: dict[tuple[str, str], tuple[list[dict], float, int]] = {}
         self._inflight: set[tuple[str, str]] = set()
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._range_inflight: dict[
+            tuple[str, str, int, int, int], asyncio.Task[list[dict]]
+        ] = {}
+        self._gateway_cooldowns: dict[tuple[str, str], float] = {}
 
     def peek_last(self, symbol: str, interval: str) -> dict | None:
         entry = self._store.get((symbol, interval))
@@ -341,10 +346,20 @@ class HistoryCache:
                   from_time: int | None = None,
                   to_time: int | None = None) -> tuple[list[dict], bool]:
         if from_time is not None and to_time is not None:
-            candles = await asyncio.get_running_loop().run_in_executor(
-                None, self.gateway.fetch_history, symbol, interval, limit,
-                from_time, to_time
-            )
+            request_key = (symbol, interval, limit, from_time, to_time)
+            task = self._range_inflight.get(request_key)
+            if task is None:
+                async def fetch_range() -> list[dict]:
+                    try:
+                        return await self._fetch_range(
+                            symbol, interval, limit, from_time, to_time
+                        )
+                    finally:
+                        self._range_inflight.pop(request_key, None)
+
+                task = asyncio.create_task(fetch_range())
+                self._range_inflight[request_key] = task
+            candles = await asyncio.shield(task)
             return candles, False
         key = (symbol, interval)
         ttl = TTL_DAILY if interval in {"1d", "1w", "1M"} else TTL_INTRADAY
@@ -384,12 +399,44 @@ class HistoryCache:
                 return entry[0][-limit:]
             if force and entry is not None:
                 limit = max(limit, entry[2])
-            loop = asyncio.get_running_loop()
-            candles = await loop.run_in_executor(
-                None, self.gateway.fetch_history, symbol, interval, limit
-            )
+            candles = await self._fetch_gateway_history(symbol, interval, limit)
             self._store[key] = (candles, time.monotonic(), limit)
             return candles
+
+    async def _fetch_range(self, symbol: str, interval: str, limit: int,
+                           from_time: int, to_time: int) -> list[dict]:
+        lock = self._locks.setdefault((symbol, interval), asyncio.Lock())
+        async with lock:
+            return await self._fetch_gateway_history(
+                symbol, interval, limit, from_time, to_time
+            )
+
+    async def _fetch_gateway_history(self, symbol: str, interval: str, limit: int,
+                                     from_time: int | None = None,
+                                     to_time: int | None = None) -> list[dict]:
+        key = (symbol, interval)
+        now = time.monotonic()
+        retry_at = self._gateway_cooldowns.get(key, 0.0)
+        if retry_at > now:
+            wait_seconds = max(1, math.ceil(retry_at - now))
+            raise RuntimeError(
+                f"FiinQuant upstream 504 cooldown; retry in {wait_seconds}s"
+            )
+        self._gateway_cooldowns.pop(key, None)
+
+        try:
+            return await asyncio.get_running_loop().run_in_executor(
+                None, self.gateway.fetch_history, symbol, interval, limit,
+                from_time, to_time
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if (getattr(exc, "status", None) == 504
+                    or ("504" in message and "gateway timeout" in message)):
+                self._gateway_cooldowns[key] = (
+                    time.monotonic() + HISTORY_GATEWAY_COOLDOWN_SECONDS
+                )
+            raise
 
 
 class TickHub:
