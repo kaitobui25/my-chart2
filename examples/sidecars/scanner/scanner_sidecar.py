@@ -10,6 +10,12 @@ from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from cafef_eod import (
+    ACTIVE_MAX_AGE_DAYS,
+    HISTORY_RETAIN_BARS,
+    PROVIDER_ID as EOD_PROVIDER_ID,
+    _import_latest as import_latest_eod,
+)
 from db import ScannerDB
 from engine import ScanExecution, ScannerEngine
 from local_eod_provider import LocalEodProvider
@@ -20,6 +26,10 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / 'data' / 'scanner.db'
 DEFAULT_FIINQUANT_ENV = BASE_DIR.parent / 'fiinquant' / '.env'
 LOOPBACK_ORIGIN_HOSTS = {'127.0.0.1', '::1', 'localhost'}
+
+
+class CafeFEodUpdateBusy(RuntimeError):
+    pass
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -78,6 +88,8 @@ class ScannerRuntime:
         self.engine = engine
         self.jobs: dict[int, ScanExecution] = {}
         self.tasks: dict[int, asyncio.Task] = {}
+        self.eod_update_lock = asyncio.Lock()
+        self.eod_last_error: str | None = None
 
     async def start_scan(self, request: ScanRequest) -> int:
         run_id = await asyncio.to_thread(self.db.begin_scan, request.source, request.to_json())
@@ -95,6 +107,35 @@ class ScannerRuntime:
 
         self.tasks[run_id] = asyncio.create_task(run(), name=f'scanner-run-{run_id}')
         return run_id
+
+    async def eod_status(self) -> dict[str, object]:
+        latest, coverage = await asyncio.gather(
+            asyncio.to_thread(self.db.latest_successful_import, EOD_PROVIDER_ID),
+            asyncio.to_thread(self.db.snapshot_coverage, EOD_PROVIDER_ID),
+        )
+        latest_trade_date = None if latest is None else latest.get('trade_date')
+        return {
+            'provider': EOD_PROVIDER_ID,
+            'updating': self.eod_update_lock.locked(),
+            'latestTradeDate': latest_trade_date,
+            'activeSymbols': int(coverage.get('active_count') or 0),
+            'snapshotSymbols': int(coverage.get('snapshot_count') or 0),
+            'retentionBars': HISTORY_RETAIN_BARS,
+            'activeMaxAgeDays': ACTIVE_MAX_AGE_DAYS,
+            'latestImport': latest,
+            'lastError': self.eod_last_error,
+        }
+
+    async def update_eod(self) -> dict[str, object]:
+        if self.eod_update_lock.locked():
+            raise CafeFEodUpdateBusy('CafeF EOD update is already running')
+        async with self.eod_update_lock:
+            self.eod_last_error = None
+            try:
+                return await asyncio.to_thread(import_latest_eod, self.db, 'eod')
+            except Exception as exc:  # noqa: BLE001
+                self.eod_last_error = str(exc)[:300]
+                raise
 
     def _prune_jobs(self, keep: int = 40) -> None:
         completed = [run_id for run_id, job in self.jobs.items() if job.status != 'running']
@@ -135,11 +176,28 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
             'database': str(runtime.db.path),
             'sources': [provider.capabilities.to_json() for provider in runtime.engine.providers.values()],
             'runningScans': len(runtime.tasks),
+            'eodUpdating': runtime.eod_update_lock.locked(),
         })
 
     async def sources(_request: web.Request) -> web.Response:
         return web.json_response({
             'sources': [provider.capabilities.to_json() for provider in runtime.engine.providers.values()]
+        })
+
+    async def eod_status(_request: web.Request) -> web.Response:
+        return web.json_response(await runtime.eod_status())
+
+    async def eod_import_latest(_request: web.Request) -> web.Response:
+        try:
+            result = await runtime.update_eod()
+        except CafeFEodUpdateBusy as exc:
+            return web.json_response({'message': str(exc)}, status=409)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({'message': f'CafeF EOD update failed: {str(exc)[:300]}'}, status=502)
+        return web.json_response({
+            'ok': True,
+            'result': result,
+            'status': await runtime.eod_status(),
         })
 
     async def scan(request: web.Request) -> web.Response:
@@ -194,6 +252,8 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
     app.on_cleanup.append(on_cleanup)
     app.router.add_get('/health', health)
     app.router.add_get('/sources', sources)
+    app.router.add_get('/eod/status', eod_status)
+    app.router.add_post('/eod/import-latest', eod_import_latest)
     app.router.add_post('/scan', scan)
     app.router.add_get('/runs/{run_id}', run_status)
     app.router.add_post('/backup', backup)

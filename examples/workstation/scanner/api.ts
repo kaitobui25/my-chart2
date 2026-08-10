@@ -1,4 +1,10 @@
-import type { ScannerRequest, ScannerRun, ScannerSource } from './types';
+import type {
+  CafeFEodStatus,
+  CafeFEodUpdateResponse,
+  ScannerRequest,
+  ScannerRun,
+  ScannerSource,
+} from './types';
 
 const BASE = '/scanner-api';
 
@@ -15,6 +21,24 @@ export async function getScannerSources(): Promise<ScannerSource[]> {
   const response = await fetch(`${BASE}/sources`, { signal: AbortSignal.timeout(5000) });
   const payload = await readJson<{ sources: ScannerSource[] }>(response);
   return payload.sources ?? [];
+}
+
+export async function getCafeFEodStatus(): Promise<CafeFEodStatus> {
+  const response = await fetch(`${BASE}/eod/status`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(5000),
+  });
+  return readJson<CafeFEodStatus>(response);
+}
+
+export async function updateCafeFEod(): Promise<CafeFEodUpdateResponse> {
+  const response = await fetch(`${BASE}/eod/import-latest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    signal: AbortSignal.timeout(180_000),
+  });
+  return readJson<CafeFEodUpdateResponse>(response);
 }
 
 export async function startScannerRun(request: ScannerRequest): Promise<number> {
