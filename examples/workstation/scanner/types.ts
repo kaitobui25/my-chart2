@@ -82,6 +82,58 @@ export interface ScannerRun {
   results: ScannerResult[];
 }
 
+export interface CafeFEodImportAudit {
+  id: number;
+  provider: string;
+  source: string;
+  mode: 'eod' | 'upto' | string;
+  adjusted: number;
+  trade_date: number | null;
+  source_url: string | null;
+  source_sha256: string | null;
+  started_at: number;
+  finished_at: number | null;
+  member_count: number;
+  row_count: number;
+  symbol_count: number;
+  inserted_candle_count: number;
+  status: string;
+  error: string | null;
+}
+
+export interface CafeFEodStatus {
+  provider: 'vn_eod';
+  updating: boolean;
+  latestTradeDate: number | null;
+  activeSymbols: number;
+  snapshotSymbols: number;
+  retentionBars: number;
+  activeMaxAgeDays: number;
+  latestImport: CafeFEodImportAudit | null;
+  lastError: string | null;
+}
+
+export interface CafeFEodUpdateResult {
+  ok: boolean;
+  importId: number;
+  mode: string;
+  tradeDate: number;
+  members: number;
+  rows: number;
+  symbols: number;
+  activeSymbols: number;
+  assetTypes: Record<string, number>;
+  candles: number;
+  sha256: string;
+  source: string | null;
+}
+
+export interface CafeFEodUpdateResponse {
+  ok: true;
+  result: CafeFEodUpdateResult;
+  status: CafeFEodStatus;
+}
+
 declare global {
   interface Window {
     __L2CHART_SCANNER_BRIDGE__?: Readonly<{
