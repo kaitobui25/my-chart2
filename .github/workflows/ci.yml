@@ -98,6 +98,26 @@ jobs:
           grep -Fq 'build-current-doc-context.mjs' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'sync-current-doc-snapshot.mjs' .github/workflows/daily-current-doc-sync.yml
           grep -Fq 'node scripts/check-current-docs.mjs' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'meaningful_changed_path_count' .github/workflows/daily-current-doc-sync.yml
+          grep -Fq 'git push origin HEAD:main' .github/workflows/daily-current-doc-sync.yml
+
+          if grep -Fq 'DOC_SYNC_BRANCH' .github/workflows/daily-current-doc-sync.yml; then
+            echo 'docs sync must not use a rolling branch' >&2
+            exit 1
+          fi
+          if grep -Fq 'docs-sync/current' .github/workflows/daily-current-doc-sync.yml; then
+            echo 'docs sync must not reference docs-sync/current' >&2
+            exit 1
+          fi
+          if grep -Fq 'gh pr ' .github/workflows/daily-current-doc-sync.yml; then
+            echo 'docs sync must not create or edit pull requests' >&2
+            exit 1
+          fi
+          if grep -Fq 'pull-requests: write' .github/workflows/daily-current-doc-sync.yml; then
+            echo 'docs sync must not request pull-request write permission' >&2
+            exit 1
+          fi
+
           grep -Fq 'Never read more implementation/test/config files than `max_implementation_source_files`' agent/prompts/daily-current-doc-sync.md
           grep -Fq 'Do not perform broad repository discovery.' agent/prompts/daily-current-doc-sync.md
           grep -Fq 'stop immediately' agent/prompts/daily-current-doc-sync.md
