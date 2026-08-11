@@ -291,13 +291,12 @@ describe('P/E repositories', () => {
       return new Response(JSON.stringify({
         symbol: 'MBB',
         source: 'fiinquant-stock-valuation',
-        points: [
-          { time: 25, pe: 6.3, pb: 1.3 },
-        ],
+        points: [{ time: 25, pe: 6.3, pb: 1.3 }],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     });
     const repository = new PeValuationRepository({
       cache,
+      ensureUrl: null,
       fetchImpl: fetchImpl as typeof fetch,
       now: () => 999,
     });
@@ -307,9 +306,41 @@ describe('P/E repositories', () => {
     expect(record.points.map((item) => item.pe)).toEqual([6.1, 6.3]);
   });
 
+  it('lazily ensures the FiinQuant runtime once before valuation requests', async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === '/provider-runtime/fiinquant/ensure') {
+        expect(init?.method).toBe('POST');
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        symbol: 'MBB',
+        source: 'fiinquant-stock-valuation',
+        points: [{ time: 15, pe: 6.2, pb: 1.2 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const repository = new PeValuationRepository({
+      cache: new MemoryValuationCache(),
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => 999,
+    });
+
+    await repository.fetchAndCache('MBB', 10, 20);
+    await repository.fetchAndCache('MBB', 10, 20, true);
+
+    expect(calls.filter((url) => url === '/provider-runtime/fiinquant/ensure')).toHaveLength(1);
+    expect(calls.filter((url) => url.includes('/valuation/stock?'))).toHaveLength(2);
+  });
+
   it('keeps source errors isolated as rejected promises', async () => {
     const repository = new PeValuationRepository({
       cache: new MemoryValuationCache(),
+      ensureUrl: null,
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({ message: 'FiinQuant unavailable' }), {
         status: 502,
         headers: { 'content-type': 'application/json' },
