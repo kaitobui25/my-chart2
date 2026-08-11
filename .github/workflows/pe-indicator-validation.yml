@@ -28,18 +28,20 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx tsc --noEmit \
-            --target ES2022 \
-            --module ESNext \
-            --moduleResolution Bundler \
-            --lib ES2022,DOM,DOM.Iterable \
-            --strict \
-            --skipLibCheck \
-            src/indicators/builtin/pe.ts \
-            src/indicators/builtin/pe-client.ts \
-            src/indicators/builtin/pe-cache.ts \
-            src/indicators/builtin/pe-model.ts \
-            src/indicators/runtime-context.ts 2>&1 | tee pe-typecheck.log
+          cat > tsconfig.pe-validation.json <<'EOF'
+          {
+            "extends": "./tsconfig.json",
+            "include": [
+              "src/indicators/builtin/pe.ts",
+              "src/indicators/builtin/pe-client.ts",
+              "src/indicators/builtin/pe-cache.ts",
+              "src/indicators/builtin/pe-model.ts",
+              "src/indicators/runtime-context.ts"
+            ],
+            "exclude": []
+          }
+          EOF
+          npx tsc -p tsconfig.pe-validation.json 2>&1 | tee pe-typecheck.log
 
       - id: pe_unit
         name: Run P/E unit tests
