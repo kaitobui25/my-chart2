@@ -2,6 +2,7 @@ import { registerIndicator, type IndicatorDef } from './registry';
 import bollinger from './builtin/bollinger';
 import ema from './builtin/ema';
 import macd from './builtin/macd';
+import pe from './builtin/pe';
 import rsi from './builtin/rsi';
 import sma from './builtin/sma';
 import { indicators as taSuite } from './builtin/ta-suite';
@@ -18,6 +19,7 @@ const builtins: IndicatorDef[] = [
   bollinger,
   visibleRangeExtrema,
   volume,
+  pe,
   rsi,
   macd,
   ...taSuite,
