@@ -9,12 +9,20 @@ import {
 import type { IndicatorDef } from '../registry';
 import { PeFundamentalsRepository } from './pe-client';
 import type { PeFundamentalsRecord } from './pe-cache';
-import { computePeSeries, type PeMarker } from './pe-model';
+import { PeValuationRepository } from './pe-valuation-client';
+import type { PeValuationRecord } from './pe-valuation-cache';
+import {
+  computeFiinQuantPeLine,
+  computeQuarterPePresentation,
+  peValuationRangeForCandles,
+  type PeMarker,
+} from './pe-model';
 
 export const PE_CACHE_MISS_DELAY_MS = 30_000;
 export const PE_CACHE_REFRESH_SECONDS = 24 * 60 * 60;
 const DAY_SECONDS = 24 * 60 * 60;
 const QUARTER_MARKER_COLOR = '#f4b740';
+const VALUATION_TAIL_REFRESH_SECONDS = 14 * DAY_SECONDS;
 
 installIndicatorRuntimeContextTracking();
 
@@ -126,13 +134,17 @@ class PeMarkerSeries extends Series {
 }
 
 export interface PeIndicatorRuntime {
+  /** Legacy alias kept for tests/extensions that injected the Vnstock repository in V1. */
   repository?: PeFundamentalsRepository;
+  quarterRepository?: PeFundamentalsRepository;
+  valuationRepository?: PeValuationRepository;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
 }
 
 export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): IndicatorDef {
-  const repository = runtime.repository ?? new PeFundamentalsRepository();
+  const quarterRepository = runtime.quarterRepository ?? runtime.repository ?? new PeFundamentalsRepository();
+  const valuationRepository = runtime.valuationRepository ?? new PeValuationRepository();
   const setTimer = runtime.setTimer ?? setTimeout;
   const clearTimer = runtime.clearTimer ?? clearTimeout;
 
@@ -150,23 +162,35 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       pane.series.push(markerSeries);
       chart.invalidate();
 
-      let record: PeFundamentalsRecord | null = null;
+      let quarterRecord: PeFundamentalsRecord | null = null;
+      let valuationRecord: PeValuationRecord | null = null;
       let symbol = getIndicatorChartSymbol(chart);
       let generation = 0;
       let hoverIndex: number | null = null;
-      let cacheRead = false;
-      let fetchInProgress = false;
-      let fetchTimer: ReturnType<typeof setTimeout> | null = null;
-      let manualMissFetch = chart.getCandles().length > 0 && !!symbol;
+      let quarterCacheRead = false;
+      let valuationCacheRead = false;
+      let quarterFetchInProgress = false;
+      let valuationFetchInProgress = false;
+      let quarterFetchTimer: ReturnType<typeof setTimeout> | null = null;
+      let valuationFetchTimer: ReturnType<typeof setTimeout> | null = null;
+      let pendingValuationRange: { from: number; to: number; force: boolean } | null = null;
+      let manualQuarterMissFetch = chart.getCandles().length > 0 && !!symbol;
+      let manualValuationMissFetch = manualQuarterMissFetch;
       let removed = false;
       let computedValues: LinePoint[] = [];
       let computedMarkers: PeMarker[] = [];
       let computedLatestReportedPe: number | null = null;
 
-      const clearTimerIfNeeded = () => {
-        if (fetchTimer !== null) {
-          clearTimer(fetchTimer);
-          fetchTimer = null;
+      const clearQuarterTimer = () => {
+        if (quarterFetchTimer !== null) {
+          clearTimer(quarterFetchTimer);
+          quarterFetchTimer = null;
+        }
+      };
+      const clearValuationTimer = () => {
+        if (valuationFetchTimer !== null) {
+          clearTimer(valuationFetchTimer);
+          valuationFetchTimer = null;
         }
       };
 
@@ -178,94 +202,189 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         chart.invalidate();
       };
 
-      const clearVisuals = () => {
-        computedValues = new Array<LinePoint>(chart.getCandles().length).fill(null);
-        computedMarkers = [];
-        computedLatestReportedPe = null;
-        line.setData(computedValues);
-        updateHoverPresentation();
-      };
-
       const recomputeData = () => {
         const candles = chart.getCandles();
-        if (!record || chart.getIntervalSec() < DAY_SECONDS) {
-          clearVisuals();
-          return;
+        if (chart.getIntervalSec() < DAY_SECONDS || candles.length === 0) {
+          computedValues = new Array<LinePoint>(candles.length).fill(null);
+          computedMarkers = [];
+          computedLatestReportedPe = null;
+        } else {
+          computedValues = valuationRecord
+            ? computeFiinQuantPeLine(candles, valuationRecord.points, chart.getIntervalSec())
+            : new Array<LinePoint>(candles.length).fill(null);
+          const quarterPresentation = quarterRecord
+            ? computeQuarterPePresentation(candles, quarterRecord.quarters, chart.getIntervalSec())
+            : { markers: [], latestReportedPe: null };
+          computedMarkers = quarterPresentation.markers;
+          computedLatestReportedPe = quarterPresentation.latestReportedPe;
         }
-        const computed = computePeSeries(candles, record.quarters, chart.getIntervalSec());
-        computedValues = computed.values;
-        computedMarkers = computed.markers;
-        computedLatestReportedPe = computed.latestReportedPe;
         line.setData(computedValues);
         updateHoverPresentation();
       };
 
-      const fetchFresh = async (expectedSymbol: string, expectedGeneration: number) => {
-        if (fetchInProgress || removed) return;
-        fetchInProgress = true;
+      const fetchQuarterFresh = async (expectedSymbol: string, expectedGeneration: number) => {
+        if (quarterFetchInProgress || removed) return;
+        quarterFetchInProgress = true;
         try {
-          const fresh = await repository.fetchAndCache(expectedSymbol);
+          const fresh = await quarterRepository.fetchAndCache(expectedSymbol);
           if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
-          record = fresh;
+          quarterRecord = fresh;
           recomputeData();
         } catch (error) {
-          // Fundamental-data failures must never poison the candle provider or block interaction.
-          console.warn(`[P/E] ${expectedSymbol}:`, error);
+          console.warn(`[P/E:Vnstock] ${expectedSymbol}:`, error);
         } finally {
-          if (generation === expectedGeneration && symbol === expectedSymbol) fetchInProgress = false;
+          if (generation === expectedGeneration && symbol === expectedSymbol) quarterFetchInProgress = false;
         }
       };
 
-      const scheduleFetch = (expectedSymbol: string, expectedGeneration: number, delayMs: number) => {
-        clearTimerIfNeeded();
+      const scheduleQuarterFetch = (expectedSymbol: string, expectedGeneration: number, delayMs: number) => {
+        clearQuarterTimer();
         if (delayMs <= 0) {
-          void fetchFresh(expectedSymbol, expectedGeneration);
+          void fetchQuarterFresh(expectedSymbol, expectedGeneration);
           return;
         }
-        fetchTimer = setTimer(() => {
-          fetchTimer = null;
+        quarterFetchTimer = setTimer(() => {
+          quarterFetchTimer = null;
           if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
-          void fetchFresh(expectedSymbol, expectedGeneration);
+          void fetchQuarterFresh(expectedSymbol, expectedGeneration);
         }, delayMs);
       };
 
-      const loadForCurrentSymbol = async () => {
+      const fetchPendingValuation = async (expectedSymbol: string, expectedGeneration: number) => {
+        if (valuationFetchInProgress || removed || !pendingValuationRange) return;
+        const request = pendingValuationRange;
+        pendingValuationRange = null;
+        valuationFetchInProgress = true;
+        try {
+          const fresh = await valuationRepository.fetchAndCache(
+            expectedSymbol,
+            request.from,
+            request.to,
+            request.force,
+          );
+          if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
+          valuationRecord = fresh;
+          recomputeData();
+        } catch (error) {
+          console.warn(`[P/E:FiinQuant] ${expectedSymbol}:`, error);
+        } finally {
+          if (generation === expectedGeneration && symbol === expectedSymbol) {
+            valuationFetchInProgress = false;
+            if (pendingValuationRange) void fetchPendingValuation(expectedSymbol, expectedGeneration);
+          }
+        }
+      };
+
+      const scheduleValuationFetch = (
+        expectedSymbol: string,
+        expectedGeneration: number,
+        range: { from: number; to: number },
+        delayMs: number,
+        force = false,
+      ) => {
+        pendingValuationRange = pendingValuationRange
+          ? {
+              from: Math.min(pendingValuationRange.from, range.from),
+              to: Math.max(pendingValuationRange.to, range.to),
+              force: pendingValuationRange.force || force,
+            }
+          : { ...range, force };
+        if (valuationFetchInProgress || valuationFetchTimer !== null) return;
+        if (delayMs <= 0) {
+          void fetchPendingValuation(expectedSymbol, expectedGeneration);
+          return;
+        }
+        valuationFetchTimer = setTimer(() => {
+          valuationFetchTimer = null;
+          if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
+          void fetchPendingValuation(expectedSymbol, expectedGeneration);
+        }, delayMs);
+      };
+
+      const loadQuarterForCurrentSymbol = async () => {
         const expectedSymbol = symbol;
         const expectedGeneration = generation;
-        if (!expectedSymbol || cacheRead || removed) return;
-        cacheRead = true;
-        const cached = await repository.getCached(expectedSymbol).catch(() => null);
+        if (!expectedSymbol || quarterCacheRead || removed) return;
+        quarterCacheRead = true;
+        const cached = await quarterRepository.getCached(expectedSymbol).catch(() => null);
         if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
         if (cached) {
-          record = cached;
+          quarterRecord = cached;
           recomputeData();
           const age = Math.floor(Date.now() / 1000) - cached.fetchedAt;
           if (age > PE_CACHE_REFRESH_SECONDS) {
-            scheduleFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualMissFetch));
+            scheduleQuarterFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualQuarterMissFetch));
           }
-          manualMissFetch = false;
+          manualQuarterMissFetch = false;
           return;
         }
-        scheduleFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualMissFetch));
-        manualMissFetch = false;
+        scheduleQuarterFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualQuarterMissFetch));
+        manualQuarterMissFetch = false;
+      };
+
+      const loadValuationForCurrentSymbol = async () => {
+        const candles = chart.getCandles();
+        const range = peValuationRangeForCandles(candles, chart.getIntervalSec());
+        const expectedSymbol = symbol;
+        const expectedGeneration = generation;
+        if (!expectedSymbol || !range || removed) return;
+
+        const firstCacheRead = !valuationCacheRead;
+        if (firstCacheRead) {
+          valuationCacheRead = true;
+          const cached = await valuationRepository.getCached(expectedSymbol).catch(() => null);
+          if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
+          valuationRecord = cached;
+          if (cached) recomputeData();
+        }
+
+        const missing = valuationRepository.missingRanges(valuationRecord, range.from, range.to);
+        if (missing.length > 0) {
+          const missingRange = {
+            from: Math.min(...missing.map((item) => item.from)),
+            to: Math.max(...missing.map((item) => item.to)),
+          };
+          const delay = firstCacheRead ? peCacheMissDelay(manualValuationMissFetch) : 0;
+          manualValuationMissFetch = false;
+          scheduleValuationFetch(expectedSymbol, expectedGeneration, missingRange, delay);
+          return;
+        }
+
+        const now = Math.floor(Date.now() / 1000);
+        const age = valuationRecord ? now - valuationRecord.fetchedAt : 0;
+        const includesCurrentTail = range.to >= now - 7 * DAY_SECONDS;
+        if (valuationRecord && includesCurrentTail && age > PE_CACHE_REFRESH_SECONDS) {
+          const tail = { from: Math.max(range.from, range.to - VALUATION_TAIL_REFRESH_SECONDS), to: range.to };
+          const delay = firstCacheRead ? peCacheMissDelay(manualValuationMissFetch) : 0;
+          manualValuationMissFetch = false;
+          scheduleValuationFetch(expectedSymbol, expectedGeneration, tail, delay, true);
+        } else if (firstCacheRead) {
+          manualValuationMissFetch = false;
+        }
       };
 
       const resetForSymbol = (nextSymbol: string, manual = false) => {
         generation += 1;
-        clearTimerIfNeeded();
+        clearQuarterTimer();
+        clearValuationTimer();
         symbol = nextSymbol.trim().toUpperCase();
-        record = null;
-        cacheRead = false;
-        fetchInProgress = false;
-        manualMissFetch = manual;
+        quarterRecord = null;
+        valuationRecord = null;
+        quarterCacheRead = false;
+        valuationCacheRead = false;
+        quarterFetchInProgress = false;
+        valuationFetchInProgress = false;
+        pendingValuationRange = null;
+        manualQuarterMissFetch = manual;
+        manualValuationMissFetch = manual;
         hoverIndex = null;
-        clearVisuals();
+        recomputeData();
       };
 
       const offSymbol = onIndicatorChartSymbolChange(chart, (nextSymbol) => {
         if (nextSymbol === symbol) return;
-        // A ticker switch clears the old P/E immediately. Loading waits until the
-        // new candle data event calls recompute(), preserving candle-first UX.
+        // Ticker changes clear old P/E immediately. New candles render first;
+        // the next data/recompute event then reads IndexedDB before any network call.
         resetForSymbol(nextSymbol, false);
       });
       const offCrosshair = chart.on('crosshair', (event) => {
@@ -278,14 +397,17 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
           const tracked = getIndicatorChartSymbol(chart);
           if (tracked && tracked !== symbol) resetForSymbol(tracked, false);
           recomputeData();
-          if (chart.getIntervalSec() >= DAY_SECONDS && chart.getCandles().length > 0 && !record) {
-            void loadForCurrentSymbol();
+          if (chart.getIntervalSec() >= DAY_SECONDS && chart.getCandles().length > 0) {
+            void loadQuarterForCurrentSymbol();
+            void loadValuationForCurrentSymbol();
           }
         },
         remove() {
           removed = true;
           generation += 1;
-          clearTimerIfNeeded();
+          clearQuarterTimer();
+          clearValuationTimer();
+          pendingValuationRange = null;
           offCrosshair();
           offSymbol();
           chart.removeSeries(line);
