@@ -11,8 +11,9 @@ import {
 export const VNSTOCK_HISTORY_SOURCE = 'vnstock:ohlcv:v1';
 const VNSTOCK_UTC_OFFSET_MINUTES = 7 * 60;
 const MAX_HISTORY_REQUEST = 50_000;
-const DEFAULT_POLL_MS = 5_000;
-const MAX_POLL_SYMBOLS = 50;
+const DEFAULT_POLL_MS = 5 * 60_000;
+const WATCHLIST_ITEM_POLL_MS = 60_000;
+const WATCHLIST_SWEEP_PAUSE_MS = 5 * 60_000;
 
 export interface VnstockHealth {
   ok: boolean;
@@ -48,10 +49,13 @@ function formatHistoryDate(time: number): string {
   return new Date(time * 1000).toISOString().slice(0, 10);
 }
 
-function chunks<T>(values: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
-  return out;
+export function isVietnamTradingSession(date: Date): boolean {
+  const vietnam = new Date(date.getTime() + VNSTOCK_UTC_OFFSET_MINUTES * 60_000);
+  const weekday = vietnam.getUTCDay();
+  if (weekday === 0 || weekday === 6) return false;
+  const minute = vietnam.getUTCHours() * 60 + vietnam.getUTCMinutes();
+  return (minute >= 9 * 60 && minute <= 11 * 60 + 30)
+    || (minute >= 13 * 60 && minute <= 15 * 60);
 }
 
 export class VnstockDatafeed implements Datafeed {
@@ -62,8 +66,12 @@ export class VnstockDatafeed implements Datafeed {
   private pollMs: number;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInFlight = false;
+  private watchlistTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchlistInFlight = false;
+  private watchlistCursor = 0;
   private disposed = false;
   private readonly subscriptions = new Map<string, PollSubscription>();
+  private readonly watchlistSubscriptions = new Map<string, PollSubscription>();
 
   constructor(baseUrl = '/vnstock-api', options: VnstockDatafeedOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -188,8 +196,8 @@ export class VnstockDatafeed implements Datafeed {
 
   subscribe(symbol: string, interval: string, onCandle: (candle: Candle) => void): () => void {
     if (this.disposed) return () => undefined;
-    const remove = this.addListener(symbol, interval, onCandle);
-    this.schedulePoll(0);
+    const remove = this.addListener(this.subscriptions, symbol, interval, onCandle);
+    this.schedulePoll();
     return remove;
   }
 
@@ -201,40 +209,54 @@ export class VnstockDatafeed implements Datafeed {
     if (this.disposed) return () => undefined;
     const normalized = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
     const removers = normalized.map((symbol) => this.addListener(
+      this.watchlistSubscriptions,
       symbol,
       interval,
       (candle) => onCandle(symbol, candle),
     ));
-    this.schedulePoll(0);
+    this.scheduleWatchlistPoll();
     return () => removers.forEach((remove) => remove());
   }
 
   dispose(): void {
     this.disposed = true;
     this.subscriptions.clear();
+    this.watchlistSubscriptions.clear();
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    if (this.watchlistTimer) clearTimeout(this.watchlistTimer);
     this.pollTimer = null;
+    this.watchlistTimer = null;
   }
 
-  private addListener(symbol: string, interval: string, listener: (candle: Candle) => void): () => void {
+  private addListener(
+    collection: Map<string, PollSubscription>,
+    symbol: string,
+    interval: string,
+    listener: (candle: Candle) => void,
+  ): () => void {
     const normalizedSymbol = symbol.trim().toUpperCase();
     const key = `${normalizedSymbol}\u0000${interval}`;
-    let subscription = this.subscriptions.get(key);
+    let subscription = collection.get(key);
     if (!subscription) {
       subscription = { symbol: normalizedSymbol, interval, listeners: new Set() };
-      this.subscriptions.set(key, subscription);
+      collection.set(key, subscription);
     }
     subscription.listeners.add(listener);
     let active = true;
     return () => {
       if (!active) return;
       active = false;
-      const current = this.subscriptions.get(key);
+      const current = collection.get(key);
       current?.listeners.delete(listener);
-      if (current?.listeners.size === 0) this.subscriptions.delete(key);
-      if (this.subscriptions.size === 0 && this.pollTimer) {
+      if (current?.listeners.size === 0) collection.delete(key);
+      if (collection === this.subscriptions && collection.size === 0 && this.pollTimer) {
         clearTimeout(this.pollTimer);
         this.pollTimer = null;
+      }
+      if (collection === this.watchlistSubscriptions && collection.size === 0 && this.watchlistTimer) {
+        clearTimeout(this.watchlistTimer);
+        this.watchlistTimer = null;
+        this.watchlistCursor = 0;
       }
     };
   }
@@ -249,6 +271,7 @@ export class VnstockDatafeed implements Datafeed {
 
   private async poll(): Promise<void> {
     if (this.pollInFlight || this.disposed || this.subscriptions.size === 0) return;
+    if (!isVietnamTradingSession(new Date())) return;
     this.pollInFlight = true;
     try {
       const byInterval = new Map<string, PollSubscription[]>();
@@ -258,32 +281,74 @@ export class VnstockDatafeed implements Datafeed {
         byInterval.set(subscription.interval, group);
       }
       for (const [interval, subscriptions] of byInterval) {
-        for (const batch of chunks(subscriptions, MAX_POLL_SYMBOLS)) {
-          const url = this.apiUrl('/latest');
-          url.searchParams.set('symbols', batch.map((item) => item.symbol).join(','));
-          url.searchParams.set('interval', interval);
-          try {
-            const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(Math.max(8_000, this.pollMs)) });
-            const payload = await response.json().catch(() => ({})) as {
-              candles?: Record<string, Candle>;
-            };
-            if (!response.ok) continue;
-            for (const subscription of batch) {
-              const rawCandle = this.validCandle(payload.candles?.[subscription.symbol]);
-              const candle = rawCandle ? this.normalizePolledCandle(rawCandle, interval) : null;
-              if (!candle) continue;
-              await this.persistHistory(subscription.symbol, interval, [candle], this.returnedCoverage([candle], interval));
-              const current = this.subscriptions.get(`${subscription.symbol}\u0000${interval}`);
-              if (!current) continue;
-              for (const listener of current.listeners) listener(candle);
-            }
-          } catch {
-            // Polling is best effort. Historical requests remain the recovery path.
-          }
-        }
+        await this.fetchLatest(subscriptions, interval, this.subscriptions);
       }
     } finally {
       this.pollInFlight = false;
+    }
+  }
+
+  private scheduleWatchlistPoll(delay = WATCHLIST_ITEM_POLL_MS): void {
+    if (this.disposed || this.watchlistSubscriptions.size === 0 || this.watchlistTimer) return;
+    this.watchlistTimer = setTimeout(() => {
+      this.watchlistTimer = null;
+      void this.pollNextWatchlistSymbol().then((nextDelay) => this.scheduleWatchlistPoll(nextDelay));
+    }, delay);
+  }
+
+  private async pollNextWatchlistSymbol(): Promise<number> {
+    if (this.watchlistInFlight || this.disposed || this.watchlistSubscriptions.size === 0) {
+      return WATCHLIST_ITEM_POLL_MS;
+    }
+    this.watchlistInFlight = true;
+    try {
+      const subscriptions = [...this.watchlistSubscriptions.values()];
+      let selected: PollSubscription | undefined;
+      let examined = 0;
+      while (examined < subscriptions.length) {
+        const candidate = subscriptions[this.watchlistCursor % subscriptions.length];
+        this.watchlistCursor = (this.watchlistCursor + 1) % subscriptions.length;
+        examined += 1;
+        if (!this.subscriptions.has(`${candidate.symbol}\u0000${candidate.interval}`)) {
+          selected = candidate;
+          break;
+        }
+      }
+      if (selected) {
+        await this.fetchLatest([selected], selected.interval, this.watchlistSubscriptions);
+      }
+      return this.watchlistCursor === 0 ? WATCHLIST_SWEEP_PAUSE_MS : WATCHLIST_ITEM_POLL_MS;
+    } finally {
+      this.watchlistInFlight = false;
+    }
+  }
+
+  private async fetchLatest(
+    subscriptions: PollSubscription[],
+    interval: string,
+    collection: Map<string, PollSubscription>,
+  ): Promise<void> {
+    if (subscriptions.length === 0) return;
+    const url = this.apiUrl('/latest');
+    url.searchParams.set('symbols', subscriptions.map((item) => item.symbol).join(','));
+    url.searchParams.set('interval', interval);
+    try {
+      const response = await this.fetchImpl(url, { signal: AbortSignal.timeout(20_000) });
+      const payload = await response.json().catch(() => ({})) as {
+        candles?: Record<string, Candle>;
+      };
+      if (!response.ok) return;
+      for (const subscription of subscriptions) {
+        const rawCandle = this.validCandle(payload.candles?.[subscription.symbol]);
+        const candle = rawCandle ? this.normalizePolledCandle(rawCandle, interval) : null;
+        if (!candle) continue;
+        await this.persistHistory(subscription.symbol, interval, [candle], this.returnedCoverage([candle], interval));
+        const current = collection.get(`${subscription.symbol}\u0000${interval}`);
+        if (!current) continue;
+        for (const listener of current.listeners) listener(candle);
+      }
+    } catch {
+      // Polling is best effort. Historical requests remain the recovery path.
     }
   }
 

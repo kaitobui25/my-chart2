@@ -2392,6 +2392,7 @@ class Tile implements ReplayParticipant {
     const providerId = activeProvider;
     const provider = currentFeed();
     if (!provider.feed) return;
+    if (provider.feed.name === 'Vnstock') return;
 
     const token = this.loadToken;
     const symbol = this.symbol;

@@ -107,6 +107,18 @@ describe('lazy chart provider lifecycle', () => {
     expect(bulkSubscription).toBeGreaterThan(providerLookup);
   });
 
+  it('lets Vnstock schedule the watchlist without bulk history seeding', async () => {
+    const code = await transformedWorkstation();
+    const watchlistStart = code.indexOf('function syncWatchlistFeeds(seedSymbols: string[] = []): void {');
+    const watchlistBlock = code.slice(watchlistStart, watchlistStart + 5000);
+    const bulkSubscription = watchlistBlock.indexOf('provider.feed.subscribeMany');
+    const vnstockReturn = watchlistBlock.indexOf("if (activeProvider === 'vnstock') return;");
+    const seedQueue = watchlistBlock.indexOf('const seedQueue =');
+    expect(bulkSubscription).toBeGreaterThan(-1);
+    expect(vnstockReturn).toBeGreaterThan(bulkSubscription);
+    expect(seedQueue).toBeGreaterThan(vnstockReturn);
+  });
+
   it('upgrades a stale managed FiinQuant environment to the pinned provider stack', () => {
     const baseRequirements = readFileSync(
       path.resolve('examples/sidecars/fiinquant/requirements.txt'),

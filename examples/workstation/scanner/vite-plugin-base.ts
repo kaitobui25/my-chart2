@@ -323,6 +323,11 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
+    "  const seedQueue = [...watchlistSymbols.entries()].sort(([, a], [, b]) => {",
+    "  if (activeProvider === 'vnstock') return;\n  const seedQueue = [...watchlistSymbols.entries()].sort(([, a], [, b]) => {",
+  );
+  code = replaceRequired(
+    code,
     "\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;",
     `\n  if (provider === 'vnstock') {\n    return {\n      service: vnstockConnectionState === 'connected'\n        ? tr('Trực tuyến')\n        : vnstockConnectionState === 'checking'\n          ? tr('Đang kiểm tra')\n          : tr('Không khả dụng'),\n      realtime: vnstockConnectionState === 'connected'\n        ? \`REST polling · \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'no cache'}\`\n        : tr('Không khả dụng'),\n      serviceTone: vnstockConnectionState === 'connected' ? 'success' : vnstockConnectionState === 'checking' ? 'warning' : 'error',\n      realtimeTone: vnstockConnectionState === 'connected' ? 'success' : 'idle',\n    };\n  }\n\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;`,
   );

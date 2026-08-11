@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime
+from io import StringIO
 from zoneinfo import ZoneInfo
 
-from vnstock_sidecar import Candle, aggregate_candles, normalize_candle
+from vnstock_sidecar import (
+    POLL_INTERVAL_SECONDS,
+    Candle,
+    VnstockQuotaError,
+    _call_vnstock,
+    aggregate_candles,
+    normalize_candle,
+)
 
 VN_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
 
@@ -89,6 +98,22 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(bars[0].close, 13)
         self.assertEqual(bars[0].volume, 100)
         self.assertEqual(bars[1].open, 20)
+
+
+class QuotaHandlingTests(unittest.TestCase):
+    def test_rate_limit_exit_is_silent_and_becomes_a_regular_error(self) -> None:
+        terminal = StringIO()
+
+        def limited_call() -> None:
+            print('GIỚI HẠN API ĐÃ ĐẠT TỐI ĐA')
+            raise SystemExit('Rate limit exceeded. Process terminated.')
+
+        with redirect_stdout(terminal):
+            with self.assertRaisesRegex(VnstockQuotaError, 'retry later'):
+                _call_vnstock(limited_call)
+
+        self.assertEqual(terminal.getvalue(), '')
+        self.assertEqual(POLL_INTERVAL_SECONDS, 300.0)
 
 
 if __name__ == '__main__':

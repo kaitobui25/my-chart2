@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Candle } from '../../src/core/types';
 import type { HistoryRange } from '../../src/datafeed';
-import { VnstockDatafeed } from '../../examples/providers/vnstock';
+import { isVietnamTradingSession, VnstockDatafeed } from '../../examples/providers/vnstock';
 import {
   mergeHistoryCoverage,
   type BrowserHistoryCacheApi,
@@ -38,6 +38,10 @@ function memoryCache(): BrowserHistoryCacheApi {
 }
 
 describe('VnstockDatafeed', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('reuses cached Vnstock history for an already covered Replay range', async () => {
     const day = 86_400;
     const candles: Candle[] = [
@@ -96,5 +100,105 @@ describe('VnstockDatafeed', () => {
     const feed = new VnstockDatafeed('/vnstock-api', { cache, fetchImpl });
 
     await expect(feed.getHistory('FPT', '1d', 500)).resolves.toEqual(cached);
+  });
+
+  it('refreshes an open chart only after five minutes during a Vietnam trading session', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T03:00:00Z'));
+    const candle = { time: 1_754_860_800, open: 100, high: 105, low: 99, close: 103, volume: 1_000 };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      candles: { FPT: candle },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const feed = new VnstockDatafeed('/vnstock-api', {
+      cache: memoryCache(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    const onCandle = vi.fn();
+
+    const unsubscribe = feed.subscribe('FPT', '1d', onCandle);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/latest?symbols=FPT&interval=1d');
+    expect(onCandle).toHaveBeenCalledWith(expect.objectContaining({ close: candle.close }));
+
+    unsubscribe();
+    feed.dispose();
+  });
+
+  it('does not refresh an open chart outside Vietnam trading hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T10:00:00Z'));
+    const fetchMock = vi.fn();
+    const feed = new VnstockDatafeed('/vnstock-api', {
+      cache: memoryCache(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    feed.subscribe('FPT', '1d', vi.fn());
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(fetchMock).not.toHaveBeenCalled();
+    feed.dispose();
+  });
+
+  it('scans one watchlist ticker per minute and pauses five minutes between sweeps', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T03:00:00Z'));
+    const candle = { time: 1_754_860_800, open: 100, high: 105, low: 99, close: 103, volume: 1_000 };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      const symbol = url.searchParams.get('symbols') ?? '';
+      return new Response(JSON.stringify({ candles: { [symbol]: candle } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const feed = new VnstockDatafeed('/vnstock-api', {
+      cache: memoryCache(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    feed.subscribeMany(['HPG', 'SSI'], '1d', vi.fn());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('symbols=HPG');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(String(fetchMock.mock.calls[1][0])).toContain('symbols=SSI');
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(String(fetchMock.mock.calls[2][0])).toContain('symbols=HPG');
+    feed.dispose();
+  });
+
+  it('skips the open chart ticker while scanning the watchlist', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-11T03:00:00Z'));
+    const candle = { time: 1_754_860_800, open: 100, high: 105, low: 99, close: 103, volume: 1_000 };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({ candles: { SSI: candle } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const feed = new VnstockDatafeed('/vnstock-api', {
+      cache: memoryCache(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    feed.subscribe('HPG', '1d', vi.fn());
+    feed.subscribeMany(['HPG', 'SSI'], '1d', vi.fn());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('symbols=SSI');
+    feed.dispose();
+  });
+
+  it('recognizes Vietnam weekday morning and afternoon sessions', () => {
+    expect(isVietnamTradingSession(new Date('2026-08-11T02:00:00Z'))).toBe(true);
+    expect(isVietnamTradingSession(new Date('2026-08-11T04:31:00Z'))).toBe(false);
+    expect(isVietnamTradingSession(new Date('2026-08-11T06:00:00Z'))).toBe(true);
+    expect(isVietnamTradingSession(new Date('2026-08-15T03:00:00Z'))).toBe(false);
   });
 });
