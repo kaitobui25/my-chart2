@@ -67,17 +67,19 @@ function normalizeRecord(value: unknown): PeFundamentalsRecord | null {
   };
 }
 
-/** Merge a refresh while preserving the earliest time each period was observed. */
+/**
+ * Merge a refresh while preserving both the earliest observation timestamp and
+ * historical quarters that have rolled out of Vnstock Free's recent-period window.
+ */
 export function mergePeFundamentals(
   existing: PeFundamentalsRecord | null,
   incoming: PeIncomingPayload,
   observedAt: number,
 ): PeFundamentalsRecord {
   const symbol = normalizeSymbol(incoming.symbol);
-  const previous = new Map(
-    (existing?.symbol === symbol ? existing.quarters : []).map((item) => [item.period, item]),
-  );
-  const merged = new Map<string, PeQuarter>();
+  const previousQuarters = existing?.symbol === symbol ? existing.quarters : [];
+  const previous = new Map(previousQuarters.map((item) => [item.period, item]));
+  const merged = new Map(previousQuarters.map((item) => [item.period, { ...item }]));
 
   for (const raw of incoming.quarters) {
     const period = raw.period.trim().toUpperCase();
