@@ -12,7 +12,9 @@ test('Cyber candle theme is selectable only in Dark Mode', async ({ browser }) =
   let select = page.locator('#candle-theme-select');
   await expect(select).toBeVisible();
   await expect(select).toHaveValue('default');
-  await expect(select.locator('option[value="cyber"]')).toBeEnabled();
+  await expect.poll(() => select.locator('option[value="cyber"]').evaluate((option) => (
+    (option as HTMLOptionElement).disabled
+  ))).toBe(false);
 
   await select.selectOption('cyber');
   await expect(select).toHaveValue('cyber');
@@ -27,14 +29,18 @@ test('Cyber candle theme is selectable only in Dark Mode', async ({ browser }) =
   await page.getByRole('button', { name: 'More tools' }).click();
   select = page.locator('#candle-theme-select');
   await expect(select).toHaveValue('default');
-  await expect(select.locator('option[value="cyber"]')).toBeDisabled();
+  await expect.poll(() => select.locator('option[value="cyber"]').evaluate((option) => (
+    (option as HTMLOptionElement).disabled
+  ))).toBe(true);
 
   await page.locator('#theme-toggle').click();
   await expect.poll(() => page.evaluate(() => document.body.classList.contains('light'))).toBe(false);
   await page.getByRole('button', { name: 'More tools' }).click();
   select = page.locator('#candle-theme-select');
   await expect(select).toHaveValue('default');
-  await expect(select.locator('option[value="cyber"]')).toBeEnabled();
+  await expect.poll(() => select.locator('option[value="cyber"]').evaluate((option) => (
+    (option as HTMLOptionElement).disabled
+  ))).toBe(false);
   expect(pageErrors).toEqual([]);
 
   await page.close();
