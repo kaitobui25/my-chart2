@@ -74,13 +74,14 @@ function quarterNumber(period: string): number | null {
  * Vnstock Free does not expose the exact filing timestamp with `ratio()`.
  * These deliberately conservative windows avoid treating quarter-end as the
  * disclosure date. `firstObservedAt` can tighten the bound when we know the API
- * already exposed the quarter earlier than the fallback.
+ * already exposed the quarter earlier than the fallback. A malformed cache can
+ * never make a quarter effective before the reporting period actually ended.
  */
 export function peQuarterEffectiveAt(quarter: PeQuarter): number {
   const q = quarterNumber(quarter.period);
   const fallbackDays = q === 2 ? 60 : q === 4 ? 90 : 30;
   const conservative = quarter.periodEnd + fallbackDays * DAY_SECONDS;
-  return Math.min(conservative, quarter.firstObservedAt);
+  return Math.max(quarter.periodEnd, Math.min(conservative, quarter.firstObservedAt));
 }
 
 export function inferPePriceScale(candles: readonly Candle[], quarters: readonly PeQuarter[]): number {
