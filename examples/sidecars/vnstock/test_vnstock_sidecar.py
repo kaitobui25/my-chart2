@@ -19,6 +19,7 @@ from vnstock_sidecar import (
     _load_vnstock_api_key,
     aggregate_candles,
     normalize_candle,
+    normalize_pe_quarters,
 )
 
 VN_TZ = ZoneInfo('Asia/Ho_Chi_Minh')
@@ -66,6 +67,30 @@ class NormalizeCandleTests(unittest.TestCase):
         self.assertIsNotNone(candle)
         assert candle is not None
         self.assertIsNone(candle.volume)
+
+
+class PeNormalizationTests(unittest.TestCase):
+    def test_normalizes_vnm_schema_and_prefers_canonical_duplicate(self) -> None:
+        quarters = normalize_pe_quarters([
+            {'period': '2025-Q4', 'ticker': 'VNM', 'trailing_eps': 4194.41, 'pe_ratio': 14.45},
+            {'period': '2025-Q4_1', 'ticker': 'VNM', 'trailing_eps': 4159.65, 'pe_ratio': 14.42},
+            {'period': '2026-Q1', 'ticker': 'VNM', 'trailing_eps': 4502.58, 'pe_ratio': 13.59},
+            {'period': '2026-Q2', 'ticker': 'VNM', 'trailing_eps': 4159.65, 'pe_ratio': 14.42},
+        ])
+        self.assertEqual([item.period for item in quarters], ['2025-Q4', '2026-Q1', '2026-Q2'])
+        self.assertEqual(quarters[0].trailing_eps, 4194.41)
+        self.assertEqual(quarters[0].pe_ratio, 14.45)
+        q2_end = datetime.fromtimestamp(quarters[-1].period_end, VN_TZ)
+        self.assertEqual((q2_end.year, q2_end.month, q2_end.day), (2026, 6, 30))
+
+    def test_accepts_documented_ratio_aliases_and_skips_missing_eps(self) -> None:
+        quarters = normalize_pe_quarters([
+            {'period': '2026-Q1', 'trailingEps': 4500, 'priceToEarning': 13.5},
+            {'period': '2026-Q2', 'pe_ratio': 14.2},
+        ])
+        self.assertEqual(len(quarters), 1)
+        self.assertEqual(quarters[0].period, '2026-Q1')
+        self.assertEqual(quarters[0].pe_ratio, 13.5)
 
 
 class AggregateTests(unittest.TestCase):
