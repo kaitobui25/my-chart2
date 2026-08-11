@@ -8,7 +8,9 @@ import {
 } from './pe-valuation-cache';
 
 const DEFAULT_BASE_URL = '/fiinquant-api';
+const DEFAULT_ENSURE_URL = '/provider-runtime/fiinquant/ensure';
 const REQUEST_TIMEOUT_MS = 20_000;
+const ENSURE_TIMEOUT_MS = 35_000;
 
 export interface PeValuationCacheApi {
   get(symbol: string): Promise<PeValuationRecord | null>;
@@ -17,6 +19,8 @@ export interface PeValuationCacheApi {
 
 export interface PeValuationRepositoryOptions {
   baseUrl?: string;
+  /** Set null for tests/embedders that already own the FiinQuant sidecar lifecycle. */
+  ensureUrl?: string | null;
   cache?: PeValuationCacheApi;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -61,14 +65,18 @@ function parsePayload(value: unknown, requestedSymbol: string): PeIncomingValuat
 
 export class PeValuationRepository {
   private readonly baseUrl: string;
+  private readonly ensureUrl: string | null;
   private readonly cache: PeValuationCacheApi;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly timeoutMs: number;
   private readonly inFlight = new Map<string, Promise<PeValuationRecord>>();
+  private ensureInFlight: Promise<void> | null = null;
+  private ensured = false;
 
   constructor(options: PeValuationRepositoryOptions = {}) {
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    this.ensureUrl = options.ensureUrl === undefined ? DEFAULT_ENSURE_URL : options.ensureUrl;
     this.cache = options.cache ?? new PeValuationCache();
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
@@ -94,6 +102,8 @@ export class PeValuationRepository {
       : missingPeValuationRanges(cached, requestedFrom, requestedTo);
     if (ranges.length === 0 && cached) return cached;
 
+    await this.ensureReady();
+
     let record = cached;
     for (const range of ranges) {
       record = await this.fetchRange(normalized, range.from, range.to, record);
@@ -108,6 +118,30 @@ export class PeValuationRepository {
       };
     }
     return record;
+  }
+
+  private ensureReady(): Promise<void> {
+    if (this.ensureUrl === null || this.ensured) return Promise.resolve();
+    if (this.ensureInFlight) return this.ensureInFlight;
+
+    const request = (async () => {
+      const response = await this.fetchImpl(this.ensureUrl!, {
+        method: 'POST',
+        signal: AbortSignal.timeout(ENSURE_TIMEOUT_MS),
+      });
+      const payload = await response.json().catch(() => null) as unknown;
+      if (!response.ok) {
+        const message = payload && typeof payload === 'object'
+          ? String((payload as Record<string, unknown>).message ?? `HTTP ${response.status}`)
+          : `HTTP ${response.status}`;
+        throw new Error(`FiinQuant runtime unavailable: ${message}`);
+      }
+      this.ensured = true;
+    })().finally(() => {
+      if (this.ensureInFlight === request) this.ensureInFlight = null;
+    });
+    this.ensureInFlight = request;
+    return request;
   }
 
   private fetchRange(
