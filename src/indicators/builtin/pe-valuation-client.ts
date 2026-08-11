@@ -3,7 +3,6 @@ import {
   mergePeValuation,
   missingPeValuationRanges,
   type PeIncomingValuationPayload,
-  type PeValuationCache as PeValuationCacheType,
   type PeValuationPoint,
   type PeValuationRecord,
 } from './pe-valuation-cache';
