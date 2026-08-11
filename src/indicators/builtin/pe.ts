@@ -18,6 +18,10 @@ const QUARTER_MARKER_COLOR = '#f4b740';
 
 installIndicatorRuntimeContextTracking();
 
+export function peCacheMissDelay(manualEnable: boolean): number {
+  return manualEnable ? 0 : PE_CACHE_MISS_DELAY_MS;
+}
+
 function formatPe(value: number | null): string {
   return value !== null && Number.isFinite(value) ? value.toFixed(2) : '—';
 }
@@ -237,20 +241,12 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
           recomputeData();
           const age = Math.floor(Date.now() / 1000) - cached.fetchedAt;
           if (age > PE_CACHE_REFRESH_SECONDS) {
-            scheduleFetch(
-              expectedSymbol,
-              expectedGeneration,
-              manualMissFetch ? 0 : PE_CACHE_MISS_DELAY_MS,
-            );
+            scheduleFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualMissFetch));
           }
           manualMissFetch = false;
           return;
         }
-        scheduleFetch(
-          expectedSymbol,
-          expectedGeneration,
-          manualMissFetch ? 0 : PE_CACHE_MISS_DELAY_MS,
-        );
+        scheduleFetch(expectedSymbol, expectedGeneration, peCacheMissDelay(manualMissFetch));
         manualMissFetch = false;
       };
 
