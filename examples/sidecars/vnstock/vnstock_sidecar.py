@@ -5,6 +5,7 @@ import io
 import json
 import math
 import os
+import re
 import threading
 import time
 from contextlib import redirect_stderr, redirect_stdout
@@ -95,6 +96,14 @@ class SymbolItem:
     symbol: str
     name: str = ''
     exchange: str = ''
+
+
+@dataclass(slots=True)
+class PeQuarter:
+    period: str
+    period_end: int
+    trailing_eps: float
+    pe_ratio: float | None
 
 
 def _finite(value: Any) -> float | None:
@@ -189,6 +198,62 @@ def normalize_candle(row: dict[str, Any]) -> Candle | None:
     return Candle(timestamp, open_, high, low, close, volume)
 
 
+def _period_details(value: Any) -> tuple[str, int, int] | None:
+    text = str(value or '').strip().upper()
+    match = re.fullmatch(r'(\d{4})-Q([1-4])(?:_(\d+))?', text)
+    if not match:
+        return None
+    year = int(match.group(1))
+    quarter = int(match.group(2))
+    # Exact canonical rows beat suffixed duplicate rows such as 2025-Q4_1.
+    priority = 0 if match.group(3) is None else 1
+    return f'{year}-Q{quarter}', quarter, priority
+
+
+def _period_end(period: str) -> int:
+    match = re.fullmatch(r'(\d{4})-Q([1-4])', period)
+    if not match:
+        raise ValueError(f'invalid reporting period: {period}')
+    year = int(match.group(1))
+    quarter = int(match.group(2))
+    month = quarter * 3
+    if month == 12:
+        next_month = datetime(year + 1, 1, 1, tzinfo=VIETNAM_TZ)
+    else:
+        next_month = datetime(year, month + 1, 1, tzinfo=VIETNAM_TZ)
+    return int((next_month - timedelta(days=1)).timestamp())
+
+
+def normalize_pe_quarters(value: Any) -> list[PeQuarter]:
+    selected: dict[str, tuple[int, PeQuarter]] = {}
+    for row in _records(value):
+        details = _period_details(_first(row, ('period', 'report_period', 'reportperiod')))
+        if details is None:
+            year = _first(row, ('year',))
+            quarter = _first(row, ('quarter',))
+            try:
+                details = _period_details(f'{int(year)}-Q{int(quarter)}')
+            except (TypeError, ValueError):
+                details = None
+        if details is None:
+            continue
+        period, _, priority = details
+        trailing_eps = _finite(_first(row, (
+            'trailing_eps', 'trailingeps', 'trailing_e_ps',
+            'earning_per_share', 'earnings_per_share', 'eps_ttm',
+        )))
+        if trailing_eps is None:
+            continue
+        pe_ratio = _finite(_first(row, (
+            'pe_ratio', 'peratio', 'pe', 'price_to_earning', 'pricetoearning',
+        )))
+        item = PeQuarter(period, _period_end(period), trailing_eps, pe_ratio)
+        previous = selected.get(period)
+        if previous is None or priority < previous[0]:
+            selected[period] = (priority, item)
+    return [selected[period][1] for period in sorted(selected)]
+
+
 def _aggregate_group(group: list[Candle]) -> Candle:
     return Candle(
         time=group[0].time,
@@ -249,6 +314,7 @@ class VnstockGateway:
     def __init__(self) -> None:
         self._market: Any | None = None
         self._reference: Any | None = None
+        self._fundamental: Any | None = None
         self._lock = threading.RLock()
         self._symbols: list[SymbolItem] = []
         self._symbols_at = 0.0
@@ -262,6 +328,11 @@ class VnstockGateway:
         from vnstock import Reference
         return Market, Reference
 
+    @staticmethod
+    def _load_fundamental_class() -> Any:
+        from vnstock import Fundamental
+        return Fundamental
+
     def _ensure_clients(self) -> tuple[Any, Any]:
         with self._lock:
             _load_vnstock_api_key()
@@ -270,6 +341,13 @@ class VnstockGateway:
                 self._market = Market()
                 self._reference = Reference()
             return self._market, self._reference
+
+    def _ensure_fundamental(self) -> Any:
+        with self._lock:
+            _load_vnstock_api_key()
+            if self._fundamental is None:
+                self._fundamental = self._load_fundamental_class()()
+            return self._fundamental
 
     def health(self) -> dict[str, Any]:
         # Health checks must never consume upstream Vnstock/API quota. The
@@ -402,6 +480,16 @@ class VnstockGateway:
             candles = [item for item in candles if item.time <= to_time]
         return candles[-limit:]
 
+    def pe_ratios(self, symbol: str) -> list[PeQuarter]:
+        symbol = _normalize_symbol(symbol)
+        if not symbol or symbol in INDEX_SYMBOLS:
+            raise ValueError('P/E fundamentals require an equity ticker')
+        fundamental = self._ensure_fundamental()
+        with self._lock:
+            equity = _call_vnstock(fundamental.equity, symbol)
+            raw = _call_vnstock(equity.ratio, period='quarter', orient='time_series')
+        return normalize_pe_quarters(raw)
+
     def latest(self, symbols: list[str], interval: str) -> dict[str, Candle]:
         symbols = [_normalize_symbol(symbol) for symbol in symbols]
         symbols = [symbol for symbol in dict.fromkeys(symbols) if symbol]
@@ -470,6 +558,34 @@ async def history_handler(request: web.Request) -> web.Response:
         return _json({'message': str(exc)}, 502)
 
 
+async def pe_handler(request: web.Request) -> web.Response:
+    symbol = _normalize_symbol(request.query.get('symbol', ''))
+    if not symbol:
+        return _json({'message': 'missing symbol'}, 400)
+    try:
+        quarters = await asyncio.to_thread(GATEWAY.pe_ratios, symbol)
+        return _json({
+            'symbol': symbol,
+            'source': 'vnstock-unified',
+            'cadence': 'quarter',
+            'quarters': [
+                {
+                    'period': item.period,
+                    'periodEnd': item.period_end,
+                    'trailingEps': item.trailing_eps,
+                    'peRatio': item.pe_ratio,
+                }
+                for item in quarters
+            ],
+        })
+    except VnstockQuotaError as exc:
+        return _json({'message': str(exc)}, 429)
+    except ValueError as exc:
+        return _json({'message': str(exc)}, 400)
+    except Exception as exc:
+        return _json({'message': str(exc)}, 502)
+
+
 async def latest_handler(request: web.Request) -> web.Response:
     symbols = request.query.get('symbols', '').split(',')
     interval = request.query.get('interval', '1d')
@@ -493,6 +609,7 @@ def create_app() -> web.Application:
     app.router.add_get('/health', health_handler)
     app.router.add_get('/symbols', symbols_handler)
     app.router.add_get('/history', history_handler)
+    app.router.add_get('/fundamentals/pe', pe_handler)
     app.router.add_get('/latest', latest_handler)
     return app
 
