@@ -1,0 +1,55 @@
+name: P/E indicator validation
+
+on:
+  push:
+    branches:
+      - agent/pe-indicator-v1
+
+permissions:
+  contents: read
+
+jobs:
+  pe-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck P/E modules
+        run: >-
+          npx tsc --noEmit
+          --target ES2022
+          --module ESNext
+          --moduleResolution Bundler
+          --lib ES2022,DOM,DOM.Iterable
+          --strict
+          --skipLibCheck
+          src/indicators/builtin/pe.ts
+          src/indicators/builtin/pe-client.ts
+          src/indicators/builtin/pe-cache.ts
+          src/indicators/builtin/pe-model.ts
+          src/indicators/runtime-context.ts
+
+      - name: Run P/E unit tests
+        run: npx vitest run tests/unit/pe-indicator.test.ts tests/unit/pe-load-policy.test.ts
+
+      - name: Build workstation
+        run: npm run build:demo
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Vnstock sidecar test dependency
+        run: python -m pip install 'aiohttp>=3.10,<4'
+
+      - name: Test Vnstock P/E sidecar
+        working-directory: examples/sidecars/vnstock
+        run: python -m unittest -v test_vnstock_sidecar.py
