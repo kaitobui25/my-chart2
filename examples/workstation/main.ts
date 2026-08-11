@@ -149,6 +149,7 @@ const DNSE_STORAGE_KEY = 'l2chart.dnse.settings.v1';
 const LEGACY_FIINQUANT_STORAGE_KEY = 'l2chart.fiinquant.credentials';
 const FIINQUANT_STORAGE_KEY = 'l2chart.fiinquant.settings.v1';
 const ACTIVE_PROVIDER_KEY = 'l2chart.priceProvider';
+const PROVIDER_ENABLED_KEY = 'l2chart.priceProviderEnabled';
 const CHART_PREFERENCES_KEY = 'l2chart.chartPreferences.v1';
 const CHART_TEMPLATES_KEY = 'l2chart.chartTemplates.v1';
 const DEFAULT_CHART_TEMPLATE_KEY = 'l2chart.defaultChartTemplate.v1';
@@ -885,7 +886,8 @@ function readFiinQuantSettings(): FiinQuantStoredSettings {
   return settings;
 }
 
-let activeProvider: PriceProviderId = readActiveProvider();
+let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';
+let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';
 const dnseSettings = readDnseSettings();
 let dnseCredentials: DnseCredentials | null = null;
 let fiinQuantSettings = readFiinQuantSettings();
@@ -898,9 +900,15 @@ const demoFeed = new SampleDatafeed();
 const binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });
 const binanceUsdmFeed = new BinanceDatafeed({ market: 'usdm' });
 
-if (activeProvider === 'dnse' && !dnseFeed) {
-  activeProvider = 'demo';
-  localStorage.setItem(ACTIVE_PROVIDER_KEY, activeProvider);
+if (activeProvider === 'dnse' && providerEnabled) {
+  dnseCredentials = normalizeDnseCredentials({
+    apiKey: '',
+    apiSecret: '',
+    restBase: DNSE_REST_PROXY,
+    wsBase: dnseWsProxyBase(),
+    useProxyCredentials: true,
+  });
+  dnseFeed = new DNSEDatafeed(dnseCredentials);
 }
 
 function makeFiinQuantFeed(): FiinQuantDatafeed {
@@ -976,7 +984,7 @@ async function reportFiinQuantHealth(showChecking = true): Promise<void> {
 }
 
 function pollFiinQuantHealth(): void {
-  if (activeProvider !== 'fiinquant' || document.hidden) return;
+  if (!providerEnabled || activeProvider !== 'fiinquant' || document.hidden) return;
   void reportFiinQuantHealth(false);
 }
 
@@ -987,14 +995,19 @@ function reportProviderLoadSuccess(provider: PriceProviderId): void {
 }
 
 function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {
-  if (provider !== 'fiinquant' || activeProvider !== provider) return;
+  if (activeProvider !== provider) return;
+  if (providerEnabled) {
+    disableActiveProvider();
+    showProviderActivationError(provider, message);
+  }
+  if (provider !== 'fiinquant') return;
   if (/cannot reach|failed to fetch|network|sidecar/i.test(message)) {
     fiinQuantHealthRequest += 1;
     fiinQuantConnectionState = 'offline';
     renderProviderSourceState();
     return;
   }
-  void reportFiinQuantHealth();
+  if (providerEnabled) void reportFiinQuantHealth();
 }
 
 function isBinanceProvider(provider: PriceProviderId): provider is 'binance-spot' | 'binance-usdm' {
@@ -1018,7 +1031,9 @@ function setActiveProvider(provider: PriceProviderId): void {
   const previousProvider = activeProvider;
   const previousWatchlist = tradingWorkspace?.getWatchlist() ?? [];
   activeProvider = provider;
+  providerEnabled = true;
   localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);
+  localStorage.setItem(PROVIDER_ENABLED_KEY, 'true');
 
   if (providerFamily(previousProvider) !== providerFamily(provider)) {
     const defaultSymbol = defaultSymbolsForProvider(provider)[0];
@@ -1042,7 +1057,21 @@ function setActiveProvider(provider: PriceProviderId): void {
   syncWatchlistFeeds();
 }
 
+function disableActiveProvider(): void {
+  if (!providerEnabled) return;
+  providerEnabled = false;
+  localStorage.setItem(PROVIDER_ENABLED_KEY, 'false');
+  activeProvider = 'demo';
+  refreshProviderUi();
+  reloadAllTiles();
+  tradingWorkspace?.setSourceLabel(tr('Tắt'));
+  syncWatchlistFeeds();
+}
+
 function currentFeed(): { feed: Datafeed | null; label: string; unavailable: string | null } {
+  if (!providerEnabled) {
+    return { feed: null, label: tr('Tắt'), unavailable: tr('bật nguồn dữ liệu trong Market data') };
+  }
   if (activeProvider === 'demo') {
     return { feed: demoFeed, label: 'Demo', unavailable: null };
   }
@@ -3657,9 +3686,13 @@ const fiinQuantTestButton = document.getElementById('fiinquant-test') as HTMLBut
 const fiinQuantUseButton = document.getElementById('fiinquant-use') as HTMLButtonElement;
 const fiinQuantLoginButton = document.getElementById('fiinquant-login') as HTMLButtonElement;
 const fiinQuantConnectionNote = document.getElementById('fiinquant-connection-note')!;
+const providerErrorOverlay = document.getElementById('provider-error-overlay')!;
+const providerErrorTitle = document.getElementById('provider-error-title')!;
+const providerErrorMessage = document.getElementById('provider-error-message')!;
 let dnseCredentialMode: ProviderCredentialMode = dnseSettings.credentialMode ?? 'session';
 let fiinQuantCredentialMode: ProviderCredentialMode = fiinQuantSettings.credentialMode;
 let selectedProviderPanel: PriceProviderId = activeProvider;
+let pendingProvider: PriceProviderId | null = null;
 
 function renderProviderCredentialModes(): void {
   providerOverlay.querySelectorAll<HTMLButtonElement>('[data-credential-provider]').forEach((button) => {
@@ -3765,105 +3798,6 @@ function bindDnseRealtimeStatus(): void {
   }
 }
 
-type ProviderTone = 'success' | 'warning' | 'error' | 'idle';
-
-interface ProviderConnectionSummary {
-  service: string;
-  realtime: string;
-  serviceTone: ProviderTone;
-  realtimeTone: ProviderTone;
-}
-
-function providerConnectionSummary(provider: PriceProviderId): ProviderConnectionSummary {
-  if (provider === 'demo') {
-    return {
-      service: tr('Khả dụng'),
-      realtime: tr('Mô phỏng cục bộ'),
-      serviceTone: 'success',
-      realtimeTone: 'idle',
-    };
-  }
-  if (provider === 'dnse') {
-    const connecting = dnseRealtimeState === 'connecting'
-      || dnseRealtimeState === 'authenticating'
-      || dnseRealtimeState === 'reconnecting';
-    return {
-      service: dnseFeed ? tr('Đã cấu hình') : tr('Chưa cấu hình'),
-      realtime: dnseRealtimeState === 'connected'
-        ? tr('Đang phát dữ liệu')
-        : connecting
-          ? tr('Đang kết nối')
-          : dnseRealtimeState === 'error'
-            ? tr('Lỗi kết nối')
-            : tr('Chưa mở kết nối'),
-      serviceTone: dnseFeed ? 'success' : 'warning',
-      realtimeTone: dnseRealtimeState === 'connected'
-        ? 'success'
-        : dnseRealtimeState === 'error'
-          ? 'error'
-          : connecting
-            ? 'warning'
-            : 'idle',
-    };
-  }
-
-  if (isBinanceProvider(provider)) {
-    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;
-    return {
-      service: tr('Khả dụng'),
-      realtime: feed.cacheAvailable ? 'WebSocket · IndexedDB' : 'WebSocket',
-      serviceTone: 'success',
-      realtimeTone: 'success',
-    };
-  }
-
-  const stream = fiinQuantHealthSnapshot?.stream;
-  if (fiinQuantHealthSnapshot?.tokenConfigured === false) {
-    return {
-      service: tr('Thiếu sidecar token'),
-      realtime: tr('Không khả dụng'),
-      serviceTone: 'error',
-      realtimeTone: 'error',
-    };
-  }
-  if (fiinQuantHealthSnapshot?.authorized === false) {
-    return {
-      service: tr('Token không đúng'),
-      realtime: tr('Không khả dụng'),
-      serviceTone: 'error',
-      realtimeTone: 'error',
-    };
-  }
-  const legacySecurity = fiinQuantHealthSnapshot
-    ? usesLegacyFiinQuantSecurity(fiinQuantHealthSnapshot)
-    : false;
-  const tickDetail = stream?.lastTickAt
-    ? `${tr('Đang phát dữ liệu')} · ${stream.lastTickSymbol ?? ''} · ${stream.lastMarketTickAt ?? stream.lastTickAt}`
-    : stream?.upstreamActive
-      ? tr('Đã kết nối, đang chờ tick')
-      : tr('Chưa mở kết nối');
-  return {
-    service: fiinQuantConnectionState === 'connected'
-      ? legacySecurity ? `${tr('Trực tuyến')} · ${tr('Sidecar cũ')}` : tr('Trực tuyến')
-      : fiinQuantConnectionState === 'checking'
-        ? tr('Đang kiểm tra')
-        : fiinQuantConnectionState === 'signed-out'
-          ? tr('Cần đăng nhập')
-          : tr('Không khả dụng'),
-    realtime: fiinQuantConnectionState === 'connected' ? tickDetail : tr('Không khả dụng'),
-    serviceTone: fiinQuantConnectionState === 'connected'
-      ? legacySecurity ? 'warning' : 'success'
-      : fiinQuantConnectionState === 'checking'
-        ? 'warning'
-        : 'error',
-    realtimeTone: stream?.lastTickAt
-      ? 'success'
-      : stream?.upstreamActive
-        ? 'warning'
-        : 'idle',
-  };
-}
-
 function renderProviderConnectionSummary(): void {
   providerSourceSummary.replaceChildren();
   const names: Record<PriceProviderId, string> = {
@@ -3874,14 +3808,14 @@ function renderProviderConnectionSummary(): void {
     'binance-usdm': 'Binance Futures',
   };
   for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {
-    const state = providerConnectionSummary(provider);
+    const isOn = providerEnabled && provider === activeProvider;
     const row = document.createElement('div');
     row.className = 'provider-source-row';
-    row.classList.toggle('active', provider === activeProvider);
+    row.classList.toggle('active', isOn);
     row.classList.toggle('selected', provider === selectedProviderPanel);
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
-    row.setAttribute('aria-label', `${names[provider]} · ${state.service} · ${state.realtime}`);
+    row.setAttribute('aria-label', names[provider]);
     row.addEventListener('click', () => setProviderPanel(provider));
     row.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -3891,51 +3825,26 @@ function renderProviderConnectionSummary(): void {
 
     const name = document.createElement('strong');
     name.className = 'provider-source-name';
-    name.dataset.tone = state.serviceTone;
     name.textContent = names[provider];
-
-    const role = document.createElement('span');
-    role.className = 'provider-source-role';
-    role.textContent = provider === activeProvider ? tr('Đang dùng') : tr('Dự phòng');
-
-    const service = document.createElement('span');
-    service.className = 'provider-source-state';
-    service.dataset.tone = state.serviceTone;
-    service.textContent = `${tr('Dịch vụ')}: ${state.service}`;
-
-    const realtime = document.createElement('span');
-    realtime.className = 'provider-source-state provider-source-realtime';
-    realtime.dataset.tone = state.realtimeTone;
-    realtime.textContent = `Realtime: ${state.realtime}`;
-    realtime.title = realtime.textContent;
 
     const action = document.createElement('button');
     action.type = 'button';
-    action.className = 'provider-source-action';
-    if (provider === activeProvider) {
-      action.textContent = tr('Đang dùng');
-      action.disabled = true;
-      action.classList.add('current');
-    } else if (provider === 'demo') {
-      action.textContent = tr('Dùng');
-      action.classList.add('primary');
-    } else if (isBinanceProvider(provider)) {
-      action.textContent = tr('Dùng');
-      action.classList.add('primary');
-    } else if (provider === 'dnse') {
-      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');
-      action.classList.toggle('primary', !!dnseFeed);
-    } else {
-      action.textContent = fiinQuantConnectionState === 'signed-out' ? tr('Đăng nhập') : tr('Dùng');
-      action.classList.toggle('primary', fiinQuantConnectionState !== 'offline');
-    }
+    action.className = 'provider-source-toggle';
+    action.textContent = '';
+    action.disabled = false;
+    action.setAttribute('role', 'switch');
+    action.setAttribute('aria-label', `${isOn ? tr('Tắt') : tr('Bật')} ${names[provider]}`);
+    action.setAttribute('aria-checked', String(isOn));
+    action.classList.toggle('on', isOn);
+    action.classList.toggle('pending', pendingProvider === provider);
     action.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void activateProviderFromSwitcher(provider);
+      if (isOn) disableActiveProvider();
+      else void toggleProvider(provider);
     });
 
-    row.append(name, role, service, realtime, action);
+    row.append(name, action);
     providerSourceSummary.appendChild(row);
   }
 }
@@ -3948,6 +3857,16 @@ function providerDisplayName(provider: PriceProviderId): string {
 }
 
 function renderProviderSourceState(): void {
+  if (!providerEnabled) {
+    sourcePrefix.textContent = `${tr('Dữ liệu')} · `;
+    sourceProvider.textContent = tr('Tắt');
+    sourceState.textContent = '';
+    sourceBtn.setAttribute('aria-label', tr('Cấu hình nguồn giá'));
+    sourceBtn.classList.remove('active', 'error', 'demo');
+    sourceBtn.title = tr('Chưa bật nguồn dữ liệu');
+    renderProviderConnectionSummary();
+    return;
+  }
   const providerName = providerDisplayName(activeProvider);
   const fiinState = fiinQuantConnectionState === 'connected'
     ? tr('đã kết nối')
@@ -3980,8 +3899,7 @@ function renderProviderSourceState(): void {
       || (activeProvider === 'dnse' && dnseRealtimeState === 'error'),
   );
   sourceBtn.classList.toggle('demo', activeProvider === 'demo');
-  const activeSummary = providerConnectionSummary(activeProvider);
-  sourceBtn.title = `${tr('Nguồn đang dùng')}: ${providerName} · ${tr('Dịch vụ')}: ${activeSummary.service} · Realtime: ${activeSummary.realtime}`;
+  sourceBtn.title = `${tr('Nguồn đang dùng')}: ${providerName}`;
   renderProviderConnectionSummary();
 }
 
@@ -3989,7 +3907,7 @@ function refreshProviderUi(): void {
   renderProviderSourceState();
   delete providerStatus.dataset.tone;
   if (activeProvider === 'demo') {
-    providerStatus.textContent = tr('Đang dùng dữ liệu mô phỏng. Không cần tài khoản hay API credential.');
+    providerStatus.textContent = '';
   } else if (activeProvider === 'dnse') {
     renderDnseProviderStatus();
   } else if (isBinanceProvider(activeProvider)) {
@@ -4016,10 +3934,10 @@ function setProviderPanel(provider: PriceProviderId): void {
     btn.classList.toggle('active', btn.dataset.providerTab === provider);
   });
   providerOverlay.querySelectorAll<HTMLElement>('[data-provider-panel]').forEach((panel) => {
-    panel.hidden = panel.dataset.providerPanel !== provider;
+    panel.hidden = provider !== 'fiinquant' || panel.dataset.providerPanel !== provider;
   });
   if (provider === 'demo') {
-    providerStatus.textContent = tr('Đang dùng dữ liệu mô phỏng. Không cần tài khoản hay API credential.');
+    providerStatus.textContent = '';
   } else if (provider === 'dnse') {
     renderDnseProviderStatus();
   } else if (isBinanceProvider(provider)) {
@@ -4078,13 +3996,18 @@ async function activateProviderFromSwitcher(provider: PriceProviderId): Promise<
     return;
   }
   if (provider === 'dnse') {
-    if (dnseFeed) {
-      setActiveProvider('dnse');
-    } else {
-      providerStatus.dataset.tone = 'error';
-      renderDnseProviderStatus();
-      focusProviderField('dnse');
+    if (!dnseFeed) {
+      dnseCredentials = normalizeDnseCredentials({
+        apiKey: '',
+        apiSecret: '',
+        restBase: DNSE_REST_PROXY,
+        wsBase: dnseWsProxyBase(),
+        useProxyCredentials: true,
+      });
+      dnseFeed = new DNSEDatafeed(dnseCredentials);
+      bindDnseRealtimeStatus();
     }
+    setActiveProvider('dnse');
     return;
   }
   if (fiinQuantCredentialMode === 'session') {
@@ -4093,8 +4016,35 @@ async function activateProviderFromSwitcher(provider: PriceProviderId): Promise<
     await useConfiguredFiinQuantSession();
   }
   if (fiinQuantConnectionState !== 'connected') {
+    showProviderActivationError('fiinquant', providerStatus.textContent || tr('Không thể kết nối FiinQuant.'));
     focusProviderField('fiinquant');
   }
+}
+
+async function toggleProvider(provider: PriceProviderId): Promise<void> {
+  if (pendingProvider) return;
+  pendingProvider = provider;
+  renderProviderConnectionSummary();
+  try {
+    await activateProviderFromSwitcher(provider);
+  } catch (error) {
+    if (providerEnabled && activeProvider === provider) disableActiveProvider();
+    showProviderActivationError(provider, error instanceof Error ? error.message : String(error));
+  } finally {
+    pendingProvider = null;
+    renderProviderConnectionSummary();
+  }
+}
+
+function showProviderActivationError(provider: PriceProviderId, message: string): void {
+  providerErrorTitle.textContent = `${tr('Không thể bật')} ${providerDisplayName(provider)}`;
+  providerErrorMessage.textContent = message || tr('Nguồn dữ liệu không phản hồi.');
+  providerErrorOverlay.hidden = false;
+  (document.getElementById('provider-error-close') as HTMLButtonElement).focus();
+}
+
+function closeProviderActivationError(): void {
+  providerErrorOverlay.hidden = true;
 }
 
 function saveDnseCredentials(): void {
@@ -4310,6 +4260,10 @@ document.getElementById('fiinquant-credential-form')!.addEventListener('submit',
 });
 providerOverlay.addEventListener('pointerdown', (e) => {
   if (e.target === providerOverlay) closeProviderDialog();
+});
+document.getElementById('provider-error-close')!.addEventListener('click', closeProviderActivationError);
+providerErrorOverlay.addEventListener('pointerdown', (event) => {
+  if (event.target === providerErrorOverlay) closeProviderActivationError();
 });
 providerOverlay.querySelectorAll<HTMLButtonElement>('[data-provider-tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -4873,6 +4827,11 @@ window.addEventListener('keydown', (e) => {
   const tag = target?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  if (!providerErrorOverlay.hidden) {
+    if (e.key === 'Escape') closeProviderActivationError();
+    return;
+  }
 
   if (!providerOverlay.hidden) {
     if (e.key === 'Escape') closeProviderDialog();

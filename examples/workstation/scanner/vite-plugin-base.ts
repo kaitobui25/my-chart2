@@ -298,8 +298,8 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "function pollFiinQuantHealth(): void {\n  if (activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n",
-    `function pollFiinQuantHealth(): void {\n  if (activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n\ntype VnstockConnectionState = 'checking' | 'connected' | 'offline';\nlet vnstockConnectionState: VnstockConnectionState = 'checking';\nlet vnstockHealthSnapshot: VnstockHealth | null = null;\nlet vnstockHealthRequest = 0;\nconst VNSTOCK_HEALTH_POLL_MS = 15_000;\n\nfunction renderVnstockProviderStatus(): void {\n  delete providerStatus.dataset.tone;\n  if (vnstockConnectionState === 'checking') {\n    providerStatus.textContent = tr('Đang kiểm tra Vnstock sidecar...');\n    return;\n  }\n  if (vnstockConnectionState === 'offline') {\n    providerStatus.dataset.tone = 'error';\n    providerStatus.textContent = tr('Vnstock sidecar không khả dụng. Kiểm tra Python/vnstock hoặc examples/sidecars/vnstock/requirements.txt.');\n    return;\n  }\n  providerStatus.dataset.tone = 'success';\n  const routing = vnstockHealthSnapshot?.routing ?? 'KBS/VCI';\n  const seconds = vnstockHealthSnapshot?.pollIntervalSeconds ?? 5;\n  providerStatus.textContent = \`Vnstock sẵn sàng · \${routing} · polling \${seconds}s · cache \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'không khả dụng'}\`;\n}\n\nasync function reportVnstockHealth(showChecking = true): Promise<void> {\n  const request = ++vnstockHealthRequest;\n  if (showChecking) {\n    vnstockConnectionState = 'checking';\n    renderProviderSourceState();\n  }\n  try {\n    const health = await vnstockFeed.health();\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = health;\n    vnstockConnectionState = health.ok ? 'connected' : 'offline';\n  } catch {\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = null;\n    vnstockConnectionState = 'offline';\n  } finally {\n    if (request === vnstockHealthRequest) {\n      renderProviderSourceState();\n      if (!providerOverlay.hidden && selectedProviderPanel === 'vnstock') renderVnstockProviderStatus();\n    }\n  }\n}\n\nfunction pollVnstockHealth(): void {\n  if (activeProvider !== 'vnstock' || document.hidden) return;\n  void reportVnstockHealth(false);\n}\n`,
+    "function pollFiinQuantHealth(): void {\n  if (!providerEnabled || activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n",
+    `function pollFiinQuantHealth(): void {\n  if (!providerEnabled || activeProvider !== 'fiinquant' || document.hidden) return;\n  void reportFiinQuantHealth(false);\n}\n\ntype VnstockConnectionState = 'checking' | 'connected' | 'offline';\nlet vnstockConnectionState: VnstockConnectionState = 'checking';\nlet vnstockHealthSnapshot: VnstockHealth | null = null;\nlet vnstockHealthRequest = 0;\nconst VNSTOCK_HEALTH_POLL_MS = 15_000;\n\nfunction renderVnstockProviderStatus(): void {\n  delete providerStatus.dataset.tone;\n  if (vnstockConnectionState === 'checking') {\n    providerStatus.textContent = tr('Đang kiểm tra Vnstock sidecar...');\n    return;\n  }\n  if (vnstockConnectionState === 'offline') {\n    providerStatus.dataset.tone = 'error';\n    providerStatus.textContent = tr('Vnstock sidecar không khả dụng. Kiểm tra Python/vnstock hoặc examples/sidecars/vnstock/requirements.txt.');\n    return;\n  }\n  providerStatus.dataset.tone = 'success';\n  const routing = vnstockHealthSnapshot?.routing ?? 'KBS/VCI';\n  const seconds = vnstockHealthSnapshot?.pollIntervalSeconds ?? 5;\n  providerStatus.textContent = \`Vnstock sẵn sàng · \${routing} · polling \${seconds}s · cache \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'không khả dụng'}\`;\n}\n\nasync function reportVnstockHealth(showChecking = true): Promise<void> {\n  const request = ++vnstockHealthRequest;\n  if (showChecking) {\n    vnstockConnectionState = 'checking';\n    renderProviderSourceState();\n  }\n  try {\n    const health = await vnstockFeed.health();\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = health;\n    vnstockConnectionState = health.ok ? 'connected' : 'offline';\n  } catch {\n    if (request !== vnstockHealthRequest) return;\n    vnstockHealthSnapshot = null;\n    vnstockConnectionState = 'offline';\n  } finally {\n    if (request === vnstockHealthRequest) {\n      renderProviderSourceState();\n      if (!providerOverlay.hidden && selectedProviderPanel === 'vnstock') renderVnstockProviderStatus();\n    }\n  }\n}\n\nfunction pollVnstockHealth(): void {\n  if (!providerEnabled || activeProvider !== 'vnstock' || document.hidden) return;\n  void reportVnstockHealth(false);\n}\n`,
   );
   code = replaceRequired(
     code,
@@ -308,8 +308,8 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (provider !== 'fiinquant' || activeProvider !== provider) return;",
-    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (activeProvider !== provider) return;\n  if (provider === 'vnstock') {\n    if (/cannot reach|failed to fetch|network|sidecar/i.test(message)) vnstockConnectionState = 'offline';\n    renderProviderSourceState();\n    return;\n  }\n  if (provider !== 'fiinquant') return;",
+    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (activeProvider !== provider) return;\n  if (providerEnabled) {\n    disableActiveProvider();\n    showProviderActivationError(provider, message);\n  }\n  if (provider !== 'fiinquant') return;",
+    "function reportProviderLoadFailure(provider: PriceProviderId, message: string): void {\n  if (activeProvider !== provider) return;\n  if (providerEnabled) {\n    disableActiveProvider();\n    showProviderActivationError(provider, message);\n  }\n  if (provider === 'vnstock') {\n    if (/cannot reach|failed to fetch|network|sidecar/i.test(message)) vnstockConnectionState = 'offline';\n    renderProviderSourceState();\n    return;\n  }\n  if (provider !== 'fiinquant') return;",
   );
   code = replaceRequired(
     code,
@@ -328,11 +328,6 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;",
-    `\n  if (provider === 'vnstock') {\n    return {\n      service: vnstockConnectionState === 'connected'\n        ? tr('Trực tuyến')\n        : vnstockConnectionState === 'checking'\n          ? tr('Đang kiểm tra')\n          : tr('Không khả dụng'),\n      realtime: vnstockConnectionState === 'connected'\n        ? \`REST polling · \${vnstockFeed.cacheAvailable ? 'IndexedDB' : 'no cache'}\`\n        : tr('Không khả dụng'),\n      serviceTone: vnstockConnectionState === 'connected' ? 'success' : vnstockConnectionState === 'checking' ? 'warning' : 'error',\n      realtimeTone: vnstockConnectionState === 'connected' ? 'success' : 'idle',\n    };\n  }\n\n  if (isBinanceProvider(provider)) {\n    const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;`,
-  );
-  code = replaceRequired(
-    code,
     "    fiinquant: 'FiinQuant',\n    'binance-spot': 'Binance Spot',",
     "    fiinquant: 'FiinQuant',\n    vnstock: 'Vnstock',\n    'binance-spot': 'Binance Spot',",
   );
@@ -340,11 +335,6 @@ function integrateVnstockMain(original: string): string {
     code,
     "for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {",
     "for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'vnstock', 'fiinquant'] as PriceProviderId[]) {",
-  );
-  code = replaceRequired(
-    code,
-    "    } else if (provider === 'dnse') {\n      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\n      action.classList.toggle('primary', !!dnseFeed);\n    } else {",
-    "    } else if (provider === 'dnse') {\n      action.textContent = dnseFeed ? tr('Dùng') : tr('Cấu hình');\n      action.classList.toggle('primary', !!dnseFeed);\n    } else if (provider === 'vnstock') {\n      action.textContent = tr('Dùng');\n      action.classList.toggle('primary', vnstockConnectionState !== 'offline');\n    } else {",
   );
   code = replaceRequired(
     code,
@@ -408,7 +398,7 @@ function integrateVnstockHtml(original: string): string {
   html = replaceRequired(
     html,
     '        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>',
-    `        <section class="provider-panel" data-provider-panel="vnstock" hidden>\n          <span class="provider-note">Vnstock 4 dùng nguồn dữ liệu Việt Nam công khai qua sidecar Python. Market data được Unified UI định tuyến KBS/VCI; lịch sử được cache trong IndexedDB.</span>\n          <div class="provider-actions">\n            <button id="vnstock-cache-clear" type="button">Xóa cache Vnstock</button>\n            <span class="spacer"></span>\n            <button id="vnstock-use" type="button">Dùng Vnstock</button>\n          </div>\n        </section>\n        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
+    `        <section class="provider-panel" data-provider-panel="vnstock" hidden>\n          <button id="vnstock-cache-clear" type="button" hidden></button>\n          <button id="vnstock-use" type="button" hidden></button>\n        </section>\n        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
   );
   return html;
 }

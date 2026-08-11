@@ -34,7 +34,7 @@ describe('lazy chart provider lifecycle', () => {
     const code = await transformedWorkstation();
     expect(code).toContain("type VnstockConnectionState = 'idle' | 'checking' | 'connected' | 'offline';");
     expect(code).toContain("let vnstockConnectionState: VnstockConnectionState = 'idle';");
-    expect(code).toContain("if (await reportVnstockHealth()) setActiveProvider('vnstock');");
+    expect(code).toContain("showProviderActivationError('vnstock'");
     expect(code).not.toContain('refreshProviderUi();\nvoid reportVnstockHealth(false);');
   });
 
@@ -49,9 +49,22 @@ describe('lazy chart provider lifecycle', () => {
     const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
     const code = await transformedWorkstation();
     expect(main).toContain("const ACTIVE_PROVIDER_KEY = 'l2chart.priceProvider';");
+    expect(main).toContain("const PROVIDER_ENABLED_KEY = 'l2chart.priceProviderEnabled';");
+    expect(main).toContain("let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';");
+    expect(main).toContain("let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';");
     expect(main).toContain('localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);');
     expect(code).toContain("if (activeProvider === 'fiinquant') {");
     expect(code).toContain("} else if (activeProvider === 'vnstock') {");
+  });
+
+  it('renders provider controls as persistent switches and disables data access when off', async () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const code = await transformedWorkstation();
+    expect(main).toContain("action.setAttribute('role', 'switch');");
+    expect(main).toContain("action.setAttribute('aria-checked', String(isOn));");
+    expect(main).toContain("localStorage.setItem(PROVIDER_ENABLED_KEY, 'false');");
+    expect(main).toContain('if (!providerEnabled) {');
+    expect(code).toContain("showProviderActivationError('vnstock'");
   });
 
   it('opens scanner results without loading hidden or stale symbols', async () => {
