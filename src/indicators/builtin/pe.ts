@@ -155,6 +155,9 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       let fetchTimer: ReturnType<typeof setTimeout> | null = null;
       let manualMissFetch = chart.getCandles().length > 0 && !!symbol;
       let removed = false;
+      let computedValues: LinePoint[] = [];
+      let computedMarkers: PeMarker[] = [];
+      let computedLatestReportedPe: number | null = null;
 
       const clearTimerIfNeeded = () => {
         if (fetchTimer !== null) {
@@ -163,27 +166,34 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         }
       };
 
-      const clearVisuals = () => {
-        const empty = new Array<LinePoint>(chart.getCandles().length).fill(null);
-        line.setData(empty);
-        line.legendText = '—';
-        markerSeries.setState([], empty, null, line.color);
+      const updateHoverPresentation = () => {
+        line.legendText = hoverIndex === null
+          ? formatPe(computedLatestReportedPe)
+          : formatPe(computedValues[hoverIndex] ?? null);
+        markerSeries.setState(computedMarkers, computedValues, hoverIndex, line.color);
         chart.invalidate();
       };
 
-      const render = () => {
+      const clearVisuals = () => {
+        computedValues = new Array<LinePoint>(chart.getCandles().length).fill(null);
+        computedMarkers = [];
+        computedLatestReportedPe = null;
+        line.setData(computedValues);
+        updateHoverPresentation();
+      };
+
+      const recomputeData = () => {
         const candles = chart.getCandles();
         if (!record || chart.getIntervalSec() < DAY_SECONDS) {
           clearVisuals();
           return;
         }
         const computed = computePeSeries(candles, record.quarters, chart.getIntervalSec());
-        line.setData(computed.values);
-        line.legendText = hoverIndex === null
-          ? formatPe(computed.latestReportedPe)
-          : formatPe(computed.values[hoverIndex] ?? null);
-        markerSeries.setState(computed.markers, computed.values, hoverIndex, line.color);
-        chart.invalidate();
+        computedValues = computed.values;
+        computedMarkers = computed.markers;
+        computedLatestReportedPe = computed.latestReportedPe;
+        line.setData(computedValues);
+        updateHoverPresentation();
       };
 
       const fetchFresh = async (expectedSymbol: string, expectedGeneration: number) => {
@@ -193,7 +203,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
           const fresh = await repository.fetchAndCache(expectedSymbol);
           if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
           record = fresh;
-          render();
+          recomputeData();
         } catch (error) {
           // Fundamental-data failures must never poison the candle provider or block interaction.
           console.warn(`[P/E] ${expectedSymbol}:`, error);
@@ -224,7 +234,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
         if (cached) {
           record = cached;
-          render();
+          recomputeData();
           const age = Math.floor(Date.now() / 1000) - cached.fetchedAt;
           if (age > PE_CACHE_REFRESH_SECONDS) {
             scheduleFetch(
@@ -264,14 +274,14 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       });
       const offCrosshair = chart.on('crosshair', (event) => {
         hoverIndex = event.index;
-        render();
+        updateHoverPresentation();
       });
 
       return {
         recompute() {
           const tracked = getIndicatorChartSymbol(chart);
           if (tracked && tracked !== symbol) resetForSymbol(tracked, false);
-          render();
+          recomputeData();
           if (chart.getIntervalSec() >= DAY_SECONDS && chart.getCandles().length > 0 && !record) {
             void loadForCurrentSymbol();
           }
