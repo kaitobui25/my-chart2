@@ -23,6 +23,10 @@ function vnTime(year: number, month: number, day: number, hour = 9): number {
   return Math.floor(Date.UTC(year, month - 1, day, hour) / 1000) - VN_OFFSET;
 }
 
+function vnEndOfDay(year: number, month: number, day: number): number {
+  return vnTime(year, month, day, 23) + 59 * 60 + 59;
+}
+
 function candle(time: number, close: number): Candle {
   return { time, open: close, high: close, low: close, close, volume: 1 };
 }
@@ -58,7 +62,7 @@ describe('P/E time model', () => {
   });
 
   it('never uses a quarter before its replay-safe effective time', () => {
-    const q1End = vnTime(2026, 3, 31, 0);
+    const q1End = vnEndOfDay(2026, 3, 31);
     const observed = q1End + 20 * DAY;
     const q1 = quarter('2026-Q1', q1End, 4000, 15, observed);
     expect(peQuarterEffectiveAt(q1)).toBe(observed);
@@ -71,41 +75,47 @@ describe('P/E time model', () => {
   });
 
   it('uses conservative fallback when a historical quarter was first observed much later', () => {
-    const q1End = vnTime(2026, 3, 31, 0);
+    const q1End = vnEndOfDay(2026, 3, 31);
     const firstObservedMuchLater = vnTime(2026, 8, 11, 20);
     const q1 = quarter('2026-Q1', q1End, 4000, 15, firstObservedMuchLater);
     expect(peQuarterEffectiveAt(q1)).toBe(q1End + 30 * DAY);
   });
 
+  it('clamps a malformed observation timestamp to no earlier than period end', () => {
+    const q1End = vnEndOfDay(2026, 3, 31);
+    const q1 = quarter('2026-Q1', q1End, 4000, 15, q1End - DAY);
+    expect(peQuarterEffectiveAt(q1)).toBe(q1End);
+  });
+
   it('infers thousand-VND chart prices from Vnstock EPS and reported P/E', () => {
     const candles = [candle(vnTime(2026, 8, 11), 62)];
-    const q2 = quarter('2026-Q2', vnTime(2026, 6, 30, 0), 4159.65, 14.42, vnTime(2026, 8, 11));
+    const q2 = quarter('2026-Q2', vnEndOfDay(2026, 6, 30), 4159.65, 14.42, vnTime(2026, 8, 11));
     expect(inferPePriceScale(candles, [q2])).toBe(1000);
   });
 
   it('keeps VND-denominated chart prices unscaled', () => {
     const candles = [candle(vnTime(2026, 8, 11), 62_000)];
-    const q2 = quarter('2026-Q2', vnTime(2026, 6, 30, 0), 4159.65, 14.42, vnTime(2026, 8, 11));
+    const q2 = quarter('2026-Q2', vnEndOfDay(2026, 6, 30), 4159.65, 14.42, vnTime(2026, 8, 11));
     expect(inferPePriceScale(candles, [q2])).toBe(1);
   });
 
   it('does not invent a P/E when trailing EPS is zero or negative', () => {
     const day = candle(vnTime(2026, 8, 11), 62);
-    const q2 = quarter('2026-Q2', vnTime(2026, 6, 30, 0), -500, null, vnTime(2026, 7, 20));
+    const q2 = quarter('2026-Q2', vnEndOfDay(2026, 6, 30), -500, null, vnTime(2026, 7, 20));
     const result = computePeSeries([day], [q2], DAY, vnTime(2026, 8, 12));
     expect(result.values).toEqual([null]);
   });
 
   it('does not render P/E on intraday intervals', () => {
     const day = candle(vnTime(2026, 8, 11), 62);
-    const q2 = quarter('2026-Q2', vnTime(2026, 6, 30, 0), 4159.65, 14.42, vnTime(2026, 7, 20));
+    const q2 = quarter('2026-Q2', vnEndOfDay(2026, 6, 30), 4159.65, 14.42, vnTime(2026, 7, 20));
     const result = computePeSeries([day], [q2], 60 * 60, vnTime(2026, 8, 12));
     expect(result.values).toEqual([null]);
     expect(result.markers).toEqual([]);
   });
 
   it('evaluates weekly and monthly closing P/E at the bucket end', () => {
-    const qEnd = vnTime(2026, 6, 30, 0);
+    const qEnd = vnEndOfDay(2026, 6, 30);
     const q = quarter('2026-Q2', qEnd, 4000, 15, vnTime(2026, 7, 15, 12));
     const julyMonth = candle(vnTime(2026, 7, 1), 64);
     const result = computePeSeries([julyMonth], [q], 30 * DAY, vnTime(2026, 8, 1));
@@ -113,7 +123,7 @@ describe('P/E time model', () => {
   });
 
   it('hides a quarterly marker until the quarter is knowable in replay', () => {
-    const qEnd = vnTime(2026, 3, 31, 0);
+    const qEnd = vnEndOfDay(2026, 3, 31);
     const observed = vnTime(2026, 4, 20, 12);
     const q = quarter('2026-Q1', qEnd, 4000, 15, observed);
     const march = candle(vnTime(2026, 3, 31), 60);
@@ -149,6 +159,29 @@ describe('P/E cache merge', () => {
       firstObservedAt: 900,
     });
     expect(merged.fetchedAt).toBe(2000);
+  });
+
+  it('retains older cached quarters after they roll out of a later API response', () => {
+    const existing: PeFundamentalsRecord = {
+      symbol: 'VNM',
+      source: 'vnstock-unified',
+      fetchedAt: 1000,
+      quarters: [
+        quarter('2025-Q4', 400, 3900, 13, 600),
+        quarter('2026-Q1', 500, 4100, 14, 700),
+      ],
+    };
+    const merged = mergePeFundamentals(existing, {
+      symbol: 'VNM',
+      source: 'vnstock-unified',
+      quarters: [
+        { period: '2026-Q1', periodEnd: 500, trailingEps: 4200, peRatio: 14.5 },
+        { period: '2026-Q2', periodEnd: 600, trailingEps: 4300, peRatio: 15 },
+      ],
+    }, 2000);
+    expect(merged.quarters.map((item) => item.period)).toEqual(['2025-Q4', '2026-Q1', '2026-Q2']);
+    expect(merged.quarters[0].firstObservedAt).toBe(600);
+    expect(merged.quarters[1].trailingEps).toBe(4200);
   });
 });
 
