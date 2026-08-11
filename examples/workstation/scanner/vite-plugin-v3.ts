@@ -65,7 +65,8 @@ function patchScannerChartReload(original: string): string {
     ),
   );
 
-  // The lazy-provider wrapper currently switches provider first. That invokes
+  // Vietnamese scanner sources open their selected symbol with Vnstock. The
+  // lazy-provider wrapper currently switches provider first. That invokes
   // reloadAllTiles with the old active symbol, then setSymbol loads the clicked
   // scanner symbol a second time. Stage the symbol without loading, then let
   // the provider switch perform the one intended visible-chart reload.
@@ -91,8 +92,8 @@ function patchScannerChartReload(original: string): string {
     lines(
       '  async openSymbol(symbol) {',
       '    const providerMap = {',
-      "      fiinquant: 'fiinquant',",
-      "      vn_eod: 'fiinquant',",
+      "      fiinquant: 'vnstock',",
+      "      vn_eod: 'vnstock',",
       "      vnstock: 'vnstock',",
       "      binance_spot: 'binance-spot',",
       "      binance_usdm: 'binance-usdm',",

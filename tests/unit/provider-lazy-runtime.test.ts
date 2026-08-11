@@ -67,6 +67,14 @@ describe('lazy chart provider lifecycle', () => {
     expect(switchProvider).toBeGreaterThan(stageSymbol);
   });
 
+  it('opens Vietnamese scanner results with the Vnstock chart provider', async () => {
+    const code = await transformedWorkstation();
+    expect(code).toContain("fiinquant: 'vnstock'");
+    expect(code).toContain("vn_eod: 'vnstock'");
+    expect(code).toContain("vnstock: 'vnstock'");
+    expect(code).toContain("if (targetProvider === 'vnstock' && !(await reportVnstockHealth(false))) return;");
+  });
+
   it('gates persisted FiinQuant startup before chart and watchlist data requests', async () => {
     const code = await transformedWorkstation();
     expect(code).toContain('let fiinQuantRuntimeGate: Promise<boolean> | null = null;');
