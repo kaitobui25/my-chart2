@@ -22,26 +22,40 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck P/E modules
-        run: >-
-          npx tsc --noEmit
-          --target ES2022
-          --module ESNext
-          --moduleResolution Bundler
-          --lib ES2022,DOM,DOM.Iterable
-          --strict
-          --skipLibCheck
-          src/indicators/builtin/pe.ts
-          src/indicators/builtin/pe-client.ts
-          src/indicators/builtin/pe-cache.ts
-          src/indicators/builtin/pe-model.ts
-          src/indicators/runtime-context.ts
+      - id: pe_typecheck
+        name: Typecheck P/E modules
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsc --noEmit \
+            --target ES2022 \
+            --module ESNext \
+            --moduleResolution Bundler \
+            --lib ES2022,DOM,DOM.Iterable \
+            --strict \
+            --skipLibCheck \
+            src/indicators/builtin/pe.ts \
+            src/indicators/builtin/pe-client.ts \
+            src/indicators/builtin/pe-cache.ts \
+            src/indicators/builtin/pe-model.ts \
+            src/indicators/runtime-context.ts 2>&1 | tee pe-typecheck.log
 
-      - name: Run P/E unit tests
-        run: npx vitest run tests/unit/pe-indicator.test.ts tests/unit/pe-load-policy.test.ts
+      - id: pe_unit
+        name: Run P/E unit tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npx vitest run tests/unit/pe-indicator.test.ts tests/unit/pe-load-policy.test.ts 2>&1 | tee pe-unit.log
 
-      - name: Build workstation
-        run: npm run build:demo
+      - id: pe_build
+        name: Build workstation
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build:demo 2>&1 | tee pe-build.log
 
       - uses: actions/setup-python@v5
         with:
@@ -50,6 +64,32 @@ jobs:
       - name: Install Vnstock sidecar test dependency
         run: python -m pip install 'aiohttp>=3.10,<4'
 
-      - name: Test Vnstock P/E sidecar
+      - id: pe_sidecar
+        name: Test Vnstock P/E sidecar
+        continue-on-error: true
         working-directory: examples/sidecars/vnstock
-        run: python -m unittest -v test_vnstock_sidecar.py
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v test_vnstock_sidecar.py 2>&1 | tee ../../../pe-sidecar.log
+
+      - name: Upload focused validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pe-indicator-validation-logs
+          path: pe-*.log
+
+      - name: Require focused validation success
+        if: always()
+        env:
+          TYPECHECK: ${{ steps.pe_typecheck.outcome }}
+          UNIT: ${{ steps.pe_unit.outcome }}
+          BUILD: ${{ steps.pe_build.outcome }}
+          SIDECAR: ${{ steps.pe_sidecar.outcome }}
+        run: |
+          printf 'typecheck=%s unit=%s build=%s sidecar=%s\n' "$TYPECHECK" "$UNIT" "$BUILD" "$SIDECAR"
+          test "$TYPECHECK" = success
+          test "$UNIT" = success
+          test "$BUILD" = success
+          test "$SIDECAR" = success
