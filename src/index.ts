@@ -8,6 +8,7 @@ export {
   type IndicatorAppearance,
   type BarLabel,
   type BarLabelStyle,
+  type BarProgressMarker,
 } from './core/chart';
 export {
   type DrawingTool,

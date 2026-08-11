@@ -67,11 +67,17 @@ import {
   type MarketQuote,
 } from './trading/paper';
 import { TradingWorkspace } from './trading/workspace';
-import { SyncedReplaySession, type ReplayParticipant, type ReplaySessionSnapshot } from './replay/replay-session';
+import {
+  SyncedReplaySession,
+  chooseReplayParticipants,
+  type ReplayParticipant,
+  type ReplaySessionSnapshot,
+} from './replay/replay-session';
 import {
   buildReplayDayLabels,
   DEFAULT_REPLAY_DAY_LABEL_COLORS,
 } from './replay/replay-day-labels';
+import { buildReplayMonthProgress } from './replay/replay-month-progress';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -256,10 +262,6 @@ interface AutoSaveWorkspaceSnapshot {
     enabled: boolean;
     id: PriceProviderId;
   };
-  replay: {
-    currentTime: number;
-    speed: number;
-  } | null;
 }
 
 const marketHub = new MarketHub();
@@ -526,7 +528,6 @@ function readAutoSaveWorkspace(): AutoSaveWorkspaceSnapshot | null {
     || !snapshot.provider
     || !validProviders.includes(snapshot.provider.id)
   ) return null;
-  if (snapshot.replay && !Number.isFinite(snapshot.replay.currentTime)) return null;
   return snapshot;
 }
 
@@ -1652,6 +1653,7 @@ class Tile implements ReplayParticipant {
   private replayActive = false;
   private historyRange: HistoryRange | null = null;
   private initialLoadPromise: Promise<void> = Promise.resolve();
+  private currentLoadPromise: Promise<void> = Promise.resolve();
   private readonly headerEl: HTMLDivElement;
   private readonly chartShellEl: HTMLDivElement;
   private readonly loadStateEl: HTMLDivElement;
@@ -1840,6 +1842,10 @@ class Tile implements ReplayParticipant {
 
   whenInitialLoadComplete(): Promise<void> {
     return this.initialLoadPromise;
+  }
+
+  whenCurrentLoadComplete(): Promise<void> {
+    return this.currentLoadPromise;
   }
 
   /** Change the symbol from the header or command palette. */
@@ -2567,10 +2573,6 @@ class Tile implements ReplayParticipant {
     return this.getHistorySummary();
   }
 
-  getReplayHistoryCandles(): readonly Candle[] {
-    return this.history.map((candle) => ({ ...candle }));
-  }
-
   setHistoryRange(range: HistoryRange, interval?: string): HistoryRange | null {
     const from = Math.floor(range.from);
     const to = Math.floor(range.to);
@@ -2618,19 +2620,21 @@ class Tile implements ReplayParticipant {
     this.chart.setMarketQuote(null);
   }
 
-  setReplayData(candles: readonly Candle[]): void {
+  setReplayData(candles: readonly Candle[], currentTime: number): void {
     const data = candles.map((candle) => ({ ...candle }));
     this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
     this.chart.setData(data);
     this.chart.fitContent();
+    this.refreshReplayMonthProgress(currentTime);
     refreshReplayDayLabels(this);
     const latest = data[data.length - 1];
     if (latest) this.publishReplayCandle(latest);
   }
 
-  updateReplayCandle(candle: Candle): void {
+  updateReplayCandle(candle: Candle, currentTime: number): void {
     this.chart.updateCandle({ ...candle });
     this.chart.fitPriceScale();
+    this.refreshReplayMonthProgress(currentTime);
     refreshReplayDayLabels(this);
     this.publishReplayCandle(candle);
   }
@@ -2644,6 +2648,7 @@ class Tile implements ReplayParticipant {
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
     this.chart.setBarLabels([]);
+    this.chart.setBarProgressMarker(null);
     if (!wasReplay) return;
     if (reload) {
       void this.load();
@@ -2652,6 +2657,15 @@ class Tile implements ReplayParticipant {
     this.chart.setData(this.history.map((candle) => ({ ...candle })));
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
+  }
+
+  private refreshReplayMonthProgress(currentTime: number): void {
+    const candles = this.chart.getCandles();
+    const latest = candles[candles.length - 1];
+    const marker = this.interval === '1M' && latest
+      ? buildReplayMonthProgress(latest.time, currentTime, providerCalendarOffsetMinutes(activeProvider))
+      : null;
+    this.chart.setBarProgressMarker(marker);
   }
 
   private updateHistory(candle: Candle): Candle | null {
@@ -2735,6 +2749,10 @@ class Tile implements ReplayParticipant {
   async load(): Promise<void> {
     if (this.replayActive) return;
     const token = ++this.loadToken;
+    let finishCurrentLoad!: () => void;
+    this.currentLoadPromise = new Promise<void>((resolve) => {
+      finishCurrentLoad = resolve;
+    });
     this.loading = true;
     this.historyPageLoading = false;
     this.historyPageExhausted = false;
@@ -2762,6 +2780,7 @@ class Tile implements ReplayParticipant {
       const message = provider.unavailable ?? 'chưa có nguồn giá';
       this.setFeedStatus('error', message);
       this.setLoadState('error', message);
+      finishCurrentLoad();
       return;
     }
 
@@ -2855,6 +2874,7 @@ class Tile implements ReplayParticipant {
         this.loading = false;
         if (activeTile === this) syncRangeUi();
       }
+      finishCurrentLoad();
     }
   }
 
@@ -3032,8 +3052,6 @@ function refreshReplayDayLabels(changedTile?: Tile): void {
     && visible.length === 2
     && visible[0].interval === '1M'
     && visible[1].interval === '1d'
-    && visible[0].mode === 'candles'
-    && visible[1].mode === 'candles'
     && visible[0].symbol.trim().toUpperCase() === visible[1].symbol.trim().toUpperCase()
     ? visible[1]
     : null;
@@ -3403,6 +3421,8 @@ const replayStop = document.getElementById('replay-stop') as HTMLButtonElement;
 const REPLAY_PLAY_ICON = lucideIcon(Play);
 const REPLAY_PAUSE_ICON = lucideIcon(Pause);
 document.getElementById('replay-icon')!.innerHTML = lucideIcon(CirclePlay);
+let replayPreparing = false;
+let replayRequestToken = 0;
 
 function refreshReplayUi(): void {
   const replay = replaySession?.snapshot() ?? {
@@ -3420,12 +3440,23 @@ function refreshReplayUi(): void {
   const loading = replay.phase === 'loading';
   const playing = replay.phase === 'playing';
   const finished = replay.total > 0 && replay.cursor >= replay.total - 1;
+  const failed = replay.phase === 'idle' && replay.error !== null;
 
-  replayBtn.disabled = !activeTile;
+  replayBtn.disabled = !activeTile || replayPreparing;
   replayBtn.classList.toggle('active', active);
-  replayLabel.textContent = selecting ? 'Chọn nến' : loading ? 'Đang tải' : active ? 'Trực tiếp' : 'Replay';
+  replayBtn.classList.toggle('error', failed);
+  replayLabel.textContent = replayPreparing || loading
+    ? 'Đang tải'
+    : selecting
+      ? 'Chọn nến'
+      : active
+        ? 'Trực tiếp'
+        : failed
+          ? 'Replay lỗi'
+          : 'Replay';
   replayBtn.title = replay.error
     ?? (active ? 'Dừng replay đồng bộ và quay lại dữ liệu thời gian thực' : 'Replay đồng bộ các chart đang hiển thị');
+  replayBtn.setAttribute('aria-label', replayBtn.title);
 
   replayControls.hidden = !active;
   if (!active) {
@@ -3451,7 +3482,7 @@ function refreshReplayUi(): void {
 }
 
 replaySession = new SyncedReplaySession({
-  getParticipants: () => visibleTilesForLayout(activeLayout),
+  getParticipants: () => chooseReplayParticipants(visibleTilesForLayout(activeLayout), activeTile),
   getFeed: () => {
     const provider = currentFeed();
     return {
@@ -3470,7 +3501,26 @@ replaySession = new SyncedReplaySession({
   onStateChange: () => refreshReplayUi(),
 });
 
-replayBtn.addEventListener('click', () => replaySession?.toggle());
+replayBtn.addEventListener('click', async () => {
+  const session = replaySession;
+  if (!session) return;
+  const requestToken = ++replayRequestToken;
+  if (session.snapshot().phase !== 'idle') {
+    session.toggle();
+    return;
+  }
+
+  const participants = chooseReplayParticipants(visibleTilesForLayout(activeLayout), activeTile);
+  if (participants.some((tile) => (tile.getReplayHistorySummary()?.count ?? 0) < 2)) {
+    replayPreparing = true;
+    refreshReplayUi();
+    await Promise.allSettled(participants.map((tile) => tile.whenCurrentLoadComplete()));
+    replayPreparing = false;
+    refreshReplayUi();
+    if (requestToken !== replayRequestToken || session.snapshot().phase !== 'idle') return;
+  }
+  session.beginSelection();
+});
 replayPlay.addEventListener('click', () => replaySession?.togglePlayback());
 replayStep.addEventListener('click', () => replaySession?.step());
 replaySpeed.addEventListener('click', () => replaySession?.cycleSpeed());
@@ -3543,12 +3593,6 @@ let autoSaveTimer: number | null = null;
 
 function saveAutoSaveWorkspaceSnapshot(): void {
   if (!activeTile) return;
-  const replay = replaySession?.snapshot();
-  const replayState = replay?.currentTime !== null
-    && replay?.currentTime !== undefined
-    && (replay.phase === 'paused' || replay.phase === 'playing')
-    ? { currentTime: replay.currentTime, speed: replay.speed }
-    : null;
   const snapshot: AutoSaveWorkspaceSnapshot = {
     version: 1,
     savedAt: Date.now(),
@@ -3557,7 +3601,6 @@ function saveAutoSaveWorkspaceSnapshot(): void {
       enabled: providerEnabled,
       id: activeProvider,
     },
-    replay: replayState,
   };
   writeStoredJson(AUTO_SAVE_WORKSPACE_KEY, snapshot);
 }
@@ -5272,9 +5315,6 @@ configureAutoSaveTimer();
 
 async function finishInitialWorkspaceRestore(): Promise<void> {
   await Promise.allSettled(visibleTilesForLayout(activeLayout).map((tile) => tile.whenInitialLoadComplete()));
-  if (autoSaveWorkspaceAtStartup?.replay) {
-    await replaySession?.restore(autoSaveWorkspaceAtStartup.replay);
-  }
   document.documentElement.dataset.chartReady = 'true';
   window.dispatchEvent(new CustomEvent('l2chart:ready'));
 }

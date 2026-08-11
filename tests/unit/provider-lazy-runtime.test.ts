@@ -83,6 +83,32 @@ describe('lazy chart provider lifecycle', () => {
     expect(toolbar).not.toContain('toolbar-more-save-button');
   });
 
+  it('keeps replay state out of auto save snapshots and startup restore', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const snapshotType = main.slice(
+      main.indexOf('interface AutoSaveWorkspaceSnapshot'),
+      main.indexOf('const marketHub = new MarketHub();'),
+    );
+    const snapshotWriter = main.slice(
+      main.indexOf('function saveAutoSaveWorkspaceSnapshot()'),
+      main.indexOf('function configureAutoSaveTimer()'),
+    );
+    expect(snapshotType).not.toContain('replay:');
+    expect(snapshotWriter).not.toContain('replaySession');
+    expect(main).not.toContain('autoSaveWorkspaceAtStartup?.replay');
+  });
+
+  it('shows replay day labels independently of candle rendering mode', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const refreshLabels = main.slice(
+      main.indexOf('function refreshReplayDayLabels('),
+      main.indexOf('function createTileForSlot('),
+    );
+    expect(refreshLabels).toContain("visible[0].interval === '1M'");
+    expect(refreshLabels).toContain("visible[1].interval === '1d'");
+    expect(refreshLabels).not.toContain(".mode === 'candles'");
+  });
+
   it('opens scanner results without loading hidden or stale symbols', async () => {
     const code = await transformedWorkstation();
     expect(code).toContain('for (const tile of visibleTilesForLayout(activeLayout)) void tile.load();');

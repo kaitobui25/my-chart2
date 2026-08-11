@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Candle } from '../../src/core/types';
 import type { HistoryRange } from '../../src/datafeed';
-import { isVietnamTradingSession, VnstockDatafeed } from '../../examples/providers/vnstock';
+import {
+  isVietnamTradingSession,
+  VNSTOCK_HISTORY_SOURCE,
+  VnstockDatafeed,
+} from '../../examples/providers/vnstock';
 import {
   mergeHistoryCoverage,
   type BrowserHistoryCacheApi,
@@ -47,7 +51,7 @@ describe('VnstockDatafeed', () => {
       { time: 1_754_697_600, open: 104, high: 106, low: 103, close: 105, volume: 900 },
     ];
     const cache = memoryCache();
-    await cache.write('vnstock:ohlcv:v1', 'FPT', '1d', cached);
+    await cache.write(VNSTOCK_HISTORY_SOURCE, 'FPT', '1d', cached);
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const feed = new VnstockDatafeed('/vnstock-api', { cache, fetchImpl });
 
@@ -87,6 +91,36 @@ describe('VnstockDatafeed', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('marks only the history range actually returned by a partial backfill', async () => {
+    const requested = { from: 1_696_118_400, to: 1_706_745_600 };
+    const remote: Candle[] = [
+      { time: 1_700_784_000, open: 10, high: 11, low: 9, close: 10.5 },
+      { time: 1_700_870_400, open: 10.5, high: 12, low: 10, close: 11.5 },
+    ];
+    const cache = memoryCache();
+    const markCoverage = vi.spyOn(cache, 'markCoverage');
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: remote }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch;
+    const feed = new VnstockDatafeed('/vnstock-api', { cache, fetchImpl });
+
+    await feed.getHistory('MBB', '1d', 500, requested);
+
+    expect(markCoverage).toHaveBeenCalledWith(
+      VNSTOCK_HISTORY_SOURCE,
+      'MBB',
+      '1d',
+      { from: remote[0].time, to: remote[1].time + 86_400 },
+    );
+    expect(markCoverage).not.toHaveBeenCalledWith(
+      VNSTOCK_HISTORY_SOURCE,
+      'MBB',
+      '1d',
+      requested,
+    );
+  });
+
   it('normalizes provider-backed symbol search results', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       symbols: [{ symbol: ' fpt ', name: ' FPT Corp ', exchange: ' HOSE ' }],
@@ -106,7 +140,7 @@ describe('VnstockDatafeed', () => {
       { time: 1_754_697_600, open: 104, high: 106, low: 103, close: 105, volume: 900 },
     ];
     const cache = memoryCache();
-    await cache.write('vnstock:ohlcv:v1', 'FPT', '1d', cached);
+    await cache.write(VNSTOCK_HISTORY_SOURCE, 'FPT', '1d', cached);
     const fetchImpl = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof fetch;

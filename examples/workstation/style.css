@@ -844,6 +844,11 @@ body.light .l2chart-pane-resizer.dragging::after {
   color: var(--toolbar-text);
 }
 
+#replay-btn.error {
+  border-color: color-mix(in srgb, var(--danger, #d94a4a) 55%, var(--toolbar-border));
+  color: var(--danger, #d94a4a);
+}
+
 #replay-btn:disabled {
   cursor: default;
   opacity: 0.5;

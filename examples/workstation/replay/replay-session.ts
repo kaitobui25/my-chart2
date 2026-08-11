@@ -17,11 +17,6 @@ export interface ReplaySessionSnapshot {
   error: string | null;
 }
 
-export interface ReplayRestoreState {
-  currentTime: number;
-  speed: number;
-}
-
 export interface ReplayHistorySummary {
   from: number;
   to: number;
@@ -32,14 +27,24 @@ export interface ReplayParticipant {
   readonly symbol: string;
   readonly interval: string;
   getReplayHistorySummary(): ReplayHistorySummary | null;
-  getReplayHistoryCandles(): readonly Candle[];
   getReplaySelectionTime(index: number, utcOffsetMinutes: number): number | null;
   setReplaySelecting(selecting: boolean): void;
   enterReplay(): void;
-  setReplayData(candles: readonly Candle[]): void;
-  updateReplayCandle(candle: Candle): void;
+  setReplayData(candles: readonly Candle[], currentTime: number): void;
+  updateReplayCandle(candle: Candle, currentTime: number): void;
   setReplayStatus(label: string): void;
   leaveReplay(reload: boolean): void;
+}
+
+/** Build a replay group around the active chart without letting unrelated symbols block it. */
+export function chooseReplayParticipants<T extends ReplayParticipant>(
+  visible: readonly T[],
+  active: T | null,
+): T[] {
+  const anchor = active && visible.includes(active) ? active : visible[0];
+  if (!anchor) return [];
+  const symbol = anchor.symbol.trim().toUpperCase();
+  return visible.filter((participant) => participant.symbol.trim().toUpperCase() === symbol);
 }
 
 export interface ReplayFeedContext {
@@ -112,33 +117,23 @@ export class SyncedReplaySession {
     else this.stop(true);
   }
 
-  /** Restore a saved replay cursor as paused after its participants have loaded history. */
-  async restore(state: ReplayRestoreState): Promise<boolean> {
-    if (!Number.isFinite(state.currentTime)) return false;
-    if (this.phase !== 'idle') this.stop(false);
-    if (!this.beginSelection()) return false;
-    await this.startAt(state.currentTime);
-    if (this.phase !== 'paused') return false;
-    this.clock.setSpeed(state.speed);
-    return true;
-  }
-
   beginSelection(): boolean {
-    const participants = this.environment.getParticipants();
-    if (participants.length === 0) return this.fail('Khong co chart de replay');
-    const symbols = new Set(participants.map((participant) => participant.symbol.trim().toUpperCase()));
+    const candidates = this.environment.getParticipants();
+    if (candidates.length === 0) return this.fail('Khong co chart de replay');
+    const symbols = new Set(candidates.map((participant) => participant.symbol.trim().toUpperCase()));
     if (symbols.size !== 1) return this.fail('Replay dong bo can cac chart cung mot symbol');
-    if (participants.some((participant) => (participant.getReplayHistorySummary()?.count ?? 0) < 2)) {
-      return this.fail('Chua du du lieu de replay');
-    }
+    const readyParticipants = candidates.filter(
+      (participant) => (participant.getReplayHistorySummary()?.count ?? 0) >= 2,
+    );
+    if (readyParticipants.length === 0) return this.fail('Chua du du lieu de replay');
 
     this.loadToken += 1;
-    this.participants = participants;
+    this.participants = candidates;
     this.symbol = [...symbols][0];
-    this.baseInterval = chooseReplayBaseInterval(participants.map((participant) => participant.interval));
+    this.baseInterval = chooseReplayBaseInterval(candidates.map((participant) => participant.interval));
     this.error = null;
     this.phase = 'selecting';
-    for (const participant of participants) participant.setReplaySelecting(true);
+    for (const participant of candidates) participant.setReplaySelecting(true);
     this.emitChange();
     return true;
   }
@@ -194,26 +189,34 @@ export class SyncedReplaySession {
     }
 
     this.utcOffsetMinutes = feedContext.utcOffsetMinutes;
-    const historyByParticipant = new Map<ReplayParticipant, ReplayHistorySummary>();
+    const availableSummaries = this.participants
+      .map((participant) => participant.getReplayHistorySummary())
+      .filter((summary): summary is ReplayHistorySummary => summary !== null);
+    if (availableSummaries.length === 0) {
+      this.cancelSelection('Chua du lich su de replay');
+      return;
+    }
+    const fallbackSummary: ReplayHistorySummary = {
+      from: Math.min(...availableSummaries.map((summary) => summary.from)),
+      to: Math.max(...availableSummaries.map((summary) => summary.to)),
+      count: Math.max(...availableSummaries.map((summary) => summary.count)),
+    };
     const windows = this.participants.map((participant) => {
-      const summary = participant.getReplayHistorySummary();
-      if (!summary) return null;
-      historyByParticipant.set(participant, summary);
+      const summary = participant.getReplayHistorySummary() ?? {
+        ...fallbackSummary,
+        from: intervalStart(fallbackSummary.from, participant.interval, this.utcOffsetMinutes),
+        to: intervalStart(fallbackSummary.to, participant.interval, this.utcOffsetMinutes),
+      };
       return {
         from: summary.from,
         // summary.to la thoi gian mo nen; doi sang bien dong cua timeframe de tim giao lich su chung.
         to: nextIntervalStart(summary.to, participant.interval, this.utcOffsetMinutes),
       };
     });
-    if (windows.some((window) => window === null)) {
-      this.cancelSelection('Chua du lich su de replay');
-      return;
-    }
-    const resolvedWindows = windows.filter((window): window is { from: number; to: number } => window !== null);
-    const commonFrom = Math.max(...resolvedWindows.map((window) => window.from));
-    const commonTo = Math.min(...resolvedWindows.map((window) => window.to));
-    if (commonFrom >= commonTo || selectedTime <= commonFrom || selectedTime > commonTo) {
-      this.cancelSelection('Thoi diem chon nam ngoai lich su chung cua cac chart');
+    const historyFrom = Math.min(...windows.map((window) => window.from));
+    const historyTo = Math.max(...windows.map((window) => window.to));
+    if (historyFrom >= historyTo || selectedTime <= historyFrom || selectedTime > historyTo) {
+      this.cancelSelection('Thoi diem chon nam ngoai lich su replay');
       return;
     }
 
@@ -222,16 +225,18 @@ export class SyncedReplaySession {
     for (const participant of this.participants) participant.setReplaySelecting(false);
     this.emitChange();
 
-    // Lui ve dau bucket lon nhat dang mo de partial candle khong mat OHLC dau bucket.
+    // Start at the largest bucket containing the selected bar. A participant may
+    // have loaded a shorter visible range; raw history fills that gap for replay.
+    const selectedBarTime = selectedTime - 1;
     const sourceFrom = Math.min(
-      intervalStart(commonFrom, this.baseInterval, this.utcOffsetMinutes),
+      intervalStart(selectedBarTime, this.baseInterval, this.utcOffsetMinutes),
       ...this.participants.map((participant) => intervalStart(
-        commonFrom,
+        selectedBarTime,
         participant.interval,
         this.utcOffsetMinutes,
       )),
     );
-    const range = { from: sourceFrom, to: commonTo };
+    const range = { from: sourceFrom, to: historyTo };
     const estimated = estimateIntervalBars(range.from, range.to, this.baseInterval) + 8;
     if (estimated > MAX_SOURCE_BARS) {
       this.cancelSelection('Khoang replay can qua nhieu raw candles; hay chon timeframe gan nhau hon');
@@ -273,20 +278,10 @@ export class SyncedReplaySession {
         const projection = new ReplayProjection(participant.interval, this.utcOffsetMinutes);
         this.projections.set(participant, projection);
 
-        const summary = historyByParticipant.get(participant)!;
-        const seed = participant.getReplayHistoryCandles()
-          .filter((candle) => nextIntervalStart(
-            candle.time,
-            participant.interval,
-            this.utcOffsetMinutes,
-          ) <= sourceFrom)
-          .map((candle) => ({ ...candle }));
         const projected = projection.reset(revealed)
-          .filter((candle) => candle.time >= summary.from);
-        const initialByTime = new Map<number, Candle>();
-        for (const candle of seed) initialByTime.set(candle.time, candle);
-        for (const candle of projected) initialByTime.set(candle.time, { ...candle });
-        participant.setReplayData([...initialByTime.values()].sort((a, b) => a.time - b.time));
+          .slice(-1)
+          .map((candle) => ({ ...candle }));
+        participant.setReplayData(projected, timeline[startCursor]);
         participant.setReplayStatus(`replay · ${startCursor + 1}/${source.length}`);
       }
 
@@ -307,7 +302,7 @@ export class SyncedReplaySession {
     for (const participant of this.participants) {
       const projection = this.projections.get(participant);
       if (!projection) continue;
-      participant.updateReplayCandle(projection.push(source));
+      participant.updateReplayCandle(projection.push(source), currentTime);
       participant.setReplayStatus(`replay · ${cursor + 1}/${this.sourceCandles.length}`);
     }
     this.publishSourceCandle(cursor, currentTime);

@@ -58,12 +58,19 @@ export interface BarLabel {
   time: number;
   text: string;
   color?: string;
+  underlineColor?: string;
 }
 
 export interface BarLabelStyle {
   opacity?: number;
   gap?: number;
   fontSize?: number;
+}
+
+export interface BarProgressMarker {
+  time: number;
+  remaining: number;
+  color?: string;
 }
 
 export interface CrosshairEvent {
@@ -214,6 +221,8 @@ export class L2Chart {
   private barLabelOpacity = 0.7;
   private barLabelGap = 10;
   private barLabelFontSize = 8;
+  private barProgressMarker: BarProgressMarker | null = null;
+  private barProgressAnchor: { time: number; bottom: number } | null = null;
 
   private pointers = new Map<number, { x: number; y: number }>();
   private pointerStarts = new Map<number, { x: number; y: number }>();
@@ -442,6 +451,14 @@ export class L2Chart {
     if (style.opacity !== undefined) this.barLabelOpacity = clamp(style.opacity, 0, 1);
     if (style.gap !== undefined) this.barLabelGap = clamp(style.gap, 0, 40);
     if (style.fontSize !== undefined) this.barLabelFontSize = clamp(style.fontSize, 6, 16);
+    this.invalidate();
+  }
+
+  /** Draw a compact vertical progress marker beside one price bar. */
+  setBarProgressMarker(marker: BarProgressMarker | null): void {
+    const next = marker ? { ...marker, remaining: clamp(marker.remaining, 0, 1) } : null;
+    if (!next || next.time !== this.barProgressMarker?.time) this.barProgressAnchor = null;
+    this.barProgressMarker = next;
     this.invalidate();
   }
 
@@ -2093,7 +2110,10 @@ export class L2Chart {
           }
           ctx.restore();
         }
-        if (pane === this.panes[0]) this.drawBarLabels(pane, range.from, range.to);
+        if (pane === this.panes[0]) {
+          this.drawBarProgressMarker(pane, range.from, range.to);
+          this.drawBarLabels(pane, range.from, range.to);
+        }
         ctx.restore();
       }
       this.drawPriceAxis(pane);
@@ -2122,7 +2142,52 @@ export class L2Chart {
       );
       ctx.fillStyle = label.color ?? this.theme.textDim;
       ctx.fillText(label.text, x, y);
+      if (label.underlineColor) {
+        const width = ctx.measureText(label.text).width + 2;
+        ctx.strokeStyle = label.underlineColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x - width / 2, y + this.barLabelFontSize + 1);
+        ctx.lineTo(x + width / 2, y + this.barLabelFontSize + 1);
+        ctx.stroke();
+      }
     }
+    ctx.restore();
+  }
+
+  private drawBarProgressMarker(pane: Pane, from: number, to: number): void {
+    const marker = this.barProgressMarker;
+    if (!marker) return;
+    const candles = this.priceSeriesCandles();
+    const index = candles.findIndex((candle) => candle.time === marker.time);
+    if (index < Math.floor(from) || index > Math.ceil(to)) return;
+
+    const candle = candles[index];
+    const fullHeight = Math.max(12, pane.height * 0.2);
+    const initialBottom = clamp(pane.priceScale.yFor(candle.low), fullHeight + 4, pane.height - 4);
+    const bottom = clamp(this.barProgressAnchor?.bottom ?? initialBottom, fullHeight + 4, pane.height - 4);
+    if (!this.barProgressAnchor) this.barProgressAnchor = { time: marker.time, bottom };
+    const visibleHeight = Math.max(5, fullHeight * marker.remaining);
+    const visibleTop = bottom - visibleHeight;
+    const segmentCount = 5;
+    const segmentGap = 2;
+    const segmentHeight = (fullHeight - segmentGap * (segmentCount - 1)) / segmentCount;
+    const x = this.timeScale.xForIndex(index) + clamp(this.timeScale.barSpacing * 1.5, 14, 28);
+    const ctx = pane.ctx;
+    ctx.save();
+    ctx.strokeStyle = marker.color ?? '#d4a017';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    for (let segment = 0; segment < segmentCount; segment += 1) {
+      const segmentTop = bottom - fullHeight + segment * (segmentHeight + segmentGap);
+      const segmentBottom = segmentTop + segmentHeight;
+      const drawTop = Math.max(segmentTop, visibleTop);
+      if (drawTop >= segmentBottom) continue;
+      ctx.moveTo(x, drawTop);
+      ctx.lineTo(x, segmentBottom);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 
