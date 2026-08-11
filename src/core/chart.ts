@@ -54,6 +54,18 @@ export interface ChartOptions {
   timeAxisHeight?: number;
 }
 
+export interface BarLabel {
+  time: number;
+  text: string;
+  color?: string;
+}
+
+export interface BarLabelStyle {
+  opacity?: number;
+  gap?: number;
+  fontSize?: number;
+}
+
 export interface CrosshairEvent {
   index: number | null;
   candle: Candle | null;
@@ -198,6 +210,10 @@ export class L2Chart {
   private legendCollapsed = false;
   private marketQuote: ChartMarketQuote | null = null;
   private sessionsVisible = true;
+  private barLabels = new Map<number, Omit<BarLabel, 'time'>>();
+  private barLabelOpacity = 0.7;
+  private barLabelGap = 10;
+  private barLabelFontSize = 8;
 
   private pointers = new Map<number, { x: number; y: number }>();
   private pointerStarts = new Map<number, { x: number; y: number }>();
@@ -417,6 +433,15 @@ export class L2Chart {
   setPriceSeriesColors(colors: { line?: string; area?: string }): void {
     this.mainSeries.lineColor = colors.line || null;
     this.mainSeries.areaColor = colors.area || null;
+    this.invalidate();
+  }
+
+  /** Draw compact labels under selected price bars. */
+  setBarLabels(labels: readonly BarLabel[], style: BarLabelStyle = {}): void {
+    this.barLabels = new Map(labels.map(({ time, ...label }) => [time, label]));
+    if (style.opacity !== undefined) this.barLabelOpacity = clamp(style.opacity, 0, 1);
+    if (style.gap !== undefined) this.barLabelGap = clamp(style.gap, 0, 40);
+    if (style.fontSize !== undefined) this.barLabelFontSize = clamp(style.fontSize, 6, 16);
     this.invalidate();
   }
 
@@ -656,6 +681,12 @@ export class L2Chart {
 
   fitContent(): void {
     this.timeScale.fit();
+    for (const pane of this.panes) pane.priceScale.reset();
+    this.invalidate();
+  }
+
+  /** Reset only vertical scales, preserving the current horizontal replay position. */
+  fitPriceScale(): void {
     for (const pane of this.panes) pane.priceScale.reset();
     this.invalidate();
   }
@@ -2062,12 +2093,37 @@ export class L2Chart {
           }
           ctx.restore();
         }
+        if (pane === this.panes[0]) this.drawBarLabels(pane, range.from, range.to);
         ctx.restore();
       }
       this.drawPriceAxis(pane);
       this.updateLegend(pane);
     }
     this.renderTimeAxis();
+  }
+
+  private drawBarLabels(pane: Pane, from: number, to: number): void {
+    if (this.barLabels.size === 0) return;
+    const candles = this.priceSeriesCandles();
+    const ctx = pane.ctx;
+    ctx.save();
+    ctx.globalAlpha = this.barLabelOpacity;
+    ctx.font = `400 ${this.barLabelFontSize}px Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let index = Math.max(0, Math.floor(from)); index <= Math.min(candles.length - 1, Math.ceil(to)); index += 1) {
+      const candle = candles[index];
+      const label = this.barLabels.get(candle.time);
+      if (!label) continue;
+      const x = this.timeScale.xForIndex(index);
+      const y = Math.max(
+        0,
+        Math.min(pane.height - this.barLabelFontSize - 2, pane.priceScale.yFor(candle.low) + this.barLabelGap),
+      );
+      ctx.fillStyle = label.color ?? this.theme.textDim;
+      ctx.fillText(label.text, x, y);
+    }
+    ctx.restore();
   }
 
   private computeTimeTicks(range: { from: number; to: number } | null): void {

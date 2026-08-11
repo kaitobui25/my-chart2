@@ -6,6 +6,8 @@ export {
   type VisibleRangeChangeEvent,
   type ChartMarketQuote,
   type IndicatorAppearance,
+  type BarLabel,
+  type BarLabelStyle,
 } from './core/chart';
 export {
   type DrawingTool,

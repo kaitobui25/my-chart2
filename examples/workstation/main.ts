@@ -67,6 +67,10 @@ import {
 } from './trading/paper';
 import { TradingWorkspace } from './trading/workspace';
 import { SyncedReplaySession, type ReplayParticipant, type ReplaySessionSnapshot } from './replay/replay-session';
+import {
+  buildReplayDayLabels,
+  DEFAULT_REPLAY_DAY_LABEL_COLORS,
+} from './replay/replay-day-labels';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -229,6 +233,11 @@ interface UiPreferences {
   watchlistVisible: boolean;
   rightPanelVisible: boolean;
   symbols: string[];
+  replayDayLabels: boolean;
+  replayDayLabelOpacity: number;
+  replayDayLabelGap: number;
+  replayDayLabelFontSize: number;
+  replayDayLabelColors: [string, string];
 }
 
 const marketHub = new MarketHub();
@@ -438,6 +447,11 @@ const defaultUiPreferences: UiPreferences = {
   watchlistVisible: true,
   rightPanelVisible: false,
   symbols: [...DEFAULT_SYMBOLS],
+  replayDayLabels: false,
+  replayDayLabelOpacity: 0.7,
+  replayDayLabelGap: 10,
+  replayDayLabelFontSize: 8,
+  replayDayLabelColors: [...DEFAULT_REPLAY_DAY_LABEL_COLORS],
 };
 
 let uiPreferences: UiPreferences = {
@@ -447,6 +461,24 @@ let uiPreferences: UiPreferences = {
 if (!Array.isArray(uiPreferences.symbols)) {
   uiPreferences.symbols = [...DEFAULT_SYMBOLS];
 }
+uiPreferences.replayDayLabels = uiPreferences.replayDayLabels === true;
+uiPreferences.replayDayLabelOpacity = Math.min(
+  1,
+  Math.max(0.2, Number(uiPreferences.replayDayLabelOpacity) || 0.7),
+);
+uiPreferences.replayDayLabelGap = Math.min(
+  24,
+  Math.max(4, Number(uiPreferences.replayDayLabelGap) || 10),
+);
+uiPreferences.replayDayLabelFontSize = Math.min(
+  12,
+  Math.max(6, Number(uiPreferences.replayDayLabelFontSize) || 8),
+);
+const storedReplayLabelColors = uiPreferences.replayDayLabelColors;
+uiPreferences.replayDayLabelColors = DEFAULT_REPLAY_DAY_LABEL_COLORS.map((fallback, index) => {
+  const color = storedReplayLabelColors?.[index];
+  return typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : fallback;
+}) as [string, string];
 
 function saveUiPreferences(): void {
   writeStoredJson(UI_PREFERENCES_KEY, uiPreferences);
@@ -509,6 +541,111 @@ function setupToolbarOverflow(): void {
   wrap.append(button, menu);
   toolbar.appendChild(wrap);
 
+  const replaySettings = document.createElement('section');
+  replaySettings.className = 'toolbar-more-settings';
+  const replaySettingsTitle = document.createElement('strong');
+  const replayLabelRow = document.createElement('div');
+  replayLabelRow.className = 'toolbar-more-setting-row';
+  const replayLabelText = document.createElement('span');
+  const replayLabelToggle = document.createElement('button');
+  replayLabelToggle.type = 'button';
+  replayLabelToggle.className = 'toolbar-more-switch';
+  replayLabelToggle.setAttribute('role', 'switch');
+  const replayTuningRow = document.createElement('div');
+  replayTuningRow.className = 'toolbar-more-tuning-row';
+  const createRangeControl = (min: string, max: string, step: string) => {
+    const control = document.createElement('label');
+    control.className = 'toolbar-more-range-control';
+    const heading = document.createElement('span');
+    const value = document.createElement('output');
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = min;
+    input.max = max;
+    input.step = step;
+    control.append(heading, value, input);
+    replayTuningRow.appendChild(control);
+    return { heading, value, input };
+  };
+  const opacityControl = createRangeControl('20', '100', '5');
+  const gapControl = createRangeControl('4', '24', '1');
+  const sizeControl = createRangeControl('6', '12', '0.5');
+  const replayColorsRow = document.createElement('div');
+  replayColorsRow.className = 'toolbar-more-colors-row';
+  const createColorControl = () => {
+    const control = document.createElement('label');
+    const text = document.createElement('span');
+    const input = document.createElement('input');
+    input.type = 'color';
+    control.append(text, input);
+    replayColorsRow.appendChild(control);
+    return { text, input };
+  };
+  const firstColorControl = createColorControl();
+  const secondColorControl = createColorControl();
+  replayLabelRow.append(replayLabelText, replayLabelToggle);
+  replaySettings.append(replaySettingsTitle, replayLabelRow, replayTuningRow, replayColorsRow);
+
+  const renderReplaySettings = () => {
+    const vi = getLocale() === 'vi';
+    replaySettingsTitle.textContent = 'Replay · 1M / 1D';
+    replayLabelText.textContent = vi ? 'Hiện số ngày dưới nến' : 'Show day numbers under bars';
+    opacityControl.heading.textContent = vi ? 'Độ mờ' : 'Opacity';
+    gapControl.heading.textContent = vi ? 'Khoảng cách' : 'Gap';
+    sizeControl.heading.textContent = vi ? 'Cỡ chữ' : 'Size';
+    firstColorControl.text.textContent = vi ? 'Tháng A' : 'Month A';
+    secondColorControl.text.textContent = vi ? 'Tháng B' : 'Month B';
+    replayLabelToggle.classList.toggle('on', uiPreferences.replayDayLabels);
+    replayLabelToggle.setAttribute('aria-checked', String(uiPreferences.replayDayLabels));
+    replayLabelToggle.setAttribute('aria-label', replayLabelText.textContent);
+    opacityControl.input.value = String(Math.round(uiPreferences.replayDayLabelOpacity * 100));
+    gapControl.input.value = String(uiPreferences.replayDayLabelGap);
+    sizeControl.input.value = String(uiPreferences.replayDayLabelFontSize);
+    opacityControl.value.value = `${opacityControl.input.value}%`;
+    gapControl.value.value = `${gapControl.input.value}px`;
+    sizeControl.value.value = `${sizeControl.input.value}px`;
+    firstColorControl.input.value = uiPreferences.replayDayLabelColors[0];
+    secondColorControl.input.value = uiPreferences.replayDayLabelColors[1];
+    for (const input of [
+      opacityControl.input,
+      gapControl.input,
+      sizeControl.input,
+      firstColorControl.input,
+      secondColorControl.input,
+    ]) input.disabled = !uiPreferences.replayDayLabels;
+  };
+  replayLabelToggle.addEventListener('click', () => {
+    uiPreferences.replayDayLabels = !uiPreferences.replayDayLabels;
+    saveUiPreferences();
+    renderReplaySettings();
+    refreshReplayDayLabels();
+  });
+  opacityControl.input.addEventListener('input', () => {
+    uiPreferences.replayDayLabelOpacity = Number(opacityControl.input.value) / 100;
+    opacityControl.value.value = `${opacityControl.input.value}%`;
+    saveUiPreferences();
+    refreshReplayDayLabels();
+  });
+  gapControl.input.addEventListener('input', () => {
+    uiPreferences.replayDayLabelGap = Number(gapControl.input.value);
+    gapControl.value.value = `${gapControl.input.value}px`;
+    saveUiPreferences();
+    refreshReplayDayLabels();
+  });
+  sizeControl.input.addEventListener('input', () => {
+    uiPreferences.replayDayLabelFontSize = Number(sizeControl.input.value);
+    sizeControl.value.value = `${sizeControl.input.value}px`;
+    saveUiPreferences();
+    refreshReplayDayLabels();
+  });
+  [firstColorControl.input, secondColorControl.input].forEach((input, index) => {
+    input.addEventListener('input', () => {
+      uiPreferences.replayDayLabelColors[index] = input.value;
+      saveUiPreferences();
+      refreshReplayDayLabels();
+    });
+  });
+
   const definitions = [
     ['chart-type-wrap', 'Chart type', 'Loại biểu đồ'],
     ['replay-wrap', 'Replay', 'Replay'],
@@ -543,7 +680,7 @@ function setupToolbarOverflow(): void {
     updating = true;
     close();
     restore();
-    wrap.hidden = true;
+    wrap.hidden = false;
 
     const overflowed = new Set<string>();
     const isOverflowing = () => toolbar.scrollWidth > toolbar.clientWidth + 1;
@@ -567,7 +704,9 @@ function setupToolbarOverflow(): void {
       row.append(label, entry.element);
       menu.appendChild(row);
     }
-    wrap.hidden = overflowed.size === 0;
+    renderReplaySettings();
+    menu.appendChild(replaySettings);
+    wrap.hidden = false;
     updating = false;
   };
 
@@ -2373,12 +2512,15 @@ class Tile implements ReplayParticipant {
     this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
     this.chart.setData(data);
     this.chart.fitContent();
+    refreshReplayDayLabels(this);
     const latest = data[data.length - 1];
     if (latest) this.publishReplayCandle(latest);
   }
 
   updateReplayCandle(candle: Candle): void {
     this.chart.updateCandle({ ...candle });
+    this.chart.fitPriceScale();
+    refreshReplayDayLabels(this);
     this.publishReplayCandle(candle);
   }
 
@@ -2390,6 +2532,7 @@ class Tile implements ReplayParticipant {
     const wasReplay = this.replayActive;
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
+    this.chart.setBarLabels([]);
     if (!wasReplay) return;
     if (reload) {
       void this.load();
@@ -2744,6 +2887,33 @@ function visibleTilesForLayout(layout: LayoutId): Tile[] {
     return selected ? [selected] : [];
   }
   return tiles.slice(0, count);
+}
+
+function refreshReplayDayLabels(changedTile?: Tile): void {
+  const visible = visibleTilesForLayout(activeLayout);
+  const replayPhase = replaySession?.snapshot().phase ?? 'idle';
+  const target = uiPreferences.replayDayLabels
+    && replayPhase !== 'idle'
+    && activeLayout === '2h'
+    && visible.length === 2
+    && visible[0].interval === '1M'
+    && visible[1].interval === '1d'
+    && visible[0].mode === 'candles'
+    && visible[1].mode === 'candles'
+    && visible[0].symbol.trim().toUpperCase() === visible[1].symbol.trim().toUpperCase()
+    ? visible[1]
+    : null;
+  const utcOffsetMinutes = providerCalendarOffsetMinutes(activeProvider);
+  for (const tile of changedTile ? [changedTile] : tiles) {
+    const labels = tile === target
+      ? buildReplayDayLabels(tile.chart.getCandles(), utcOffsetMinutes, uiPreferences.replayDayLabelColors)
+      : [];
+    tile.chart.setBarLabels(labels, {
+      opacity: uiPreferences.replayDayLabelOpacity,
+      gap: uiPreferences.replayDayLabelGap,
+      fontSize: uiPreferences.replayDayLabelFontSize,
+    });
+  }
 }
 
 function createTileForSlot(index: number, template?: TileTemplate): Tile {
