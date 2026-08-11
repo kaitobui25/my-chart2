@@ -138,15 +138,6 @@ function installStyles(): void {
     #${SELECT_ID}:focus {
       border-color: var(--accent);
     }
-
-    #${CONTROL_ID} .candle-theme-note {
-      display: block;
-      margin-top: 6px;
-      color: var(--text-dim);
-      font-size: 10px;
-      line-height: 1.35;
-      opacity: 0.72;
-    }
   `;
   document.head.appendChild(style);
 }
@@ -178,12 +169,8 @@ function buildControl(): HTMLElement {
     setSelectedTheme(normalizeCandleTheme(select.value));
   });
 
-  const note = document.createElement('small');
-  note.className = 'candle-theme-note';
-  note.textContent = 'Cyber chỉ đổi màu thân/râu nến và chỉ dùng trong Dark Mode.';
-
   row.append(label, select);
-  section.append(title, row, note);
+  section.append(title, row);
   return section;
 }
 
