@@ -32,6 +32,8 @@ export interface SymbolSearchResult {
 export interface Datafeed {
   /** Human-readable name shown in UIs. */
   readonly name: string;
+  /** Optional fast path for rendering persisted history before a remote refresh completes. */
+  getCachedHistory?(symbol: string, interval: string, limit?: number, range?: HistoryRange): Promise<Candle[]>;
   getHistory(symbol: string, interval: string, limit?: number, range?: HistoryRange): Promise<Candle[]>;
   /**
    * Stream live updates for the current bar (and new bars).

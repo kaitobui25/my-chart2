@@ -45,13 +45,14 @@ describe('lazy chart provider lifecycle', () => {
     expect(code).toContain("FiinQuant chưa kết nối. Bấm Dùng để khởi động sidecar.");
   });
 
-  it('restores only the provider persisted by the workstation', async () => {
+  it('restores the provider from auto save before the regular workstation preference', async () => {
     const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
     const code = await transformedWorkstation();
     expect(main).toContain("const ACTIVE_PROVIDER_KEY = 'l2chart.priceProvider';");
     expect(main).toContain("const PROVIDER_ENABLED_KEY = 'l2chart.priceProviderEnabled';");
-    expect(main).toContain("let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';");
-    expect(main).toContain("let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';");
+    expect(main).toContain('let providerEnabled = autoSaveWorkspaceAtStartup?.provider.enabled');
+    expect(main).toContain('let activeProvider: PriceProviderId = autoSaveWorkspaceAtStartup?.provider.id');
+    expect(main).toContain("?? (providerEnabled ? readActiveProvider() : 'demo');");
     expect(main).toContain('localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);');
     expect(code).toContain("if (activeProvider === 'fiinquant') {");
     expect(code).toContain("} else if (activeProvider === 'vnstock') {");
@@ -65,6 +66,21 @@ describe('lazy chart provider lifecycle', () => {
     expect(main).toContain("localStorage.setItem(PROVIDER_ENABLED_KEY, 'false');");
     expect(main).toContain('if (!providerEnabled) {');
     expect(code).toContain("showProviderActivationError('vnstock'");
+  });
+
+  it('keeps the compact Auto save row at the top after rebuilding the overflow menu', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const toolbar = main.slice(
+      main.indexOf('function setupToolbarOverflow()'),
+      main.indexOf('function defaultPreferences()'),
+    );
+    const finalMenuReset = toolbar.lastIndexOf('menu.replaceChildren();');
+    const autoSaveMount = toolbar.indexOf('menu.appendChild(autoSaveSection);', finalMenuReset);
+    const overflowRows = toolbar.indexOf('for (const entry of entries)', finalMenuReset);
+    expect(finalMenuReset).toBeGreaterThan(-1);
+    expect(autoSaveMount).toBeGreaterThan(finalMenuReset);
+    expect(autoSaveMount).toBeLessThan(overflowRows);
+    expect(toolbar).not.toContain('toolbar-more-save-button');
   });
 
   it('opens scanner results without loading hidden or stale symbols', async () => {

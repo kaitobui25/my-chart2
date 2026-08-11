@@ -126,6 +126,28 @@ export class VnstockDatafeed implements Datafeed {
       }));
   }
 
+  async getCachedHistory(
+    symbol: string,
+    interval: string,
+    limit = 500,
+    range?: HistoryRange,
+  ): Promise<Candle[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!normalizedSymbol) return [];
+    const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
+    if (!range) {
+      return this.cache.readLatest(VNSTOCK_HISTORY_SOURCE, normalizedSymbol, interval, requestedLimit);
+    }
+    return this.cache.readRange(
+      VNSTOCK_HISTORY_SOURCE,
+      normalizedSymbol,
+      interval,
+      Math.min(range.from, range.to),
+      Math.max(range.from, range.to),
+      requestedLimit,
+    );
+  }
+
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) return [];

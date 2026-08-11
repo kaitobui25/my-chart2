@@ -42,6 +42,19 @@ describe('VnstockDatafeed', () => {
     vi.useRealTimers();
   });
 
+  it('reads cached chart history without calling the sidecar', async () => {
+    const cached: Candle[] = [
+      { time: 1_754_697_600, open: 104, high: 106, low: 103, close: 105, volume: 900 },
+    ];
+    const cache = memoryCache();
+    await cache.write('vnstock:ohlcv:v1', 'FPT', '1d', cached);
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const feed = new VnstockDatafeed('/vnstock-api', { cache, fetchImpl });
+
+    await expect(feed.getCachedHistory('FPT', '1d', 500)).resolves.toEqual(cached);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('reuses cached Vnstock history for an already covered Replay range', async () => {
     const day = 86_400;
     const candles: Candle[] = [

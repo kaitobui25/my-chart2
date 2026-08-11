@@ -154,4 +154,27 @@ describe('SyncedReplaySession', () => {
     expect(session.beginSelection()).toBe(false);
     expect(state.error).toContain('cung mot symbol');
   });
+
+  it('restores a saved replay cursor as paused with its saved speed', async () => {
+    const selectedTime = utc('2026-08-07T10:30:00Z');
+    const participant = new TestParticipant('BTCUSDT', '15m', selectedTime);
+    let state = idleReplayState();
+    const feed: Datafeed = {
+      name: 'Test',
+      getHistory: vi.fn(async () => sourceCandles()),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant],
+      getFeed: () => ({ feed, label: 'Test', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: (next) => { state = next; },
+    });
+
+    await expect(session.restore({ currentTime: selectedTime, speed: 5 })).resolves.toBe(true);
+    expect(state).toMatchObject({ phase: 'paused', currentTime: selectedTime, speed: 5 });
+    expect(participant.active).toBe(true);
+  });
 });

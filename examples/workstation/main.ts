@@ -21,6 +21,7 @@ import {
   Redo2,
   Rows2,
   RulerDimensionLine,
+  Save,
   Search,
   Settings2,
   Shapes,
@@ -162,6 +163,8 @@ const DRAWINGS_STORAGE_PREFIX = 'l2chart.drawings.v2';
 const DRAWING_RECENTS_KEY = 'l2chart.drawingRecents.v1';
 const DRAWING_ESCAPE_HINT_KEY = 'l2chart.drawingEscapeHint.v1';
 const UI_PREFERENCES_KEY = 'l2chart.uiPreferences.v1';
+const AUTO_SAVE_SETTINGS_KEY = 'l2chart.autoSave.settings.v1';
+const AUTO_SAVE_WORKSPACE_KEY = 'l2chart.autoSave.workspace.v1';
 const INDICATOR_FAVORITES_KEY = 'l2chart.indicatorFavorites.v1';
 const CHART_DEFAULTS_VERSION = 2;
 const DNSE_OFFICIAL_REST = 'https://openapi.dnse.com.vn';
@@ -238,6 +241,25 @@ interface UiPreferences {
   replayDayLabelGap: number;
   replayDayLabelFontSize: number;
   replayDayLabelColors: [string, string];
+}
+
+interface AutoSaveSettings {
+  enabled: boolean;
+  minutes: number;
+}
+
+interface AutoSaveWorkspaceSnapshot {
+  version: 1;
+  savedAt: number;
+  workspace: ChartTemplate;
+  provider: {
+    enabled: boolean;
+    id: PriceProviderId;
+  };
+  replay: {
+    currentTime: number;
+    speed: number;
+  } | null;
 }
 
 const marketHub = new MarketHub();
@@ -484,6 +506,32 @@ function saveUiPreferences(): void {
   writeStoredJson(UI_PREFERENCES_KEY, uiPreferences);
 }
 
+const storedAutoSaveSettings = readStoredJson<Partial<AutoSaveSettings>>(AUTO_SAVE_SETTINGS_KEY, {});
+const autoSaveSettings: AutoSaveSettings = {
+  enabled: storedAutoSaveSettings.enabled === true,
+  minutes: Math.min(1440, Math.max(1, Math.round(Number(storedAutoSaveSettings.minutes) || 5))),
+};
+
+function readAutoSaveWorkspace(): AutoSaveWorkspaceSnapshot | null {
+  const snapshot = readStoredJson<AutoSaveWorkspaceSnapshot | null>(AUTO_SAVE_WORKSPACE_KEY, null);
+  const validProviders = ['demo', 'dnse', 'fiinquant', 'vnstock', 'binance-spot', 'binance-usdm'];
+  const validLayouts: LayoutId[] = ['1', '2v', '2h', '3', '4', '6'];
+  if (
+    snapshot?.version !== 1
+    || !snapshot.workspace
+    || !Array.isArray(snapshot.workspace.tiles)
+    || snapshot.workspace.tiles.length === 0
+    || !snapshot.workspace.layout
+    || !validLayouts.includes(snapshot.workspace.layout)
+    || !snapshot.provider
+    || !validProviders.includes(snapshot.provider.id)
+  ) return null;
+  if (snapshot.replay && !Number.isFinite(snapshot.replay.currentTime)) return null;
+  return snapshot;
+}
+
+const autoSaveWorkspaceAtStartup = readAutoSaveWorkspace();
+
 let globalDrawingToolbar: HTMLDivElement | null = null;
 let drawingEscapeHintTimer = 0;
 let scheduleToolbarOverflow: () => void = () => undefined;
@@ -540,6 +588,60 @@ function setupToolbarOverflow(): void {
   menu.hidden = true;
   wrap.append(button, menu);
   toolbar.appendChild(wrap);
+
+  const autoSaveSection = document.createElement('section');
+  autoSaveSection.className = 'toolbar-more-settings toolbar-more-auto-save';
+  const autoSaveTitle = document.createElement('button');
+  autoSaveTitle.type = 'button';
+  autoSaveTitle.className = 'toolbar-more-auto-save-title';
+  autoSaveTitle.innerHTML = `${lucideIcon(Save)}<span>Auto save</span>`;
+  autoSaveTitle.title = 'Save current workspace now';
+  autoSaveTitle.setAttribute('aria-label', 'Auto save: save current workspace now');
+  const autoSaveToggle = document.createElement('button');
+  autoSaveToggle.type = 'button';
+  autoSaveToggle.className = 'toolbar-more-switch';
+  autoSaveToggle.setAttribute('role', 'switch');
+  autoSaveToggle.setAttribute('aria-label', 'Auto save');
+  const autoSaveMinuteField = document.createElement('label');
+  autoSaveMinuteField.className = 'toolbar-more-auto-save-minute';
+  const autoSaveMinutesInput = document.createElement('input');
+  autoSaveMinutesInput.type = 'number';
+  autoSaveMinutesInput.min = '1';
+  autoSaveMinutesInput.max = '1440';
+  autoSaveMinutesInput.step = '1';
+  autoSaveMinutesInput.setAttribute('aria-label', 'Auto save interval in minutes');
+  const autoSaveMinuteSuffix = document.createElement('span');
+  autoSaveMinuteSuffix.textContent = 'minute';
+  autoSaveMinuteField.append(autoSaveMinutesInput, autoSaveMinuteSuffix);
+  autoSaveSection.append(autoSaveTitle, autoSaveMinuteField, autoSaveToggle);
+
+  const renderAutoSaveSettings = () => {
+    autoSaveToggle.classList.toggle('on', autoSaveSettings.enabled);
+    autoSaveToggle.setAttribute('aria-checked', String(autoSaveSettings.enabled));
+    autoSaveMinutesInput.value = String(autoSaveSettings.minutes);
+    autoSaveMinutesInput.disabled = !autoSaveSettings.enabled;
+  };
+  let autoSaveFeedbackTimer = 0;
+  const saveCurrentWorkspace = () => {
+    saveAutoSaveWorkspaceSnapshot();
+    autoSaveTitle.classList.add('saved');
+    window.clearTimeout(autoSaveFeedbackTimer);
+    autoSaveFeedbackTimer = window.setTimeout(() => autoSaveTitle.classList.remove('saved'), 700);
+  };
+  autoSaveTitle.addEventListener('click', saveCurrentWorkspace);
+  autoSaveToggle.addEventListener('click', () => {
+    autoSaveSettings.enabled = !autoSaveSettings.enabled;
+    writeStoredJson(AUTO_SAVE_SETTINGS_KEY, autoSaveSettings);
+    if (autoSaveSettings.enabled) saveAutoSaveWorkspaceSnapshot();
+    configureAutoSaveTimer();
+    renderAutoSaveSettings();
+  });
+  autoSaveMinutesInput.addEventListener('change', () => {
+    autoSaveSettings.minutes = Math.min(1440, Math.max(1, Math.round(Number(autoSaveMinutesInput.value) || 5)));
+    writeStoredJson(AUTO_SAVE_SETTINGS_KEY, autoSaveSettings);
+    configureAutoSaveTimer();
+    renderAutoSaveSettings();
+  });
 
   const replaySettings = document.createElement('section');
   replaySettings.className = 'toolbar-more-settings';
@@ -694,6 +796,8 @@ function setupToolbarOverflow(): void {
     }
 
     menu.replaceChildren();
+    renderAutoSaveSettings();
+    menu.appendChild(autoSaveSection);
     for (const entry of entries) {
       if (!overflowed.has(entry.id)) continue;
       const row = document.createElement('div');
@@ -1025,8 +1129,10 @@ function readFiinQuantSettings(): FiinQuantStoredSettings {
   return settings;
 }
 
-let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';
-let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';
+let providerEnabled = autoSaveWorkspaceAtStartup?.provider.enabled
+  ?? (localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true');
+let activeProvider: PriceProviderId = autoSaveWorkspaceAtStartup?.provider.id
+  ?? (providerEnabled ? readActiveProvider() : 'demo');
 const dnseSettings = readDnseSettings();
 let dnseCredentials: DnseCredentials | null = null;
 let fiinQuantSettings = readFiinQuantSettings();
@@ -1545,6 +1651,7 @@ class Tile implements ReplayParticipant {
   private history: Candle[] = [];
   private replayActive = false;
   private historyRange: HistoryRange | null = null;
+  private initialLoadPromise: Promise<void> = Promise.resolve();
   private readonly headerEl: HTMLDivElement;
   private readonly chartShellEl: HTMLDivElement;
   private readonly loadStateEl: HTMLDivElement;
@@ -1728,7 +1835,11 @@ class Tile implements ReplayParticipant {
     if (initialTemplate?.paneWeights) this.chart.setPaneWeights(initialTemplate.paneWeights);
     this.chart.setDrawings(readDrawings(this.symbol, this.interval));
     this.countdownTimer = window.setInterval(() => this.renderMarketStatus(), 1000);
-    void this.load();
+    this.initialLoadPromise = this.load();
+  }
+
+  whenInitialLoadComplete(): Promise<void> {
+    return this.initialLoadPromise;
   }
 
   /** Change the symbol from the header or command palette. */
@@ -2628,7 +2739,8 @@ class Tile implements ReplayParticipant {
     this.historyPageLoading = false;
     this.historyPageExhausted = false;
     this.historyPageRetryAfter = 0;
-    const hadRenderableData = this.history.length > 0;
+    let hadRenderableData = this.history.length > 0;
+    let renderedCachedHistory = false;
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
     this.renderMarketStatus();
@@ -2661,12 +2773,33 @@ class Tile implements ReplayParticipant {
       const range = this.historyRange ? { ...this.historyRange } : undefined;
       const requestedBars = range ? estimateIntervalBars(range.from, range.to, this.interval) + 2 : pageSize;
       const limit = range ? Math.min(20000, Math.max(50, requestedBars)) : pageSize;
+      const renderHistory = (candles: Candle[], fitContent: boolean) => {
+        this.chart.setIntervalSec(step);
+        this.history = candles.map((candle) => ({ ...candle }));
+        this.chart.setData(this.history.map((candle) => ({ ...candle })));
+        if (fitContent) this.chart.fitContent();
+        this.publishCandle(this.history[this.history.length - 1], provider.label);
+      };
+      const cached = await provider.feed.getCachedHistory?.(this.symbol, this.interval, limit, range) ?? [];
+      if (token !== this.loadToken) return;
+      const cachedCandles = range
+        ? cached.filter((candle) => candle.time >= range.from && candle.time <= range.to)
+        : cached;
+      if (cachedCandles.length > 0) {
+        renderHistory(cachedCandles, true);
+        hadRenderableData = true;
+        renderedCachedHistory = true;
+        this.setLoadState(null);
+        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       const loaded = await provider.feed.getHistory(this.symbol, this.interval, limit, range);
       if (token !== this.loadToken) return;
       const candles = range
         ? loaded.filter((candle) => candle.time >= range.from && candle.time <= range.to)
         : loaded;
       if (candles.length === 0) {
+        if (renderedCachedHistory) return;
         if (!hadRenderableData) this.history = [];
         const message = `không có dữ liệu ${this.symbol}`;
         this.setFeedStatus('error', message);
@@ -2675,11 +2808,7 @@ class Tile implements ReplayParticipant {
       }
       reportProviderLoadSuccess(providerId);
       this.setLoadState(null);
-      this.chart.setIntervalSec(step);
-      this.history = candles.map((candle) => ({ ...candle }));
-      this.chart.setData(this.history.map((candle) => ({ ...candle })));
-      this.chart.fitContent();
-      this.publishCandle(this.history[this.history.length - 1], provider.label);
+      renderHistory(candles, !renderedCachedHistory);
       if (range) {
         this.setFeedStatus('sample', `${provider.label} · lịch sử`);
         if (activeTile === this) syncRangeUi();
@@ -2708,6 +2837,11 @@ class Tile implements ReplayParticipant {
     } catch (err) {
       if (token !== this.loadToken) return;
       console.error(err);
+      if (renderedCachedHistory) {
+        this.setLoadState(null);
+        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        return;
+      }
       if (!hadRenderableData) {
         this.history = [];
         this.chart.setData([]);
@@ -3403,6 +3537,39 @@ function workspaceTemplateSnapshot(name: string): ChartTemplate {
     layout: activeLayout,
     tiles: workspaceTemplateTiles(),
   };
+}
+
+let autoSaveTimer: number | null = null;
+
+function saveAutoSaveWorkspaceSnapshot(): void {
+  if (!activeTile) return;
+  const replay = replaySession?.snapshot();
+  const replayState = replay?.currentTime !== null
+    && replay?.currentTime !== undefined
+    && (replay.phase === 'paused' || replay.phase === 'playing')
+    ? { currentTime: replay.currentTime, speed: replay.speed }
+    : null;
+  const snapshot: AutoSaveWorkspaceSnapshot = {
+    version: 1,
+    savedAt: Date.now(),
+    workspace: workspaceTemplateSnapshot('Auto save'),
+    provider: {
+      enabled: providerEnabled,
+      id: activeProvider,
+    },
+    replay: replayState,
+  };
+  writeStoredJson(AUTO_SAVE_WORKSPACE_KEY, snapshot);
+}
+
+function configureAutoSaveTimer(): void {
+  if (autoSaveTimer !== null) window.clearInterval(autoSaveTimer);
+  autoSaveTimer = null;
+  if (!autoSaveSettings.enabled) return;
+  autoSaveTimer = window.setInterval(
+    saveAutoSaveWorkspaceSnapshot,
+    autoSaveSettings.minutes * 60_000,
+  );
 }
 
 function createNewTemplateWorkspace(): void {
@@ -5070,8 +5237,8 @@ window.addEventListener('online', () => {
 const initialMobileViewport = window.matchMedia('(max-width: 760px)').matches;
 setWatchlistVisible(initialMobileViewport ? false : uiPreferences.watchlistVisible, false);
 setRightPanelVisible(initialMobileViewport ? false : uiPreferences.rightPanelVisible, false);
-const defaultTemplate = readDefaultTemplate();
-if (defaultTemplate) applyWorkspaceTemplate(defaultTemplate);
+const initialWorkspaceTemplate = autoSaveWorkspaceAtStartup?.workspace ?? readDefaultTemplate();
+if (initialWorkspaceTemplate) applyWorkspaceTemplate(initialWorkspaceTemplate);
 else setLayout('1');
 tradingWorkspace = new TradingWorkspace({
   market: marketHub,
@@ -5101,3 +5268,15 @@ tradingWorkspace = new TradingWorkspace({
 tradingWorkspace.setSourceLabel(currentFeed().label);
 syncWatchlistFeeds();
 setupToolbarOverflow();
+configureAutoSaveTimer();
+
+async function finishInitialWorkspaceRestore(): Promise<void> {
+  await Promise.allSettled(visibleTilesForLayout(activeLayout).map((tile) => tile.whenInitialLoadComplete()));
+  if (autoSaveWorkspaceAtStartup?.replay) {
+    await replaySession?.restore(autoSaveWorkspaceAtStartup.replay);
+  }
+  document.documentElement.dataset.chartReady = 'true';
+  window.dispatchEvent(new CustomEvent('l2chart:ready'));
+}
+
+void finishInitialWorkspaceRestore();

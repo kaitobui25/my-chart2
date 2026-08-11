@@ -17,6 +17,11 @@ export interface ReplaySessionSnapshot {
   error: string | null;
 }
 
+export interface ReplayRestoreState {
+  currentTime: number;
+  speed: number;
+}
+
 export interface ReplayHistorySummary {
   from: number;
   to: number;
@@ -105,6 +110,17 @@ export class SyncedReplaySession {
   toggle(): void {
     if (this.phase === 'idle') this.beginSelection();
     else this.stop(true);
+  }
+
+  /** Restore a saved replay cursor as paused after its participants have loaded history. */
+  async restore(state: ReplayRestoreState): Promise<boolean> {
+    if (!Number.isFinite(state.currentTime)) return false;
+    if (this.phase !== 'idle') this.stop(false);
+    if (!this.beginSelection()) return false;
+    await this.startAt(state.currentTime);
+    if (this.phase !== 'paused') return false;
+    this.clock.setSpeed(state.speed);
+    return true;
   }
 
   beginSelection(): boolean {

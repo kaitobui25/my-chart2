@@ -94,6 +94,14 @@ async function workstationRuntimeIsCompatible(port) {
   }
 }
 
+async function waitForWorkstation(port, attempts = 120) {
+  for (let attempt = 0; attempt < attempts && !closing; attempt += 1) {
+    if (await workstationRuntimeIsCompatible(port)) return true
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  return false
+}
+
 function portIsAvailable(port) {
   return new Promise(resolve => {
     const server = createServer()
@@ -142,8 +150,12 @@ async function startOrReuseWorkstation() {
     '--config', workstationConfigPath,
     '--port', String(port),
     '--strictPort',
-    '--open',
   ])
+  const ready = await waitForWorkstation(port)
+  if (!ready) throw new Error(`Workstation did not become ready at http://127.0.0.1:${port}/`)
+  const url = `http://127.0.0.1:${port}/`
+  console.log(`[workstation] Ready at ${url}`)
+  openBrowser(url)
 }
 
 try {
