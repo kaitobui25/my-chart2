@@ -221,7 +221,7 @@ def _period_end(period: str) -> int:
         next_month = datetime(year + 1, 1, 1, tzinfo=VIETNAM_TZ)
     else:
         next_month = datetime(year, month + 1, 1, tzinfo=VIETNAM_TZ)
-    return int((next_month - timedelta(days=1)).timestamp())
+    return int(next_month.timestamp()) - 1
 
 
 def normalize_pe_quarters(value: Any) -> list[PeQuarter]:
