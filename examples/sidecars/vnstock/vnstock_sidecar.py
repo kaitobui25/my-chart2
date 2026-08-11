@@ -31,9 +31,10 @@ NATIVE_INTERVALS = {
 }
 
 
-def _read_simple_env(path: Path) -> None:
+def _read_simple_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
     if not path.exists():
-        return
+        return values
     for raw in path.read_text(encoding='utf-8').splitlines():
         line = raw.strip()
         if not line or line.startswith('#') or '=' not in line:
@@ -41,15 +42,28 @@ def _read_simple_env(path: Path) -> None:
         key, value = line.split('=', 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+        if key:
+            values[key] = value
+            if key not in os.environ:
+                os.environ[key] = value
+    return values
 
 
-_read_simple_env(Path(__file__).with_name('.env'))
+VNSTOCK_ENV_PATH = Path(__file__).with_name('.env')
+_read_simple_env(VNSTOCK_ENV_PATH)
 HOST = os.getenv('HOST', '127.0.0.1').strip() or '127.0.0.1'
 PORT = int(os.getenv('PORT', '8740'))
 POLL_INTERVAL_SECONDS = max(300.0, float(os.getenv('POLL_INTERVAL_SECONDS', '300')))
 SYMBOL_CACHE_SECONDS = max(60, int(os.getenv('SYMBOL_CACHE_SECONDS', '3600')))
+
+
+def _load_vnstock_api_key(path: Path = VNSTOCK_ENV_PATH) -> bool:
+    values = _read_simple_env(path)
+    api_key = (values.get('VNSTOCK_API_KEY') or values.get('APIKEY') or '').strip()
+    if not api_key:
+        return bool(os.getenv('VNSTOCK_API_KEY', '').strip())
+    os.environ['VNSTOCK_API_KEY'] = api_key
+    return True
 
 
 class VnstockQuotaError(RuntimeError):
@@ -250,6 +264,7 @@ class VnstockGateway:
 
     def _ensure_clients(self) -> tuple[Any, Any]:
         with self._lock:
+            _load_vnstock_api_key()
             if self._market is None or self._reference is None:
                 Market, Reference = self._load_classes()
                 self._market = Market()

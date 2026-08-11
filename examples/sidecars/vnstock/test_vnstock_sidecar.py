@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import os
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from vnstock_sidecar import (
     POLL_INTERVAL_SECONDS,
     Candle,
     VnstockQuotaError,
+    VnstockGateway,
     _call_vnstock,
+    _load_vnstock_api_key,
     aggregate_candles,
     normalize_candle,
 )
@@ -114,6 +120,25 @@ class QuotaHandlingTests(unittest.TestCase):
 
         self.assertEqual(terminal.getvalue(), '')
         self.assertEqual(POLL_INTERVAL_SECONDS, 300.0)
+
+
+class ApiKeyLoadingTests(unittest.TestCase):
+    def test_apikey_alias_is_loaded_as_vnstock_api_key(self) -> None:
+        with TemporaryDirectory() as directory:
+            env_path = Path(directory) / '.env'
+            env_path.write_text('APIKEY=test-key-from-env\n', encoding='utf-8')
+            with patch.dict('os.environ', {}, clear=True):
+                self.assertTrue(_load_vnstock_api_key(env_path))
+                self.assertEqual(os.environ.get('VNSTOCK_API_KEY'), 'test-key-from-env')
+
+    def test_gateway_reloads_api_key_on_every_use(self) -> None:
+        gateway = VnstockGateway()
+        gateway._market = object()
+        gateway._reference = object()
+        with patch('vnstock_sidecar._load_vnstock_api_key') as load_key:
+            gateway._ensure_clients()
+            gateway._ensure_clients()
+        self.assertEqual(load_key.call_count, 2)
 
 
 if __name__ == '__main__':
