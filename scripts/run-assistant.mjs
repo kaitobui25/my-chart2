@@ -11,6 +11,7 @@ const workstationConfigPath = path.join(ROOT, 'scripts', 'vite-dev.config.mjs')
 const ASSISTANT_HEALTH_URL = 'http://127.0.0.1:8788/health'
 const DEFAULT_WORKSTATION_PORT = 53173
 const PROVIDER_RUNTIME_VERSION = 1
+const DEV_TRACE_VERSION = 1
 
 if (!existsSync(viteBin)) {
   console.error('Missing node_modules. Run "npm install" once, then start this launcher again.')
@@ -87,8 +88,14 @@ async function workstationRuntimeIsCompatible(port) {
   try {
     const page = await fetch(`${baseUrl}/`, { signal: AbortSignal.timeout(900) })
     if (!page.ok) return false
-    const runtime = await readJson(`${baseUrl}/provider-runtime/health`)
-    return runtime?.ok === true && runtime.version === PROVIDER_RUNTIME_VERSION
+    const [runtime, trace] = await Promise.all([
+      readJson(`${baseUrl}/provider-runtime/health`),
+      readJson(`${baseUrl}/__l2chart_dev_trace/health`),
+    ])
+    return runtime?.ok === true
+      && runtime.version === PROVIDER_RUNTIME_VERSION
+      && trace?.ok === true
+      && trace.version === DEV_TRACE_VERSION
   } catch {
     return false
   }
@@ -135,7 +142,7 @@ function openBrowser(url) {
 async function startOrReuseWorkstation() {
   if (await workstationRuntimeIsCompatible(DEFAULT_WORKSTATION_PORT)) {
     const url = `http://127.0.0.1:${DEFAULT_WORKSTATION_PORT}/`
-    console.log(`[workstation] Reusing dev server at ${url}`)
+    console.log(`[workstation] Reusing traced dev server at ${url}`)
     openBrowser(url)
     return
   }
