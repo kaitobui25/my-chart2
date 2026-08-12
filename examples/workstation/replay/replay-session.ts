@@ -77,6 +77,68 @@ export function chooseReplayBaseInterval(intervals: readonly string[]): string |
   return [...intervals].sort((a, b) => intervalApproxSeconds(a) - intervalApproxSeconds(b))[0];
 }
 
+/**
+ * Preserve only closed history before the first projected replay bucket.
+ * Projected candles always win, so the selected/partial bucket is rebuilt from
+ * raw replay data and no future candle from the live chart can leak into Replay.
+ */
+export function mergeReplayInitialCandles(
+  seed: readonly Candle[],
+  projected: readonly Candle[],
+): Candle[] {
+  if (projected.length === 0) return [];
+  const firstProjectedTime = projected[0].time;
+  const byTime = new Map<number, Candle>();
+  for (const candle of seed) {
+    if (candle.time < firstProjectedTime) byTime.set(candle.time, { ...candle });
+  }
+  for (const candle of projected) byTime.set(candle.time, { ...candle });
+  return [...byTime.values()].sort((left, right) => left.time - right.time);
+}
+
+function normalizeReplaySeed(
+  candles: readonly Candle[],
+  from: number,
+  to: number,
+): Candle[] {
+  const byTime = new Map<number, Candle>();
+  for (const candle of candles) {
+    if (candle.time < from || candle.time > to) continue;
+    byTime.set(candle.time, { ...candle });
+  }
+  return [...byTime.values()].sort((left, right) => left.time - right.time);
+}
+
+async function loadReplayDisplaySeed(
+  feed: Datafeed,
+  symbol: string,
+  participant: ReplayParticipant,
+  firstProjectedTime: number,
+): Promise<Candle[]> {
+  const summary = participant.getReplayHistorySummary();
+  const to = firstProjectedTime - 1;
+  if (!summary || summary.from > to) return [];
+
+  const range = { from: summary.from, to };
+  const estimated = estimateIntervalBars(range.from, range.to, participant.interval) + 8;
+  const limit = Math.min(MAX_SOURCE_BARS, Math.max(50, summary.count, estimated));
+
+  if (feed.getCachedHistory) {
+    const cached = normalizeReplaySeed(
+      await feed.getCachedHistory(symbol, participant.interval, limit, range),
+      range.from,
+      range.to,
+    );
+    if (cached.length > 0) return cached;
+  }
+
+  return normalizeReplaySeed(
+    await feed.getHistory(symbol, participant.interval, limit, range),
+    range.from,
+    range.to,
+  );
+}
+
 export class SyncedReplaySession {
   private readonly clock: ReplayClock;
   private phase: ReplaySessionPhase = 'idle';
@@ -225,8 +287,9 @@ export class SyncedReplaySession {
     for (const participant of this.participants) participant.setReplaySelecting(false);
     this.emitChange();
 
-    // Start at the largest bucket containing the selected bar. A participant may
-    // have loaded a shorter visible range; raw history fills that gap for replay.
+    // Raw replay source only needs the largest bucket containing the selected bar
+    // and everything after it. Older visible history is restored separately as a
+    // display-only seed, so it cannot influence the replay clock or partial candle.
     const selectedBarTime = selectedTime - 1;
     const sourceFrom = Math.min(
       intervalStart(selectedBarTime, this.baseInterval, this.utcOffsetMinutes),
@@ -270,18 +333,30 @@ export class SyncedReplaySession {
 
       this.sourceCandles = source;
       this.projections.clear();
+      const revealed = source.slice(0, startCursor + 1);
+      const initialStates = this.participants.map((participant) => {
+        const projection = new ReplayProjection(participant.interval, this.utcOffsetMinutes);
+        const projected = projection.reset(revealed).map((candle) => ({ ...candle }));
+        return { participant, projection, projected };
+      });
+      const seeds = await Promise.all(initialStates.map(({ participant, projected }) => {
+        const firstProjectedTime = projected[0]?.time;
+        return firstProjectedTime === undefined
+          ? Promise.resolve([] as Candle[])
+          : loadReplayDisplaySeed(feedContext.feed!, this.symbol!, participant, firstProjectedTime);
+      }));
+      if (token !== this.loadToken || this.phase !== 'loading') return;
+
       this.environment.claimMarketSource(this.symbol, this.sourceLabel);
       this.marketSourceClaimed = true;
-      const revealed = source.slice(0, startCursor + 1);
-      for (const participant of this.participants) {
+      for (let index = 0; index < initialStates.length; index += 1) {
+        const { participant, projection, projected } = initialStates[index];
         participant.enterReplay();
-        const projection = new ReplayProjection(participant.interval, this.utcOffsetMinutes);
         this.projections.set(participant, projection);
-
-        const projected = projection.reset(revealed)
-          .slice(-1)
-          .map((candle) => ({ ...candle }));
-        participant.setReplayData(projected, timeline[startCursor]);
+        participant.setReplayData(
+          mergeReplayInitialCandles(seeds[index], projected),
+          timeline[startCursor],
+        );
         participant.setReplayStatus(`replay · ${startCursor + 1}/${source.length}`);
       }
 
