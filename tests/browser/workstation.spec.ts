@@ -66,10 +66,13 @@ test('horizontal two-chart layout shares one replay clock', async ({ browser }) 
   expect(secondBox!.y).toBeGreaterThan(firstBox!.y + firstBox!.height * 0.5);
   expect(Math.abs(secondBox!.x - firstBox!.x)).toBeLessThan(4);
 
+  const liveCounts: number[] = [];
   for (const tile of [firstTile, secondTile]) {
     await tile.locator('.tile-chart-shell').click({ position: { x: 8, y: 8 } });
     await page.waitForFunction(() => (window.__L2CHART_ASSISTANT__?.getContext()?.candleCount ?? 0) > 10);
-    expect((await readActiveReplayChart()).symbol).toBe('HPG');
+    const live = await readActiveReplayChart();
+    expect(live.symbol).toBe('HPG');
+    liveCounts.push(live.count);
   }
 
   await page.locator('#replay-btn').click();
@@ -96,6 +99,10 @@ test('horizontal two-chart layout shares one replay clock', async ({ browser }) 
   const beforeSecond = await readActiveReplayChart();
   expect(beforeFirst.phase).toBe('paused');
   expect(beforeSecond.phase).toBe('paused');
+  expect(beforeFirst.count).toBeGreaterThan(1);
+  expect(beforeSecond.count).toBeGreaterThan(1);
+  expect(beforeFirst.count).toBeLessThanOrEqual(liveCounts[0]);
+  expect(beforeSecond.count).toBeLessThanOrEqual(liveCounts[1]);
   expect(beforeFirst.count).toBe(beforeSecond.count);
   expect(beforeFirst.lastTime).toBe(beforeSecond.lastTime);
 
@@ -108,6 +115,8 @@ test('horizontal two-chart layout shares one replay clock', async ({ browser }) 
   const afterSecond = await readActiveReplayChart();
   expect(afterFirst.lastTime).not.toBe(beforeFirst.lastTime);
   expect(afterSecond.lastTime).not.toBe(beforeSecond.lastTime);
+  expect(afterFirst.count).toBeGreaterThanOrEqual(beforeFirst.count);
+  expect(afterSecond.count).toBeGreaterThanOrEqual(beforeSecond.count);
   expect(afterFirst.count).toBe(afterSecond.count);
   expect(afterFirst.lastTime).toBe(afterSecond.lastTime);
   expect(pageErrors).toEqual([]);
