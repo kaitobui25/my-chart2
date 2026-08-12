@@ -22,8 +22,8 @@ export default defineConfig({
     timeout: 120_000,
   },
   {
-    command: 'npx vite --config examples/workstation/vite.config.ts',
-    url: 'http://127.0.0.1:53173',
+    command: 'npx vite --config scripts/vite-dev.config.mjs',
+    url: 'http://127.0.0.1:53173/__l2chart_dev_trace/health',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
