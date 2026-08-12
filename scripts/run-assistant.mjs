@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
 const assistantServerPath = path.join(ROOT, 'examples', 'sidecars', 'assistant', 'server.mjs')
-const workstationConfigPath = path.join(ROOT, 'examples', 'workstation', 'vite.config.ts')
+const workstationConfigPath = path.join(ROOT, 'scripts', 'vite-dev.config.mjs')
 const ASSISTANT_HEALTH_URL = 'http://127.0.0.1:8788/health'
 const DEFAULT_WORKSTATION_PORT = 53173
 const PROVIDER_RUNTIME_VERSION = 1
