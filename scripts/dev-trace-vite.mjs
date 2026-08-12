@@ -1,4 +1,5 @@
 const TRACE_ENDPOINT = '/__l2chart_dev_trace'
+const TRACE_VERSION = 1
 
 const BROWSER_TRACE_SCRIPT = String.raw`
 (() => {
@@ -203,6 +204,12 @@ export function devTerminalTracePlugin() {
     configureServer(server) {
       console.log('[dev-trace] Browser network/IndexedDB/long-task tracing → this terminal')
       server.middlewares.use(TRACE_ENDPOINT, async (req, res) => {
+        if (req.method === 'GET') {
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ ok: true, version: TRACE_VERSION }))
+          return
+        }
         if (req.method !== 'POST') {
           res.statusCode = 405
           res.end('method not allowed')
