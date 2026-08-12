@@ -9,6 +9,7 @@ import {
 import type { IndicatorDef } from '../registry';
 import { PeFundamentalsRepository } from './pe-client';
 import type { PeFundamentalsRecord } from './pe-cache';
+import { isPeEligibleVietnamEquitySymbol } from './pe-eligibility';
 import { PeValuationRepository } from './pe-valuation-client';
 import type { PeValuationRecord } from './pe-valuation-cache';
 import {
@@ -174,12 +175,14 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       let quarterFetchTimer: ReturnType<typeof setTimeout> | null = null;
       let valuationFetchTimer: ReturnType<typeof setTimeout> | null = null;
       let pendingValuationRange: { from: number; to: number; force: boolean } | null = null;
-      let manualQuarterMissFetch = chart.getCandles().length > 0 && !!symbol;
+      let manualQuarterMissFetch = chart.getCandles().length > 0 && isPeEligibleVietnamEquitySymbol(symbol);
       let manualValuationMissFetch = manualQuarterMissFetch;
       let removed = false;
       let computedValues: LinePoint[] = [];
       let computedMarkers: PeMarker[] = [];
       let computedLatestReportedPe: number | null = null;
+
+      const supportedSymbol = () => isPeEligibleVietnamEquitySymbol(symbol);
 
       const clearQuarterTimer = () => {
         if (quarterFetchTimer !== null) {
@@ -204,7 +207,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
 
       const recomputeData = () => {
         const candles = chart.getCandles();
-        if (chart.getIntervalSec() < DAY_SECONDS || candles.length === 0) {
+        if (!supportedSymbol() || chart.getIntervalSec() < DAY_SECONDS || candles.length === 0) {
           computedValues = new Array<LinePoint>(candles.length).fill(null);
           computedMarkers = [];
           computedLatestReportedPe = null;
@@ -223,7 +226,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       };
 
       const fetchQuarterFresh = async (expectedSymbol: string, expectedGeneration: number) => {
-        if (quarterFetchInProgress || removed) return;
+        if (!isPeEligibleVietnamEquitySymbol(expectedSymbol) || quarterFetchInProgress || removed) return;
         quarterFetchInProgress = true;
         try {
           const fresh = await quarterRepository.fetchAndCache(expectedSymbol);
@@ -239,19 +242,30 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
 
       const scheduleQuarterFetch = (expectedSymbol: string, expectedGeneration: number, delayMs: number) => {
         clearQuarterTimer();
+        if (!isPeEligibleVietnamEquitySymbol(expectedSymbol)) return;
         if (delayMs <= 0) {
           void fetchQuarterFresh(expectedSymbol, expectedGeneration);
           return;
         }
         quarterFetchTimer = setTimer(() => {
           quarterFetchTimer = null;
-          if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
+          if (
+            removed
+            || generation !== expectedGeneration
+            || symbol !== expectedSymbol
+            || !isPeEligibleVietnamEquitySymbol(expectedSymbol)
+          ) return;
           void fetchQuarterFresh(expectedSymbol, expectedGeneration);
         }, delayMs);
       };
 
       const fetchPendingValuation = async (expectedSymbol: string, expectedGeneration: number) => {
-        if (valuationFetchInProgress || removed || !pendingValuationRange) return;
+        if (
+          !isPeEligibleVietnamEquitySymbol(expectedSymbol)
+          || valuationFetchInProgress
+          || removed
+          || !pendingValuationRange
+        ) return;
         const request = pendingValuationRange;
         pendingValuationRange = null;
         valuationFetchInProgress = true;
@@ -282,6 +296,11 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         delayMs: number,
         force = false,
       ) => {
+        if (!isPeEligibleVietnamEquitySymbol(expectedSymbol)) {
+          pendingValuationRange = null;
+          clearValuationTimer();
+          return;
+        }
         pendingValuationRange = pendingValuationRange
           ? {
               from: Math.min(pendingValuationRange.from, range.from),
@@ -296,7 +315,12 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         }
         valuationFetchTimer = setTimer(() => {
           valuationFetchTimer = null;
-          if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
+          if (
+            removed
+            || generation !== expectedGeneration
+            || symbol !== expectedSymbol
+            || !isPeEligibleVietnamEquitySymbol(expectedSymbol)
+          ) return;
           void fetchPendingValuation(expectedSymbol, expectedGeneration);
         }, delayMs);
       };
@@ -304,7 +328,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
       const loadQuarterForCurrentSymbol = async () => {
         const expectedSymbol = symbol;
         const expectedGeneration = generation;
-        if (!expectedSymbol || quarterCacheRead || removed) return;
+        if (!isPeEligibleVietnamEquitySymbol(expectedSymbol) || quarterCacheRead || removed) return;
         quarterCacheRead = true;
         const cached = await quarterRepository.getCached(expectedSymbol).catch(() => null);
         if (removed || generation !== expectedGeneration || symbol !== expectedSymbol) return;
@@ -327,7 +351,7 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         const range = peValuationRangeForCandles(candles, chart.getIntervalSec());
         const expectedSymbol = symbol;
         const expectedGeneration = generation;
-        if (!expectedSymbol || !range || removed) return;
+        if (!isPeEligibleVietnamEquitySymbol(expectedSymbol) || !range || removed) return;
 
         const firstCacheRead = !valuationCacheRead;
         if (firstCacheRead) {
@@ -375,16 +399,17 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
         quarterFetchInProgress = false;
         valuationFetchInProgress = false;
         pendingValuationRange = null;
-        manualQuarterMissFetch = manual;
-        manualValuationMissFetch = manual;
+        const eligible = isPeEligibleVietnamEquitySymbol(symbol);
+        manualQuarterMissFetch = manual && eligible;
+        manualValuationMissFetch = manual && eligible;
         hoverIndex = null;
         recomputeData();
       };
 
       const offSymbol = onIndicatorChartSymbolChange(chart, (nextSymbol) => {
         if (nextSymbol === symbol) return;
-        // Ticker changes clear old P/E immediately. New candles render first;
-        // the next data/recompute event then reads IndexedDB before any network call.
+        // Ticker changes clear old P/E immediately. Unsupported instruments stop
+        // here before either Vnstock or FiinQuant cache/network work can start.
         resetForSymbol(nextSymbol, false);
       });
       const offCrosshair = chart.on('crosshair', (event) => {
@@ -397,7 +422,11 @@ export function createPeIndicatorDef(runtime: PeIndicatorRuntime = {}): Indicato
           const tracked = getIndicatorChartSymbol(chart);
           if (tracked && tracked !== symbol) resetForSymbol(tracked, false);
           recomputeData();
-          if (chart.getIntervalSec() >= DAY_SECONDS && chart.getCandles().length > 0) {
+          if (
+            supportedSymbol()
+            && chart.getIntervalSec() >= DAY_SECONDS
+            && chart.getCandles().length > 0
+          ) {
             void loadQuarterForCurrentSymbol();
             void loadValuationForCurrentSymbol();
           }
