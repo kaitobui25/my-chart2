@@ -128,7 +128,7 @@ describe('Replay initial history', () => {
       utc('2026-08-07T10:00:00Z'),
       utc('2026-08-07T10:15:00Z'),
     ]);
-    expect(participant.data.at(-1)?.close).toBe(104);
+    expect(participant.data[participant.data.length - 1]?.close).toBe(104);
     expect(participant.active).toBe(true);
     expect(getCachedHistory).toHaveBeenCalledTimes(1);
     expect(getHistory).toHaveBeenCalledTimes(1);
