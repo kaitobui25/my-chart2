@@ -85,11 +85,16 @@ async function resolvesQuickly<T>(promise: Promise<T>): Promise<T> {
   ]);
 }
 
+function pendingFetch(input: RequestInfo | URL): Promise<Response> {
+  void input;
+  return new Promise<Response>(() => undefined);
+}
+
 describe('FiinQuant fast timeframe history', () => {
   it('returns cached daily history immediately while remote refresh runs in background', async () => {
     const cached = dailyCandles(40);
     const cache = keyedMemoryCache([{ symbol: 'PGI', interval: '1d', candles: cached }]);
-    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchMock = vi.fn(pendingFetch);
     const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
@@ -105,7 +110,7 @@ describe('FiinQuant fast timeframe history', () => {
   it('uses cached daily candles to build weekly history without waiting for FiinQuant', async () => {
     const daily = dailyCandles(220);
     const cache = keyedMemoryCache([{ symbol: 'PGI', interval: '1d', candles: daily }]);
-    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchMock = vi.fn(pendingFetch);
     const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 
@@ -153,7 +158,7 @@ describe('FiinQuant fast timeframe history', () => {
       time: Date.UTC(2018, index, 1) / 1000,
     }));
     const cache = keyedMemoryCache([{ symbol: 'SSI', interval: '1M', candles: monthly }]);
-    const fetchMock = vi.fn(() => new Promise<Response>(() => undefined));
+    const fetchMock = vi.fn(pendingFetch);
     const fetchImpl = fetchMock as unknown as typeof fetch;
     const feed = new FiinQuantDatafeed('/fiinquant-api', '', { cache, fetchImpl });
 

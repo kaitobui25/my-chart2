@@ -1167,7 +1167,6 @@ function makeFiinQuantFeed(): FiinQuantDatafeed {
 let fiinQuantFeed: FiinQuantDatafeed = makeFiinQuantFeed();
 type FiinQuantConnectionState = 'checking' | 'connected' | 'signed-out' | 'offline';
 let fiinQuantConnectionState: FiinQuantConnectionState = 'checking';
-let fiinQuantHealthSnapshot: FiinQuantHealth | null = null;
 let fiinQuantHealthRequest = 0;
 const FIINQUANT_HEALTH_POLL_MS = 10_000;
 
@@ -1191,7 +1190,6 @@ async function reportFiinQuantHealth(showChecking = true): Promise<void> {
   try {
     const h = await fiinQuantFeed.health();
     if (request !== fiinQuantHealthRequest) return;
-    fiinQuantHealthSnapshot = h;
     if (h.tokenConfigured === false) {
       fiinQuantConnectionState = 'signed-out';
       providerStatus.dataset.tone = 'error';
@@ -1220,7 +1218,6 @@ async function reportFiinQuantHealth(showChecking = true): Promise<void> {
     }
   } catch {
     if (request !== fiinQuantHealthRequest) return;
-    fiinQuantHealthSnapshot = null;
     fiinQuantConnectionState = 'offline';
     providerStatus.dataset.tone = 'error';
     providerStatus.textContent = tr('Không gọi được sidecar. Hãy khởi động sidecar trong examples/sidecars/fiinquant rồi thử lại.');
@@ -4508,7 +4505,6 @@ function saveFiinQuantConnectionSettings(): void {
   writeStoredJson(FIINQUANT_STORAGE_KEY, fiinQuantSettings);
   fiinQuantTokenInput.value = '';
   if (!changed) return;
-  fiinQuantHealthSnapshot = null;
   fiinQuantHealthRequest += 1;
   fiinQuantFeed.dispose();
   fiinQuantFeed = makeFiinQuantFeed();
@@ -4528,7 +4524,6 @@ async function getAuthorizedFiinQuantHealth(): Promise<FiinQuantHealth | null> {
   fiinQuantHealthRequest += 1;
   try {
     const health = await fiinQuantFeed.health();
-    fiinQuantHealthSnapshot = health;
     if (health.tokenConfigured === false) {
       showFiinQuantAuthorizationError(
         tr('Sidecar thiếu SIDECAR_TOKEN. Tạo token trong .env rồi nhập token đó ở Cài đặt nâng cao.'),
@@ -4542,7 +4537,6 @@ async function getAuthorizedFiinQuantHealth(): Promise<FiinQuantHealth | null> {
     }
     return health;
   } catch {
-    fiinQuantHealthSnapshot = null;
     fiinQuantConnectionState = 'offline';
     renderProviderSourceState();
     providerStatus.dataset.tone = 'error';

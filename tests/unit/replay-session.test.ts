@@ -232,6 +232,7 @@ describe('SyncedReplaySession', () => {
     expect(state.baseInterval).toBe('15m');
     expect(state.currentTime).toBe(selectedTime);
     expect(chart15m.data).toEqual([
+      { time: utc('2026-08-07T10:00:00Z'), open: 100, high: 101, low: 99, close: 100 },
       { time: utc('2026-08-07T10:15:00Z'), open: 100, high: 105, low: 98, close: 104 },
     ]);
     expect(chart1h.data).toEqual([
@@ -246,7 +247,7 @@ describe('SyncedReplaySession', () => {
 
     session.step();
     expect(state.currentTime).toBe(utc('2026-08-07T10:45:00Z'));
-    expect(chart15m.data).toHaveLength(2);
+    expect(chart15m.data).toHaveLength(3);
     expect(chart1h.data[0].high).toBe(130);
     expect(chart15m.replayTime).toBe(utc('2026-08-07T10:45:00Z'));
     expect(chart1h.replayTime).toBe(utc('2026-08-07T10:45:00Z'));
