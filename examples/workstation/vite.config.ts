@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
 import { fiinQuantProxyToken, providerRuntimeIntegration } from './provider-runtime/vite-plugin';
 import { scannerIntegration } from './scanner/vite-plugin';
+import { stockFlowIntegration } from './stock-flow/vite-plugin';
 
 const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
 const ASSISTANT_TARGET = 'http://127.0.0.1:8788';
@@ -338,6 +339,7 @@ export default defineConfig(({ mode }) => {
       assistantApiProxy(),
       assistantIntegration(),
       scannerIntegration(),
+      stockFlowIntegration(),
     ],
     build: {
       outDir: '../../dist',
