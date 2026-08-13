@@ -1,9 +1,17 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-13  
-**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
+**Generated:** 2026-08-14  
+**Documented main:** `114f9e18697b73759cbacccae6eed8936d902335`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
+
+## 2026-08-13
+
+### Auto-doc output collapsed into one commit
+
+The `.github/workflows/daily-current-doc-sync.yml` workflow now collapses any local commits the OpenCode agent creates into one pending working-tree docs change (`git reset --mixed` to the target SHA) before validation. The validated commit step is the only place allowed to create a docs commit, and the workflow refuses to push if HEAD is not still the target SHA.
+
+Relevant implementation: `.github/workflows/daily-current-doc-sync.yml`.
 
 ## 2026-08-12
 

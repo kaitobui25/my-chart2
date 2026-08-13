@@ -1,7 +1,7 @@
 # Current Architecture
 
-**Generated:** 2026-08-13  
-**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
+**Generated:** 2026-08-14  
+**Documented main:** `114f9e18697b73759cbacccae6eed8936d902335`  
 
 This page describes implementation boundaries at the documented commit. It does not describe future plans.
 

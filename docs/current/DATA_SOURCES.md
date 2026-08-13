@@ -1,7 +1,7 @@
 # Current Data Sources
 
-**Generated:** 2026-08-13  
-**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
+**Generated:** 2026-08-14  
+**Documented main:** `114f9e18697b73759cbacccae6eed8936d902335`  
 
 This page separates chart datafeeds from scanner sources. They are different application boundaries even when they use the same upstream provider name.
 

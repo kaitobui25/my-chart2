@@ -1,7 +1,7 @@
 # Current Operations
 
-**Generated:** 2026-08-13  
-**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
+**Generated:** 2026-08-14  
+**Documented main:** `114f9e18697b73759cbacccae6eed8936d902335`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -340,7 +340,7 @@ The deterministic current-doc checker is now part of the documented `main` SHA. 
 
 Sunday runs and runs whose baseline is not an ancestor of target use `full-reconciliation`; otherwise the mode is `incremental`, and the workflow skips entirely when `scripts/build-current-doc-context.mjs` reports zero meaningful changed paths or the documented SHA already equals target.
 
-The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs, its output has the expected shape, and the sync workflow expresses direct-to-main behavior without pull-request creation or a rolling branch.
+The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. If the agent creates local commits, the workflow collapses them into one pending working-tree docs change (`git reset --mixed` to target) before validation, so the validated commit step is the only place allowed to create a docs commit. The workflow refuses to push if HEAD is not still the target SHA. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs, its output has the expected shape, and the sync workflow expresses direct-to-main behavior without pull-request creation or a rolling branch.
 
 ## Persistent local state
 
