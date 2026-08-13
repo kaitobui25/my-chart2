@@ -1,6 +1,13 @@
 import './style.css';
-import { getScannerSources, startScannerRun, waitForScannerRun } from './api';
+import {
+  getCafeFEodStatus,
+  getScannerSources,
+  startScannerRun,
+  updateCafeFEod,
+  waitForScannerRun,
+} from './api';
 import type {
+  CafeFEodStatus,
   ScannerCandleKind,
   ScannerRequest,
   ScannerResult,
@@ -10,7 +17,9 @@ import type {
   ScannerTimeframe,
 } from './types';
 
-const STORAGE_KEY = 'l2chart.scanner.filters.v1';
+const STORAGE_KEY = 'l2chart.scanner.filters.v2';
+const EOD_SOURCE: ScannerSourceId = 'vn_eod';
+const EOD_STALE_DAYS = 5;
 
 type StoredState = {
   source?: ScannerSourceId;
@@ -26,6 +35,14 @@ type StoredState = {
   noLowerWick?: boolean;
   closeChangePctMin?: string;
   candle?: ScannerCandleKind;
+};
+
+const DEFAULT_STATE: Required<Pick<StoredState, 'timeframe' | 'green' | 'noLowerWick' | 'closeChangePctMin' | 'candle'>> = {
+  timeframe: '1M',
+  green: true,
+  noLowerWick: true,
+  closeChangePctMin: '0',
+  candle: 'current',
 };
 
 function readStored(): StoredState {
@@ -51,25 +68,35 @@ function compact(value: number | null): string {
   if (value === null) return '—';
   return new Intl.NumberFormat('en-US', {
     notation: Math.abs(value) >= 1_000_000 ? 'compact' : 'standard',
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 1,
   }).format(value);
 }
 
 function price(value: number | null): string {
   if (value === null) return '—';
-  const digits = Math.abs(value) < 1 ? 6 : Math.abs(value) < 100 ? 3 : 2;
+  const digits = Math.abs(value) < 1 ? 6 : Math.abs(value) < 100 ? 3 : 1;
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: digits }).format(value);
 }
 
 function percent(value: number | null): string {
   if (value === null) return '—';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function dateOnly(value: number): string {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'medium',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  }).format(new Date(value * 1000));
 }
 
 function timestamp(value: number): string {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
-    .format(new Date(value * 1000));
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value * 1000));
 }
 
 function input(id: string): HTMLInputElement {
@@ -84,16 +111,35 @@ function select(id: string): HTMLSelectElement {
   return element;
 }
 
+function button(id: string): HTMLButtonElement {
+  const element = document.getElementById(id);
+  if (!(element instanceof HTMLButtonElement)) throw new Error(`Missing scanner button: ${id}`);
+  return element;
+}
+
 class ScannerPanel {
-  private readonly stored = readStored();
+  private stored = readStored();
   private sources: ScannerSource[] = [];
   private running = false;
+  private eodUpdating = false;
+  private eodStatus: CafeFEodStatus | null = null;
   private readonly overlay: HTMLDivElement;
   private readonly source: HTMLSelectElement;
   private readonly universe: HTMLDivElement;
   private readonly progress: HTMLDivElement;
   private readonly results: HTMLDivElement;
+  private readonly resultCount: HTMLSpanElement;
+  private readonly sourceHint: HTMLSpanElement;
+  private readonly marketCapGroup: HTMLDivElement;
   private readonly scanButton: HTMLButtonElement;
+  private readonly resetButton: HTMLButtonElement;
+  private readonly eodCard: HTMLDivElement;
+  private readonly eodBadge: HTMLSpanElement;
+  private readonly eodSummary: HTMLSpanElement;
+  private readonly eodTradeDate: HTMLElement;
+  private readonly eodActiveSymbols: HTMLElement;
+  private readonly eodRetention: HTMLElement;
+  private readonly eodUpdateButton: HTMLButtonElement;
 
   constructor() {
     this.overlay = document.createElement('div');
@@ -102,34 +148,93 @@ class ScannerPanel {
     this.overlay.innerHTML = `
       <section id="scanner-panel" role="dialog" aria-modal="true" aria-label="Market scanner">
         <header class="scanner-head">
-          <h2>Scanner</h2><small>Price / Volume / Market Cap / Heikin Ashi</small>
-          <span class="spacer"></span><button class="scanner-close" type="button" aria-label="Đóng">×</button>
+          <div class="scanner-title-block">
+            <span class="scanner-eyebrow">MARKET SCANNER</span>
+            <div class="scanner-title-row"><h2>Lọc nhanh, giữ đúng tín hiệu</h2><span id="scanner-source-hint" class="scanner-source-hint">Local-first workflow</span></div>
+          </div>
+          <div class="scanner-head-actions">
+            <label class="scanner-source-select"><span>Nguồn dữ liệu</span><select id="scanner-source"></select></label>
+            <button class="scanner-close" type="button" aria-label="Đóng">×</button>
+          </div>
         </header>
-        <div class="scanner-filter-shell"><div class="scanner-filter-bar">
-          <label class="scanner-field"><span>Source</span><select id="scanner-source"></select></label>
-          <label class="scanner-field"><span>Universe</span><div id="scanner-universe" class="scanner-universes"></div></label>
-          <label class="scanner-field"><span>Price min</span><input id="scanner-price-min" type="number" min="0" step="any" placeholder="Any"></label>
-          <label class="scanner-field"><span>Price max</span><input id="scanner-price-max" type="number" min="0" step="any" placeholder="Any"></label>
-          <label class="scanner-field"><span>Volume min</span><input id="scanner-volume-min" type="number" min="0" step="any" placeholder="Any"></label>
-          <label class="scanner-field"><span>Volume max</span><input id="scanner-volume-max" type="number" min="0" step="any" placeholder="Any"></label>
-          <label class="scanner-field"><span>Market cap min</span><input id="scanner-mc-min" type="number" min="0" step="any" placeholder="N/A"></label>
-          <label class="scanner-field"><span>Market cap max</span><input id="scanner-mc-max" type="number" min="0" step="any" placeholder="N/A"></label>
-          <label class="scanner-field"><span>HA timeframe</span><div class="scanner-timeframe">
-            <label><input type="radio" name="scanner-ha-timeframe" value="1w"> Week</label>
-            <label><input type="radio" name="scanner-ha-timeframe" value="1M"> Month</label>
-          </div></label>
-          <label class="scanner-field"><span>Candle</span><div class="scanner-candle">
-            <label><input type="radio" name="scanner-candle-kind" value="current"> Current</label>
-            <label><input type="radio" name="scanner-candle-kind" value="closed"> Closed</label>
-          </div></label>
-          <label class="scanner-field"><span>HA close Δ min %</span><input id="scanner-ha-change" type="number" step="any" value="0"></label>
-          <label class="scanner-check"><input id="scanner-green" type="checkbox"> Green</label>
-          <label class="scanner-check"><input id="scanner-no-lower" type="checkbox"> No lower wick</label>
-          <button id="scanner-run" class="scanner-run-button" type="button">SCAN</button>
-        </div></div>
-        <div class="scanner-body">
-          <div id="scanner-progress" class="scanner-progress"><span>Ready</span></div>
-          <div id="scanner-results" class="scanner-table-wrap"><div class="scanner-empty">Chọn bộ lọc rồi bấm SCAN.</div></div>
+
+        <div id="scanner-eod-card" class="scanner-eod-card" hidden>
+          <div class="scanner-eod-copy">
+            <div class="scanner-eod-heading"><span id="scanner-eod-badge" class="scanner-status-badge">CafeF EOD</span><strong>Dữ liệu scanner local</strong></div>
+            <span id="scanner-eod-summary" class="scanner-eod-summary">Đang đọc trạng thái dữ liệu…</span>
+          </div>
+          <div class="scanner-eod-metrics">
+            <span><small>Phiên mới nhất</small><strong id="scanner-eod-date">—</strong></span>
+            <span><small>Mã đang quét</small><strong id="scanner-eod-active">—</strong></span>
+            <span><small>Lịch sử / mã</small><strong id="scanner-eod-retention">1,000 phiên</strong></span>
+          </div>
+          <button id="scanner-eod-update" class="scanner-secondary-button scanner-eod-update" type="button" title="Tương đương: python cafef_eod.py import-latest --mode eod">
+            <span class="scanner-refresh-icon" aria-hidden="true">↻</span><span>Cập nhật EOD</span>
+          </button>
+        </div>
+
+        <div class="scanner-layout">
+          <aside class="scanner-sidebar">
+            <section class="scanner-filter-section">
+              <div class="scanner-section-head"><span>01</span><strong>Thị trường</strong></div>
+              <div id="scanner-universe" class="scanner-universes"></div>
+            </section>
+
+            <section class="scanner-filter-section">
+              <div class="scanner-section-head"><span>02</span><strong>Giá & thanh khoản</strong></div>
+              <div class="scanner-pair-grid">
+                <label class="scanner-field"><span>Giá từ</span><input id="scanner-price-min" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+                <label class="scanner-field"><span>Giá đến</span><input id="scanner-price-max" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+                <label class="scanner-field"><span>KL từ</span><input id="scanner-volume-min" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+                <label class="scanner-field"><span>KL đến</span><input id="scanner-volume-max" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+              </div>
+              <div id="scanner-market-cap-group" class="scanner-market-cap-group">
+                <div class="scanner-pair-grid">
+                  <label class="scanner-field"><span>Market cap từ</span><input id="scanner-mc-min" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+                  <label class="scanner-field"><span>Market cap đến</span><input id="scanner-mc-max" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="scanner-filter-section">
+              <div class="scanner-section-head"><span>03</span><strong>Heikin Ashi</strong></div>
+              <div class="scanner-control-stack">
+                <div>
+                  <span class="scanner-control-label">Timeframe</span>
+                  <div class="scanner-segmented">
+                    <label><input type="radio" name="scanner-ha-timeframe" value="1w"><span>Week</span></label>
+                    <label><input type="radio" name="scanner-ha-timeframe" value="1M"><span>Month</span></label>
+                  </div>
+                </div>
+                <div>
+                  <span class="scanner-control-label">Cây nến</span>
+                  <div class="scanner-segmented">
+                    <label><input type="radio" name="scanner-candle-kind" value="current"><span>Hiện tại</span></label>
+                    <label><input type="radio" name="scanner-candle-kind" value="closed"><span>Đã đóng</span></label>
+                  </div>
+                </div>
+                <label class="scanner-field scanner-field-wide"><span>HA close tăng tối thiểu</span><div class="scanner-unit-input"><input id="scanner-ha-change" type="number" step="any" value="0"><b>%</b></div></label>
+                <label class="scanner-switch"><span><strong>Nến xanh</strong><small>HA close &gt; HA open</small></span><input id="scanner-green" type="checkbox"><i></i></label>
+                <label class="scanner-switch"><span><strong>Không râu dưới</strong><small>Ưu tiên lực mua sạch</small></span><input id="scanner-no-lower" type="checkbox"><i></i></label>
+              </div>
+            </section>
+
+            <div class="scanner-sidebar-actions">
+              <button id="scanner-reset" class="scanner-secondary-button" type="button">Đặt lại</button>
+              <button id="scanner-run" class="scanner-run-button" type="button"><span>Quét thị trường</span><b>→</b></button>
+            </div>
+          </aside>
+
+          <main class="scanner-main">
+            <div class="scanner-results-head">
+              <div><span class="scanner-eyebrow">KẾT QUẢ</span><h3><span id="scanner-result-count">0</span> mã phù hợp</h3></div>
+              <small>Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.</small>
+            </div>
+            <div id="scanner-progress" class="scanner-progress"><span class="scanner-progress-idle">Sẵn sàng quét.</span></div>
+            <div id="scanner-results" class="scanner-table-wrap">
+              <div class="scanner-empty"><strong>Chưa có kết quả</strong><span>Chọn bộ lọc bên trái rồi bấm “Quét thị trường”.</span></div>
+            </div>
+          </main>
         </div>
       </section>`;
     document.body.appendChild(this.overlay);
@@ -138,26 +243,32 @@ class ScannerPanel {
     this.universe = document.getElementById('scanner-universe') as HTMLDivElement;
     this.progress = document.getElementById('scanner-progress') as HTMLDivElement;
     this.results = document.getElementById('scanner-results') as HTMLDivElement;
-    this.scanButton = document.getElementById('scanner-run') as HTMLButtonElement;
+    this.resultCount = document.getElementById('scanner-result-count') as HTMLSpanElement;
+    this.sourceHint = document.getElementById('scanner-source-hint') as HTMLSpanElement;
+    this.marketCapGroup = document.getElementById('scanner-market-cap-group') as HTMLDivElement;
+    this.scanButton = button('scanner-run');
+    this.resetButton = button('scanner-reset');
+    this.eodCard = document.getElementById('scanner-eod-card') as HTMLDivElement;
+    this.eodBadge = document.getElementById('scanner-eod-badge') as HTMLSpanElement;
+    this.eodSummary = document.getElementById('scanner-eod-summary') as HTMLSpanElement;
+    this.eodTradeDate = document.getElementById('scanner-eod-date') as HTMLElement;
+    this.eodActiveSymbols = document.getElementById('scanner-eod-active') as HTMLElement;
+    this.eodRetention = document.getElementById('scanner-eod-retention') as HTMLElement;
+    this.eodUpdateButton = button('scanner-eod-update');
 
-    input('scanner-price-min').value = this.stored.priceMin ?? '';
-    input('scanner-price-max').value = this.stored.priceMax ?? '';
-    input('scanner-volume-min').value = this.stored.volumeMin ?? '';
-    input('scanner-volume-max').value = this.stored.volumeMax ?? '';
-    input('scanner-mc-min').value = this.stored.marketCapMin ?? '';
-    input('scanner-mc-max').value = this.stored.marketCapMax ?? '';
-    input('scanner-ha-change').value = this.stored.closeChangePctMin ?? '0';
-    input('scanner-green').checked = this.stored.green ?? true;
-    input('scanner-no-lower').checked = this.stored.noLowerWick ?? true;
-    this.setRadio('scanner-ha-timeframe', this.stored.timeframe ?? '1M');
-    this.setRadio('scanner-candle-kind', this.stored.candle ?? 'current');
+    this.applyStoredState();
 
     this.overlay.querySelector('.scanner-close')?.addEventListener('click', () => this.hide());
     this.overlay.addEventListener('pointerdown', (event) => {
       if (event.target === this.overlay) this.hide();
     });
-    this.source.addEventListener('change', () => this.renderUniverse());
+    this.source.addEventListener('change', () => {
+      this.renderSourceControls();
+      this.persistState();
+    });
     this.scanButton.addEventListener('click', () => void this.scan());
+    this.resetButton.addEventListener('click', () => this.resetFilters());
+    this.eodUpdateButton.addEventListener('click', () => void this.updateEod());
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !this.overlay.hidden) this.hide();
     });
@@ -166,10 +277,26 @@ class ScannerPanel {
 
   show(): void {
     this.overlay.hidden = false;
+    if (this.source.value === EOD_SOURCE) void this.refreshEodStatus();
   }
 
   hide(): void {
+    if (this.running || this.eodUpdating) return;
     this.overlay.hidden = true;
+  }
+
+  private applyStoredState(): void {
+    input('scanner-price-min').value = this.stored.priceMin ?? '';
+    input('scanner-price-max').value = this.stored.priceMax ?? '';
+    input('scanner-volume-min').value = this.stored.volumeMin ?? '';
+    input('scanner-volume-max').value = this.stored.volumeMax ?? '';
+    input('scanner-mc-min').value = this.stored.marketCapMin ?? '';
+    input('scanner-mc-max').value = this.stored.marketCapMax ?? '';
+    input('scanner-ha-change').value = this.stored.closeChangePctMin ?? DEFAULT_STATE.closeChangePctMin;
+    input('scanner-green').checked = this.stored.green ?? DEFAULT_STATE.green;
+    input('scanner-no-lower').checked = this.stored.noLowerWick ?? DEFAULT_STATE.noLowerWick;
+    this.setRadio('scanner-ha-timeframe', this.stored.timeframe ?? DEFAULT_STATE.timeframe);
+    this.setRadio('scanner-candle-kind', this.stored.candle ?? DEFAULT_STATE.candle);
   }
 
   private setRadio(name: string, value: string): void {
@@ -196,10 +323,9 @@ class ScannerPanel {
       const available = this.sources.find((item) => item.id === preferred && item.available)
         ?? this.sources.find((item) => item.available);
       if (available) this.source.value = available.id;
-      this.renderUniverse();
+      this.renderSourceControls();
     } catch (error) {
-      this.progress.textContent = `Scanner offline: ${error instanceof Error ? error.message : String(error)}`;
-      this.progress.classList.add('scanner-error');
+      this.progress.innerHTML = `<span class="scanner-error">Scanner offline: ${this.escapeHtml(error instanceof Error ? error.message : String(error))}</span>`;
     }
   }
 
@@ -215,36 +341,51 @@ class ScannerPanel {
     return this.sources.find((item) => item.id === this.source.value);
   }
 
-  private renderUniverse(): void {
+  private renderSourceControls(): void {
     const source = this.currentSource();
     this.universe.replaceChildren();
     if (!source) return;
-    const saved = this.stored.source === source.id ? new Set(this.stored.universes ?? []) : new Set(source.default_universes);
+
+    const saved = this.stored.source === source.id
+      ? new Set(this.stored.universes ?? [])
+      : new Set(source.default_universes);
     for (const universe of source.universes) {
       const label = document.createElement('label');
+      label.className = 'scanner-chip';
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = universe;
       checkbox.checked = saved.has(universe) || saved.size === 0;
-      label.append(checkbox, document.createTextNode(universe));
+      const span = document.createElement('span');
+      span.textContent = universe;
+      label.append(checkbox, span);
       this.universe.appendChild(label);
     }
+
+    this.marketCapGroup.hidden = !source.market_cap;
     for (const id of ['scanner-mc-min', 'scanner-mc-max']) {
       const element = input(id);
       element.disabled = !source.market_cap;
-      element.placeholder = source.market_cap ? 'Any' : 'NULL / unsupported';
       if (!source.market_cap) element.value = '';
     }
+
+    const local = source.refresh_mode === 'preloaded';
+    this.sourceHint.textContent = local ? 'SQLite local · không gọi mạng khi scan' : 'Cache + provider refresh';
+    this.eodCard.hidden = source.id !== EOD_SOURCE;
+    if (source.id === EOD_SOURCE) void this.refreshEodStatus();
+    this.renderResults([]);
+    this.renderIdleProgress();
   }
 
   private request(): ScannerRequest {
     const source = this.currentSource();
     if (!source) throw new Error('No scanner source selected.');
     const universes = [...this.universe.querySelectorAll<HTMLInputElement>('input:checked')].map((item) => item.value);
+    if (!universes.length) throw new Error('Chọn ít nhất một thị trường.');
     const timeframe = this.selectedRadio('scanner-ha-timeframe');
-    if (timeframe !== '1w' && timeframe !== '1M') throw new Error('Choose Week or Month.');
+    if (timeframe !== '1w' && timeframe !== '1M') throw new Error('Chọn Week hoặc Month.');
     const candle = this.selectedRadio('scanner-candle-kind');
-    if (candle !== 'current' && candle !== 'closed') throw new Error('Choose Current or Closed candle.');
+    if (candle !== 'current' && candle !== 'closed') throw new Error('Chọn nến hiện tại hoặc đã đóng.');
 
     const request: ScannerRequest = {
       source: source.id,
@@ -266,8 +407,17 @@ class ScannerPanel {
       },
     };
 
-    saveStored({
-      source: request.source,
+    this.persistState(request);
+    return request;
+  }
+
+  private persistState(request?: ScannerRequest): void {
+    const source = this.currentSource();
+    const timeframe = this.selectedRadio('scanner-ha-timeframe') as ScannerTimeframe;
+    const candle = this.selectedRadio('scanner-candle-kind') as ScannerCandleKind;
+    const universes = [...this.universe.querySelectorAll<HTMLInputElement>('input:checked')].map((item) => item.value);
+    const nextState: StoredState = {
+      source: request?.source ?? source?.id,
       universes,
       priceMin: input('scanner-price-min').value,
       priceMax: input('scanner-price-max').value,
@@ -276,75 +426,196 @@ class ScannerPanel {
       marketCapMin: input('scanner-mc-min').value,
       marketCapMax: input('scanner-mc-max').value,
       timeframe,
-      green: request.heikinAshi.green,
-      noLowerWick: request.heikinAshi.noLowerWick,
+      green: input('scanner-green').checked,
+      noLowerWick: input('scanner-no-lower').checked,
       closeChangePctMin: input('scanner-ha-change').value,
       candle,
-    });
-    return request;
+    };
+    this.stored = nextState;
+    saveStored(nextState);
+  }
+
+  private resetFilters(): void {
+    input('scanner-price-min').value = '';
+    input('scanner-price-max').value = '';
+    input('scanner-volume-min').value = '';
+    input('scanner-volume-max').value = '';
+    input('scanner-mc-min').value = '';
+    input('scanner-mc-max').value = '';
+    input('scanner-ha-change').value = DEFAULT_STATE.closeChangePctMin;
+    input('scanner-green').checked = DEFAULT_STATE.green;
+    input('scanner-no-lower').checked = DEFAULT_STATE.noLowerWick;
+    this.setRadio('scanner-ha-timeframe', DEFAULT_STATE.timeframe);
+    this.setRadio('scanner-candle-kind', DEFAULT_STATE.candle);
+    for (const checkbox of this.universe.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.checked = true;
+    this.persistState();
+    this.renderResults([]);
+    this.renderIdleProgress();
   }
 
   private async scan(): Promise<void> {
-    if (this.running) return;
+    if (this.running || this.eodUpdating) return;
     this.running = true;
     this.scanButton.disabled = true;
-    this.scanButton.textContent = 'SCANNING…';
+    this.resetButton.disabled = true;
+    this.eodUpdateButton.disabled = true;
+    this.scanButton.classList.add('is-running');
+    this.scanButton.querySelector('span')!.textContent = 'Đang quét…';
     try {
       const runId = await startScannerRun(this.request());
       const run = await waitForScannerRun(runId, (value) => this.renderProgress(value));
       if (run.status === 'error') throw new Error(run.error || 'Scanner failed.');
       this.renderResults(run.results);
     } catch (error) {
-      this.progress.replaceChildren();
-      const message = document.createElement('span');
-      message.className = 'scanner-error';
-      message.textContent = error instanceof Error ? error.message : String(error);
-      this.progress.appendChild(message);
+      this.renderError(error instanceof Error ? error.message : String(error));
     } finally {
       this.running = false;
       this.scanButton.disabled = false;
-      this.scanButton.textContent = 'SCAN';
+      this.resetButton.disabled = false;
+      this.eodUpdateButton.disabled = false;
+      this.scanButton.classList.remove('is-running');
+      this.scanButton.querySelector('span')!.textContent = 'Quét thị trường';
     }
+  }
+
+  private async refreshEodStatus(): Promise<void> {
+    if (this.source.value !== EOD_SOURCE) return;
+    try {
+      this.eodStatus = await getCafeFEodStatus();
+      this.renderEodStatus();
+    } catch (error) {
+      this.eodStatus = null;
+      this.eodBadge.textContent = 'Không đọc được';
+      this.eodBadge.dataset.tone = 'error';
+      this.eodSummary.textContent = error instanceof Error ? error.message : String(error);
+      this.eodTradeDate.textContent = '—';
+      this.eodActiveSymbols.textContent = '—';
+      this.eodRetention.textContent = '1,000 phiên';
+    }
+  }
+
+  private async updateEod(): Promise<void> {
+    if (this.eodUpdating || this.running || this.source.value !== EOD_SOURCE) return;
+    this.eodUpdating = true;
+    this.eodUpdateButton.disabled = true;
+    this.scanButton.disabled = true;
+    this.resetButton.disabled = true;
+    this.eodCard.classList.add('is-updating');
+    this.eodBadge.textContent = 'Đang cập nhật';
+    this.eodBadge.dataset.tone = 'working';
+    this.eodSummary.textContent = 'Đang tìm gói CafeF EOD mới nhất, tải ZIP và upsert vào SQLite…';
+    try {
+      const response = await updateCafeFEod();
+      this.eodStatus = response.status;
+      this.renderEodStatus(`Đã cập nhật ${response.result.activeSymbols.toLocaleString('en-US')} mã · ${response.result.candles.toLocaleString('en-US')} nến được upsert.`);
+      this.renderResults([]);
+      this.renderIdleProgress('Dữ liệu EOD đã đổi. Bấm “Quét thị trường” để chạy lại với phiên mới nhất.');
+    } catch (error) {
+      this.eodBadge.textContent = 'Cập nhật lỗi';
+      this.eodBadge.dataset.tone = 'error';
+      this.eodSummary.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.eodUpdating = false;
+      this.eodUpdateButton.disabled = false;
+      this.scanButton.disabled = false;
+      this.resetButton.disabled = false;
+      this.eodCard.classList.remove('is-updating');
+    }
+  }
+
+  private renderEodStatus(successMessage?: string): void {
+    const status = this.eodStatus;
+    if (!status) return;
+    const tradeDate = status.latestTradeDate ?? status.latestImport?.trade_date ?? 0;
+    const ageDays = tradeDate ? Math.max(0, (Date.now() / 1000 - tradeDate) / 86400) : Number.POSITIVE_INFINITY;
+    const staleAfterDays = (this.currentSource()?.snapshot_ttl_seconds ?? EOD_STALE_DAYS * 86400) / 86400;
+    const stale = ageDays > staleAfterDays;
+    this.eodBadge.dataset.tone = status.updating ? 'working' : stale ? 'warning' : 'success';
+    this.eodBadge.textContent = status.updating ? 'Đang cập nhật' : stale ? 'Cần cập nhật' : 'Sẵn sàng';
+    this.eodTradeDate.textContent = tradeDate ? dateOnly(tradeDate) : 'Chưa import';
+    this.eodActiveSymbols.textContent = status.activeSymbols.toLocaleString('en-US');
+    this.eodRetention.textContent = `${status.retentionBars.toLocaleString('en-US')} phiên`;
+
+    if (successMessage) {
+      this.eodSummary.textContent = successMessage;
+      return;
+    }
+    if (!status.latestImport) {
+      this.eodSummary.textContent = 'Chưa có import CafeF thành công. Cập nhật EOD hoặc bootstrap Upto trước khi scan.';
+      return;
+    }
+    const mode = status.latestImport.mode.toUpperCase();
+    const finished = status.latestImport.finished_at ? timestamp(status.latestImport.finished_at) : '—';
+    this.eodSummary.textContent = `${mode} gần nhất hoàn tất ${finished} · ${status.snapshotSymbols.toLocaleString('en-US')} snapshot local.`;
+  }
+
+  private renderIdleProgress(message = 'Sẵn sàng quét. Stage 1 lọc rác trước, sau đó mới tính Heikin Ashi.'): void {
+    this.progress.replaceChildren();
+    const idle = document.createElement('span');
+    idle.className = 'scanner-progress-idle';
+    idle.textContent = message;
+    this.progress.appendChild(idle);
   }
 
   private renderProgress(run: ScannerRun): void {
     this.progress.replaceChildren();
-    const stats: Array<[string, number]> = [
-      ['Universe', run.universe_count ?? 0],
-      ['Stage 1', run.stage1_count ?? 0],
-      ['History refresh', run.history_refresh_count ?? 0],
-      ['HA', run.stage2_count ?? 0],
-      ['Matched', run.result_count ?? 0],
+    const local = this.currentSource()?.refresh_mode === 'preloaded';
+    const stats: Array<[string, number, boolean]> = [
+      ['Universe', run.universe_count ?? 0, (run.universe_count ?? 0) > 0],
+      ['Stage 1', run.stage1_count ?? 0, (run.stage1_count ?? 0) > 0],
+      [local ? 'Local history' : 'History', run.history_refresh_count ?? 0, local || (run.history_refresh_count ?? 0) > 0],
+      ['HA', run.stage2_count ?? 0, (run.stage2_count ?? 0) > 0],
+      ['Matched', run.result_count ?? 0, run.status === 'complete'],
     ];
-    for (const [label, value] of stats) {
+    for (const [label, value, active] of stats) {
       const item = document.createElement('span');
-      item.append(document.createTextNode(`${label} `));
-      const strong = document.createElement('strong');
-      strong.textContent = String(value);
-      item.appendChild(strong);
+      item.className = active ? 'scanner-progress-step is-active' : 'scanner-progress-step';
+      const dot = document.createElement('i');
+      const text = document.createElement('b');
+      text.textContent = label;
+      const number = document.createElement('strong');
+      number.textContent = String(value);
+      item.append(dot, text, number);
       this.progress.appendChild(item);
     }
     if (run.warnings?.length) {
       const warning = document.createElement('span');
       warning.className = 'scanner-warning';
-      warning.textContent = run.warnings[0];
+      warning.textContent = `⚠ ${run.warnings[0]}`;
       warning.title = run.warnings.join('\n');
       this.progress.appendChild(warning);
     }
   }
 
+  private renderError(messageText: string): void {
+    this.progress.replaceChildren();
+    const message = document.createElement('span');
+    message.className = 'scanner-error';
+    message.textContent = messageText;
+    this.progress.appendChild(message);
+  }
+
   private renderResults(rows: ScannerResult[]): void {
+    this.resultCount.textContent = rows.length.toLocaleString('en-US');
     this.results.replaceChildren();
     if (!rows.length) {
       const empty = document.createElement('div');
       empty.className = 'scanner-empty';
-      empty.textContent = 'Không có mã nào thỏa bộ lọc.';
+      const strong = document.createElement('strong');
+      strong.textContent = 'Chưa có kết quả';
+      const span = document.createElement('span');
+      span.textContent = 'Điều chỉnh bộ lọc và chạy scanner để xem danh sách phù hợp.';
+      empty.append(strong, span);
       this.results.appendChild(empty);
       return;
     }
+
+    const source = this.currentSource();
     const table = document.createElement('table');
     table.className = 'scanner-table';
-    const columns = ['Symbol', 'Exchange', 'Price', 'Volume', 'Market Cap', 'HA', 'Color', 'No lower wick', 'HA close Δ', 'Body', 'Candle', 'Data'];
+    const columns = ['Mã', 'Giá', 'Khối lượng'];
+    if (source?.market_cap) columns.push('Market cap');
+    columns.push('HA close Δ', 'Body', 'Tín hiệu HA', 'Nến', 'Data');
     const thead = table.createTHead();
     const head = thead.insertRow();
     for (const column of columns) {
@@ -352,33 +623,43 @@ class ScannerPanel {
       th.textContent = column;
       head.appendChild(th);
     }
+
     const tbody = table.createTBody();
     for (const result of rows) {
       const row = tbody.insertRow();
       row.dataset.symbol = result.symbol;
-      const values = [
-        result.symbol,
-        result.exchange || result.name || '',
-        price(result.price),
-        compact(result.volume),
-        compact(result.marketCap),
-        result.timeframe,
-        result.green ? 'Green' : 'Red',
-        result.noLowerWick ? 'Yes' : 'No',
-        percent(result.haCloseChangePct),
-        percent(result.haBodyPct),
-        timestamp(result.candleTime),
-        result.stale ? 'Stale' : 'Fresh',
-      ];
-      values.forEach((value, index) => {
-        const cell = row.insertCell();
-        cell.textContent = value;
-        if (index === 0) cell.className = 'scanner-symbol';
-        if (index === 4 && result.marketCap === null) cell.classList.add('scanner-null');
-        if ((index === 6 && result.green) || (index === 8 && (result.haCloseChangePct ?? 0) >= 0)) cell.classList.add('scanner-positive');
-        if (index === 11 && result.stale) cell.classList.add('scanner-stale');
-      });
+
+      const symbolCell = row.insertCell();
+      symbolCell.className = 'scanner-symbol-cell';
+      const symbol = document.createElement('strong');
+      symbol.textContent = result.symbol;
+      const meta = document.createElement('small');
+      meta.textContent = result.exchange || (result.name && result.name !== result.symbol ? result.name : '—');
+      symbolCell.append(symbol, meta);
+
+      this.textCell(row, price(result.price));
+      this.textCell(row, compact(result.volume));
+      if (source?.market_cap) this.textCell(row, compact(result.marketCap), result.marketCap === null ? 'scanner-null' : '');
+      this.textCell(row, percent(result.haCloseChangePct), (result.haCloseChangePct ?? 0) >= 0 ? 'scanner-positive' : 'scanner-negative');
+      this.textCell(row, percent(result.haBodyPct));
+
+      const signalCell = row.insertCell();
+      signalCell.className = 'scanner-signal-cell';
+      const colorBadge = document.createElement('span');
+      colorBadge.className = `scanner-mini-badge ${result.green ? 'is-positive' : 'is-negative'}`;
+      colorBadge.textContent = result.green ? 'Xanh' : 'Đỏ';
+      signalCell.appendChild(colorBadge);
+      if (result.noLowerWick) {
+        const wickBadge = document.createElement('span');
+        wickBadge.className = 'scanner-mini-badge is-neutral';
+        wickBadge.textContent = 'No wick';
+        signalCell.appendChild(wickBadge);
+      }
+
+      this.textCell(row, dateOnly(result.candleTime));
+      this.textCell(row, result.stale ? 'Cũ' : 'Mới', result.stale ? 'scanner-stale' : 'scanner-fresh');
     }
+
     tbody.addEventListener('click', (event) => {
       const row = (event.target as HTMLElement).closest<HTMLTableRowElement>('tr[data-symbol]');
       const symbol = row?.dataset.symbol;
@@ -387,6 +668,19 @@ class ScannerPanel {
       this.hide();
     });
     this.results.appendChild(table);
+  }
+
+  private textCell(row: HTMLTableRowElement, value: string, className = ''): HTMLTableCellElement {
+    const cell = row.insertCell();
+    cell.textContent = value;
+    if (className) cell.className = className;
+    return cell;
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>'"]/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+    })[char] ?? char);
   }
 }
 

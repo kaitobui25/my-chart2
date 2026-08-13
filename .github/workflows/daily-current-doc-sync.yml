@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: current-doc-sync
@@ -21,9 +20,7 @@ jobs:
     env:
       OPENCODE_MODEL: opencode/deepseek-v4-flash-free
       OPENCODE_VERSION: 1.18.15
-      DOC_SYNC_BRANCH: docs-sync/current
       DOC_SYNC_MAX_SOURCE_FILES: 25
-      GH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN || github.token }}
 
     steps:
       - name: Check out main
@@ -33,21 +30,12 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN || github.token }}
 
-      - name: Fetch remote branches
-        run: git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
-
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 20
 
-      - name: Install OpenCode
-        run: |
-          set -euo pipefail
-          npm install -g "opencode-ai@${OPENCODE_VERSION}"
-          opencode --version
-
-      - name: Resolve target, baseline and rolling PR
+      - name: Resolve target and baseline
         id: state
         run: |
           set -euo pipefail
@@ -55,49 +43,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          target_sha="$(git rev-parse origin/main)"
+          git fetch --prune origin main
+          target_sha="$(git rev-parse HEAD)"
+          remote_main_sha="$(git rev-parse origin/main)"
 
-          matching_prs="$(
-            gh pr list \
-              --state open \
-              --base main \
-              --limit 100 \
-              --json number,title,headRefName,labels \
-              --jq '[.[] |
-                select(.title | startswith("[docs-sync] ")) |
-                select(any(.labels[]; .name == "documentation"))
-              ]'
-          )"
-
-          pr_count="$(jq 'length' <<<"$matching_prs")"
-          if [ "$pr_count" -gt 1 ]; then
-            echo "::error::More than one open [docs-sync] PR targets main. Clean up the ambiguous rolling state first."
+          if [ "$target_sha" != "$remote_main_sha" ]; then
+            echo "::error::main advanced before documentation synchronization began; a later run will document the newer main."
             exit 1
-          fi
-
-          pr_exists=false
-          pr_number=""
-          remote_branch_exists=false
-
-          if [ "$pr_count" -eq 1 ]; then
-            pr_exists=true
-            pr_number="$(jq -r '.[0].number' <<<"$matching_prs")"
-            head_branch="$(jq -r '.[0].headRefName' <<<"$matching_prs")"
-
-            git fetch origin "$head_branch"
-            git switch -C "$head_branch" "origin/$head_branch"
-            git rebase origin/main
-          else
-            head_branch="$DOC_SYNC_BRANCH"
-            if git show-ref --verify --quiet "refs/remotes/origin/$head_branch"; then
-              remote_branch_exists=true
-            fi
-            git switch -C "$head_branch" origin/main
           fi
 
           baseline_sha="$(jq -r '.documented_sha' docs/current/_meta.json)"
           mode="incremental"
           should_run=true
+          meaningful_changed_path_count=0
           japan_day="$(TZ=Asia/Tokyo date +%u)"
 
           if [ "$japan_day" = "7" ]; then
@@ -105,8 +63,20 @@ jobs:
           elif [ "$baseline_sha" = "$target_sha" ]; then
             should_run=false
           elif ! git cat-file -e "${baseline_sha}^{commit}" 2>/dev/null \
-            || ! git merge-base --is-ancestor "$baseline_sha" origin/main; then
+            || ! git merge-base --is-ancestor "$baseline_sha" "$target_sha"; then
             mode="full-reconciliation"
+          else
+            state_context="$(
+              node scripts/build-current-doc-context.mjs \
+                "$baseline_sha" \
+                "$target_sha" \
+                incremental \
+                "$DOC_SYNC_MAX_SOURCE_FILES"
+            )"
+            meaningful_changed_path_count="$(jq -r '.changed_path_count' <<<"$state_context")"
+            if [ "$meaningful_changed_path_count" -eq 0 ]; then
+              should_run=false
+            fi
           fi
 
           {
@@ -114,18 +84,20 @@ jobs:
             echo "baseline_sha=$baseline_sha"
             echo "mode=$mode"
             echo "should_run=$should_run"
-            echo "pr_exists=$pr_exists"
-            echo "pr_number=$pr_number"
-            echo "head_branch=$head_branch"
-            echo "remote_branch_exists=$remote_branch_exists"
           } >> "$GITHUB_OUTPUT"
 
           echo "target_sha=$target_sha"
           echo "baseline_sha=$baseline_sha"
           echo "mode=$mode"
           echo "should_run=$should_run"
-          echo "head_branch=$head_branch"
-          echo "existing_pr=$pr_number"
+          echo "meaningful_changed_path_count=$meaningful_changed_path_count"
+
+      - name: Install OpenCode
+        if: steps.state.outputs.should_run == 'true'
+        run: |
+          set -euo pipefail
+          npm install -g "opencode-ai@${OPENCODE_VERSION}"
+          opencode --version
 
       - name: Run OpenCode semantic documentation agent
         if: steps.state.outputs.should_run == 'true'
@@ -260,26 +232,21 @@ jobs:
             exit 1
           fi
 
-          {
-            echo "changed=true"
-            echo "changed_paths<<EOF"
-            echo "$changed_paths"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Publish rolling docs PR
+      - name: Commit validated docs directly to main
         if: steps.state.outputs.should_run == 'true' && steps.validate.outputs.changed == 'true'
         env:
           TARGET_SHA: ${{ steps.state.outputs.target_sha }}
-          BASELINE_SHA: ${{ steps.state.outputs.baseline_sha }}
-          SYNC_MODE: ${{ steps.state.outputs.mode }}
-          HEAD_BRANCH: ${{ steps.state.outputs.head_branch }}
-          PR_EXISTS: ${{ steps.state.outputs.pr_exists }}
-          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
-          REMOTE_BRANCH_EXISTS: ${{ steps.state.outputs.remote_branch_exists }}
-          CHANGED_PATHS: ${{ steps.validate.outputs.changed_paths }}
         run: |
           set -euo pipefail
+
+          git fetch --prune origin main
+          remote_main_sha="$(git rev-parse origin/main)"
+          if [ "$remote_main_sha" != "$TARGET_SHA" ]; then
+            echo "::error::main advanced while documentation synchronization was running; refusing to overwrite newer work."
+            exit 1
+          fi
 
           short_sha="${TARGET_SHA:0:7}"
 
@@ -295,40 +262,4 @@ jobs:
             docs/current/_meta.json
 
           git commit -m "docs: sync current documentation through ${short_sha}"
-
-          if [ "$PR_EXISTS" = "true" ] || [ "$REMOTE_BRANCH_EXISTS" = "true" ]; then
-            git push --force-with-lease origin "HEAD:refs/heads/${HEAD_BRANCH}"
-          else
-            git push -u origin "HEAD:refs/heads/${HEAD_BRANCH}"
-          fi
-
-          body_file="$(mktemp)"
-          {
-            echo "Automated current-documentation synchronization."
-            echo
-            echo "- Runtime: OpenCode ${OPENCODE_VERSION}"
-            echo "- Model: \`${OPENCODE_MODEL}\`"
-            echo "- Baseline: \`${BASELINE_SHA}\`"
-            echo "- Target main: \`${TARGET_SHA}\`"
-            echo "- Mode: \`${SYNC_MODE}\`"
-            echo "- Validation: \`node scripts/check-current-docs.mjs\` passed"
-            echo
-            echo "Changed canonical files:"
-            while IFS= read -r path; do
-              [ -n "$path" ] && echo "- \`$path\`"
-            done <<<"$CHANGED_PATHS"
-            echo
-            echo "OpenCode owns semantic body edits only. Snapshot SHA/date/mode and headers are synchronized deterministically by the workflow."
-          } > "$body_file"
-
-          if [ "$PR_EXISTS" = "true" ]; then
-            gh pr edit "$PR_NUMBER" --body-file "$body_file"
-          else
-            gh pr create \
-              --draft \
-              --base main \
-              --head "$HEAD_BRANCH" \
-              --title "[docs-sync] sync main through ${short_sha}" \
-              --label documentation \
-              --body-file "$body_file"
-          fi
+          git push origin HEAD:main

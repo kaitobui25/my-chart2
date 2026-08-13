@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -56,6 +57,26 @@ class FakeGateway:
 
     def make_stream(self, _tickers: list[str], _callback):
         return FakeStream(self)
+
+
+class SlowGateway(FakeGateway):
+    def fetch_history(self, symbol: str, interval: str, limit: int,
+                      from_time: int | None = None,
+                      to_time: int | None = None) -> list[dict]:
+        time.sleep(0.05)
+        return super().fetch_history(symbol, interval, limit, from_time, to_time)
+
+
+class GatewayTimeoutError(Exception):
+    status = 504
+
+
+class TimeoutGateway(FakeGateway):
+    def fetch_history(self, symbol: str, interval: str, limit: int,
+                      from_time: int | None = None,
+                      to_time: int | None = None) -> list[dict]:
+        self.history_calls.append((symbol, interval, limit, from_time, to_time))
+        raise GatewayTimeoutError("504, message='Gateway Timeout'")
 
 
 class FakeHistoryFrame:
@@ -334,6 +355,29 @@ class HistoryCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1000, len(ranged))
         self.assertEqual([500, 1000], [call[2] for call in gateway.history_calls])
         self.assertEqual((1_600_000_000, 1_700_000_000), gateway.history_calls[-1][3:])
+
+    async def test_concurrent_identical_ranges_share_one_upstream_request(self) -> None:
+        gateway = SlowGateway()
+        cache = HistoryCache(gateway)
+
+        first, second = await asyncio.gather(
+            cache.get("FPT", "1d", 100, 1_700_000_000, 1_800_000_000),
+            cache.get("FPT", "1d", 100, 1_700_000_000, 1_800_000_000),
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(1, len(gateway.history_calls))
+
+    async def test_gateway_timeout_starts_symbol_interval_cooldown(self) -> None:
+        gateway = TimeoutGateway()
+        cache = HistoryCache(gateway)
+
+        with self.assertRaises(GatewayTimeoutError):
+            await cache.get("FPT", "1d", 100)
+        with self.assertRaisesRegex(RuntimeError, "504 cooldown"):
+            await cache.get("FPT", "1d", 100)
+
+        self.assertEqual(1, len(gateway.history_calls))
 
 
 class FiinQuantGatewayTests(unittest.TestCase):

@@ -1,9 +1,37 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-09  
-**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
+
+## 2026-08-10
+
+### Current-doc sync became scheduled and commits directly to main
+
+The `.github/workflows/daily-current-doc-sync.yml` workflow now runs on a schedule (daily at 05:37 JST) in addition to manual `workflow_dispatch`. When validated documentation changes exist, it commits them directly to `main` instead of maintaining the rolling `[docs-sync]` pull request.
+
+Sunday runs and runs whose baseline is not an ancestor of target use `full-reconciliation`; otherwise the mode is `incremental`. The run is skipped when `scripts/build-current-doc-context.mjs` reports zero meaningful changed paths or the documented SHA already equals target. CI's `docs-runtime` job now also enforces that the workflow stays direct-to-main: no `gh pr`, no `pull-requests: write` permission, no rolling `docs-sync/current` branch.
+
+Relevant implementation: `.github/workflows/daily-current-doc-sync.yml`, `.github/workflows/ci.yml`, `agent/prompts/daily-current-doc-sync.md`.
+
+### SSI FastConnect real-API probe experiment
+
+An experiment was added to measure the real path to SSI FastConnect before integration: `scripts/ssi-probe.mjs` plus `agent/experiments/ssi-probe/` runbook and env example. It records auth latency, DNS/TLS baseline, cold/warm 500-candle daily latency, REST paging behavior, intraday `5m`/`1h` latency, board lists and `X-RATELIMIT-*` headers, and stores a redacted report at `agent/experiments/ssi-probe/results/latest.json`. The docs checker treats that report as runtime-only. SSI is still an experiment, not a chart provider.
+
+Relevant implementation: `scripts/ssi-probe.mjs`, `agent/experiments/ssi-probe/README.md`, `agent/experiments/ssi-probe/ssi-probe.env.example`, `scripts/check-current-docs.mjs`.
+
+### Scanner UI refresh and CafeF EOD update card
+
+The workstation scanner was restyled with a Vietnamese sidebar layout (chips, segmented controls, result count) and gained a local EOD status card when `vn_eod` is selected: latest trade date, active stock count, per-symbol retention and a freshness badge with a **Cập nhật EOD** button. The scanner sidecar added `GET /eod/status` and `POST /eod/import-latest`, reusing the same CafeF importer service as the CLI (`cafef_eod._import_latest`) instead of a second Python process; only one EOD update may run at a time. Scanner filter preferences moved to `l2chart.scanner.filters.v2`.
+
+Relevant implementation: `examples/sidecars/scanner/scanner_sidecar.py`, `examples/sidecars/scanner/README.md`, `examples/workstation/scanner/`.
+
+### FiinQuant sidecar hardened historical-range caching
+
+The sidecar `HistoryCache` now coalesces concurrent identical explicit-range history requests into one upstream call and applies a 30-second per-symbol/interval cooldown after FiinQuant upstream 504 gateway timeouts before allowing retries.
+
+Relevant implementation: `examples/sidecars/fiinquant/fiinquant_sidecar.py`.
 
 ## 2026-08-09
 

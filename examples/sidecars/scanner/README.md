@@ -12,6 +12,8 @@ Endpoints:
 
 - `GET /health`
 - `GET /sources`
+- `GET /eod/status`
+- `POST /eod/import-latest`
 - `POST /scan`
 - `GET /runs/{id}`
 - `POST /backup`
@@ -26,6 +28,18 @@ Heikin Ashi accepts exactly one timeframe per scan: `1w` or `1M`.
 
 FiinQuant remains the realtime chart source. Clicking a `vn_eod` result switches the chart to FiinQuant and opens the selected ticker.
 
+### Scanner UI update button
+
+When `VN EOD (CafeF)` is selected, the scanner shows a compact local-data status card with the latest imported trading date, active stock count and per-symbol retention. The **Cập nhật EOD** button calls the scanner sidecar's `POST /eod/import-latest` endpoint.
+
+The endpoint reuses the same importer service as this CLI command rather than spawning a second Python process:
+
+```bash
+python cafef_eod.py import-latest --mode eod
+```
+
+Only one CafeF EOD update may run at a time. The network download and ZIP parsing run off the aiohttp event loop, and the UI disables scan/update controls while its own update is active.
+
 ### First bootstrap
 
 Import the latest adjusted CafeF historical `Upto 3 sàn` package:
@@ -36,7 +50,7 @@ python cafef_eod.py import-latest --mode upto
 
 ### Daily update
 
-After CafeF publishes the completed session:
+After CafeF publishes the completed session, either use the scanner's **Cập nhật EOD** button or run:
 
 ```bash
 python cafef_eod.py import-latest --mode eod

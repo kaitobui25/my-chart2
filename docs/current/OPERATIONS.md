@@ -1,7 +1,7 @@
 # Current Operations
 
-**Generated:** 2026-08-09  
-**Documented main:** `9063e77e13e19bc885c1731e844314aa582fe1f8`  
+**Generated:** 2026-08-11  
+**Documented main:** `8eae2b6fc48030dd555a66e80455bcdc8bf91da2`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -190,6 +190,8 @@ python examples/sidecars/scanner/cafef_eod.py import-latest --mode upto
 python examples/sidecars/scanner/cafef_eod.py import-latest --mode eod
 ```
 
+This is the same importer invoked by the scanner UI's **Cập nhật EOD** button through the sidecar `POST /eod/import-latest` endpoint. The scanner sidecar also exposes `GET /eod/status` to inspect local CafeF coverage (latest trade date, active/snapshot counts, retention). Only one EOD update may run at a time; the download and ZIP parsing run off the aiohttp event loop, and a concurrent `POST /eod/import-latest` returns HTTP 409.
+
 ### Inspect local state
 
 ```bash
@@ -216,6 +218,24 @@ CAFEF_DOWNLOAD_PAGE
 ```
 
 The repository does not currently install a cron/Windows Task Scheduler job for CafeF ingestion. Daily import scheduling remains an operator responsibility.
+
+## SSI FastConnect real-API probe
+
+Before SSI is integrated into the chart, `scripts/ssi-probe.mjs` measures the real path from the developer machine to SSI FastConnect: Market Data auth latency, DNS/TLS baseline, cold and warm 500-candle daily requests, REST paging (`pageSize` 10/100/500/1000), page-2 ordering, intraday `5m`/`1h` latency, HOSE/HNX/UPCOM board lists, `X-RATELIMIT-*` headers and real response field shapes.
+
+It intentionally uses only Node 20 `fetch` — no SSI SDK, no Python sidecar, no application cache, no chart code. Run with a local credential file:
+
+```text
+.env.ssi-probe
+```
+
+Populate from `agent/experiments/ssi-probe/ssi-probe.env.example` (`SSI_API_KEY`/`SSI_API_SECRET`). The report is written to:
+
+```text
+agent/experiments/ssi-probe/results/latest.json
+```
+
+The report redacts credentials and is designed to be safe to commit; `scripts/check-current-docs.mjs` treats it as runtime-only. Do not commit `.env.ssi-probe`. See `agent/experiments/ssi-probe/README.md` for the runbook.
 
 ## Build commands
 
@@ -308,9 +328,11 @@ It has separate jobs for:
 - current documentation validation (`docs` runs `scripts/check-current-docs.mjs`);
 - OpenCode documentation-sync runtime validation (`docs-runtime`).
 
-The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow (manual `workflow_dispatch`) runs the OpenCode current-documentation synchronization and publishes the rolling `[docs-sync]` documentation PR.
+The deterministic current-doc checker is now part of the documented `main` SHA. The separate `.github/workflows/daily-current-doc-sync.yml` workflow runs the OpenCode current-documentation synchronization on a schedule (daily at 05:37 JST) and on manual `workflow_dispatch`. When it produces validated changes it commits them directly to `main` instead of maintaining a rolling `[docs-sync]` pull request.
 
-The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs and its output has the expected shape.
+Sunday runs and runs whose baseline is not an ancestor of target use `full-reconciliation`; otherwise the mode is `incremental`, and the workflow skips entirely when `scripts/build-current-doc-context.mjs` reports zero meaningful changed paths or the documented SHA already equals target.
+
+The daily sync run first builds a deterministic bounded context with `scripts/build-current-doc-context.mjs` (given the baseline/target SHAs, sync mode and a source-file cap) and feeds it to the OpenCode agent. The agent may read at most `DOC_SYNC_MAX_SOURCE_FILES` (25) implementation/test/config files and must stop immediately after its semantic edits. The `docs-runtime` CI job validates this runtime, including that the bounded-context builder runs, its output has the expected shape, and the sync workflow expresses direct-to-main behavior without pull-request creation or a rolling branch.
 
 ## Persistent local state
 
@@ -326,7 +348,7 @@ Important application-local storage includes:
 ### Scanner
 
 - SQLite: `examples/sidecars/scanner/data/scanner.db` by default;
-- scanner filters stored in browser localStorage as `l2chart.scanner.filters.v1`.
+- scanner filters stored in browser localStorage as `l2chart.scanner.filters.v2`.
 
 Treat scanner SQLite as rebuildable operational data, but remember that import audit/run audit can be useful for debugging and provenance.
 
