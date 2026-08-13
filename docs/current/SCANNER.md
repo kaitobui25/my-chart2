@@ -1,7 +1,7 @@
 # Current Scanner
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 The scanner is an application subsystem outside the stable chart package. It combines a browser UI with a local Python/aiohttp sidecar and SQLite cache/database.
 
@@ -279,7 +279,7 @@ The importer supports daily EOD and historical Upto packages. It accepts determi
 
 ### Scanner UI status card and EOD update
 
-When `VN EOD (CafeF)` is selected, the workstation scanner panel shows a compact local-data status card: latest imported trade date, active stock count, per-symbol retention and a freshness badge. Its **Cập nhật EOD** button calls `POST /eod/import-latest`, which reuses the same importer service as the CLI (`cafef_eod._import_latest`, equivalent to `python cafef_eod.py import-latest --mode eod`) rather than spawning a second Python process.
+When `VN EOD (CafeF)` is selected, the workstation scanner panel shows a compact local-data status card: latest imported trade date, active stock count, per-symbol retention and a freshness badge with a **Cập nhật EOD** button. Its **Cập nhật EOD** button calls `POST /eod/import-latest`, which reuses the same importer service as the CLI (`cafef_eod._import_latest`, equivalent to `python cafef_eod.py import-latest --mode eod`) rather than spawning a second Python process.
 
 The network download and ZIP parsing run off the aiohttp event loop. Only one CafeF EOD update may run at a time; a concurrent `POST /eod/import-latest` returns HTTP 409. The UI disables scan/update controls while its own update is active.
 

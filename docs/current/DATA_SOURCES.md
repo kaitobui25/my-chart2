@@ -1,7 +1,7 @@
 # Current Data Sources
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 This page separates chart datafeeds from scanner sources. They are different application boundaries even when they use the same upstream provider name.
 
@@ -92,6 +92,8 @@ The latest documented main includes the FiinQuant fast-timeframe-switch work mer
 
 The browser datafeed owns FiinQuant stream subscriptions. The provider runtime lazily starts the local sidecar and can prepare the managed Python environment and auto-login from the sidecar `.env`.
 
+The sidecar is implemented as `examples/sidecars/fiinquant/fiinquant_sidecar_core.py` (FiinQuantX session, OHLC history cache, realtime subscriptions) plus a thin `examples/sidecars/fiinquant/fiinquant_sidecar.py` facade that extends that session with `GET /valuation/stock` for the P/E indicator. The endpoint returns normalized daily P/E/PB points for a symbol/range via `MarketDepth().get_stock_valuation()`, gated by the sidecar token.
+
 The current workstation also injects FiinQuant-specific startup and quota behavior through `examples/workstation/scanner/vite-plugin-v4.ts`, `vite-plugin-v5.ts` and `vite-plugin-v6.ts`.
 
 Those patches currently ensure that:
@@ -135,7 +137,8 @@ Current browser adapter behavior:
 - realtime-like updates poll `/latest` rather than consuming an exchange push stream;
 - polling is grouped by interval and sent in batches of up to 50 subscribed symbols;
 - default poll delay is 5 seconds, subject to sidecar health/config response;
-- daily polled candles are normalized to the same trading-day timestamp key as historical daily candles before merge.
+- daily polled candles are normalized to the same trading-day timestamp key as historical daily candles before merge;
+- `GET /fundamentals/pe` on the sidecar returns normalized quarterly trailing-EPS/P/E rows through the Vnstock `Fundamental` API; this endpoint feeds the P/E indicator markers rather than the chart datafeed.
 
 ## Binance chart sources
 
@@ -233,14 +236,18 @@ The current local stock-scanner universe uses a 30-calendar-day freshness window
 
 ## Storage boundaries
 
-Do not confuse the two persistent data stores:
+Do not confuse the persistent data stores:
 
 ```text
 Browser IndexedDB
   purpose: chart/replay history cache
 
+Browser IndexedDB (P/E indicator)
+  l2chart.fundamentals.v1  quarterly Vnstock P/E fundamentals
+  l2chart.valuations.v1    daily FiinQuant stock valuation points
+
 Scanner SQLite
   purpose: scanner instruments/snapshots/canonical daily candles/HA/audit
 ```
 
-They have different ownership and lifecycle. Scanner SQLite is not currently a generic chart-history backend.
+They have different ownership and lifecycle. Scanner SQLite is not currently a generic chart-history backend. The P/E indicator caches are separate from the chart history cache: fundamentals are keyed by symbol and merge historical quarters across refreshes, while valuations track explicit coverage ranges so only uncovered spans are requested again.

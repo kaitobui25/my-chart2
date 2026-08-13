@@ -1,7 +1,7 @@
 # Current Operations
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 This page describes how the documented repository is started, tested and operated locally. Provider credentials/entitlements remain external dependencies.
 
@@ -52,7 +52,13 @@ node scripts/run-assistant.mjs
 5. reuses a compatible workstation or chooses the next available port near 53173;
 6. starts Vite and opens the browser.
 
+The launcher starts Vite with `scripts/vite-dev.config.mjs`, which merges the workstation config with the terminal-trace plugin from `scripts/dev-trace-vite.mjs`. A reused dev server is only considered compatible when both `/provider-runtime/health` and `/__l2chart_dev_trace/health` report the expected versions.
+
 The launcher deliberately reports that FiinQuant and Vnstock are lazy providers. They are not both started unconditionally before the workstation opens.
+
+### Terminal trace diagnostics
+
+Development/Playwright Vite runs use `scripts/vite-dev.config.mjs`, which adds the dev-only plugin in `scripts/dev-trace-vite.mjs`. The plugin injects a browser script (at `/__l2chart_dev_trace`) that reports network `fetch` timing, IndexedDB operations, long tasks and window errors back to the Vite terminal. Requests whose query parameters match token/secret keywords have those values redacted, and health-check endpoints are excluded from tracing. This trace is a diagnostics feature for dev/browser-test runs, not part of the production workstation config.
 
 ## Development ports
 
@@ -72,12 +78,13 @@ Do not hard-code the workstation browser port in external tooling if the launche
 
 Current important same-origin routes include:
 
-- `/fiinquant-api` → FiinQuant sidecar;
+- `/fiinquant-api` → FiinQuant sidecar (history, realtime via WebSocket, and `/valuation/stock` for the P/E indicator);
 - `/scanner-api` → scanner sidecar;
-- `/vnstock-api` → Vnstock sidecar;
+- `/vnstock-api` → Vnstock sidecar (history, `/latest`, `/symbols`, and `/fundamentals/pe` for the P/E indicator);
 - `/assistant-api` → assistant sidecar;
 - `/dnse-api` → DNSE REST proxy/signing path;
-- `/dnse-ws` → DNSE WebSocket proxy.
+- `/dnse-ws` → DNSE WebSocket proxy;
+- `/__l2chart_dev_trace` → dev-only terminal trace endpoint installed by `scripts/vite-dev.config.mjs`.
 
 Browser request origin checks are used by the local proxy/sidecar integrations to reject unwanted cross-site use.
 
@@ -87,7 +94,8 @@ Primary files:
 
 - `examples/workstation/provider-runtime/vite-plugin.ts`
 - `examples/sidecars/fiinquant/.env.example`
-- `examples/sidecars/fiinquant/fiinquant_sidecar.py`
+- `examples/sidecars/fiinquant/fiinquant_sidecar.py` (facade: session + `/valuation/stock`)
+- `examples/sidecars/fiinquant/fiinquant_sidecar_core.py` (FiinQuantX session, history cache, realtime)
 - `examples/sidecars/fiinquant/requirements.txt`
 - `examples/sidecars/fiinquant/requirements-provider.txt`
 
@@ -343,7 +351,8 @@ Important application-local storage includes:
 - chart/provider preferences and templates in localStorage from `examples/workstation/main.ts`;
 - drawings and UI preferences in localStorage;
 - paper trading state: `l2chart.paper.v1`;
-- chart/replay historical cache IndexedDB: `l2chart.market.history.v1`.
+- chart/replay historical cache IndexedDB: `l2chart.market.history.v1`;
+- P/E indicator caches in IndexedDB: `l2chart.fundamentals.v1` (quarterly Vnstock P/E fundamentals) and `l2chart.valuations.v1` (daily FiinQuant stock valuation points).
 
 ### Scanner
 

@@ -1,7 +1,7 @@
 # Current Replay
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 Replay is a workstation subsystem built around one shared raw market-time clock. It is not implemented as independent timers inside each chart tile.
 
@@ -65,6 +65,8 @@ The raw fetch starts early enough to cover the beginning of currently-open large
 
 Before requesting the provider, Replay estimates raw source-bar count. If it exceeds 20,000 bars, the session rejects the range rather than silently truncating it.
 
+The raw source fetch starts at the largest bucket containing the selected bar and extends to the common window end. Older visible history is not part of the replay clock; it is restored separately as a display-only seed (see [Heikin Ashi context](#heikin-ashi-context)).
+
 ## Provider history and browser cache
 
 Replay calls the active chart `Datafeed.getHistory()` for the shared raw interval/range.
@@ -105,9 +107,9 @@ Week/Month aggregation uses calendar-aware interval boundaries rather than fixed
 
 Heikin Ashi is recursive: the next HA open depends on the previous HA open/close.
 
-Replay therefore does not restart a target chart's history exactly at the raw Replay source window. For each participant, it preserves completed target-timeframe candles from before the raw source start as seed history.
+Replay therefore does not restart a target chart's history exactly at the raw Replay source window. For each participant, it preserves only *closed* target-timeframe candles from before the first projected bucket as seed history (`mergeReplayInitialCandles`). The seed is read from the browser history cache first via `getCachedHistory`, and only falls back to a provider `getHistory` when the cache is empty.
 
-That seed is merged with the projected Replay data before the participant receives its initial replay dataset.
+Projected candles always win in the merged dataset. The selected/partial bucket is rebuilt from raw replay data, so a future candle from the live chart cannot leak into the Replay timeline.
 
 This keeps Heikin Ashi context stable instead of recalculating the first visible Replay HA candle as if it were the first candle ever.
 
@@ -172,12 +174,13 @@ The workstation also stops Replay around changes that would invalidate the share
 
 ## Current tested contracts
 
-Repository tests cover Replay clock/session behavior, projection/aggregation and MarketHub ownership. Browser coverage also exercises synchronized workstation Replay behavior.
+Repository tests cover Replay clock/session behavior, projection/aggregation, seed-history merging and MarketHub ownership. Browser coverage also exercises synchronized workstation Replay behavior, including that replayed candle counts never exceed the pre-replay live counts.
 
 Relevant tests include:
 
 - `tests/unit/replay-clock.test.ts`
 - `tests/unit/replay-session.test.ts`
+- `tests/unit/replay-history-seed.test.ts`
 - `tests/unit/candle-aggregation.test.ts`
 - `tests/unit/market-hub.test.ts`
 - `tests/browser/workstation.spec.ts`

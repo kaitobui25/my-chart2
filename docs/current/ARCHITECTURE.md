@@ -1,7 +1,7 @@
 # Current Architecture
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 This page describes implementation boundaries at the documented commit. It does not describe future plans.
 
@@ -17,7 +17,7 @@ Main responsibilities:
 - `src/interval.ts` — interval codes and calendar-aware interval boundaries.
 - `src/calendar-candles.ts` and `src/candle-aggregation.ts` — pure OHLC aggregation/projection helpers.
 - `src/datafeed.ts` — provider-neutral market-data contract.
-- `src/indicators/` — indicator registry and calculations.
+- `src/indicators/` — indicator registry and calculations. `src/indicators/runtime-context.ts` tracks the active chart symbol through the public `setWatermark()` API so async indicators (such as P/E) can fetch data for the correct instrument without `L2Chart` knowing about providers.
 
 `src/index.ts` exports the provider-neutral package surface. Provider SDK authentication, sidecars, scanner code and workstation behavior are intentionally outside this boundary.
 
@@ -79,7 +79,9 @@ FIinQuant Python sidecar
 FIinQuantX
 ```
 
-Evidence: `examples/workstation/vite.config.ts`, `examples/workstation/provider-runtime/vite-plugin.ts`, `examples/sidecars/fiinquant/fiinquant_sidecar.py`.
+Evidence: `examples/workstation/vite.config.ts`, `examples/workstation/provider-runtime/vite-plugin.ts`, `examples/sidecars/fiinquant/fiinquant_sidecar.py`, `examples/sidecars/fiinquant/fiinquant_sidecar_core.py`.
+
+The sidecar is split into a core module (`fiinquant_sidecar_core.py`) that owns the authenticated FiinQuantX session, OHLC history caching, realtime subscriptions and the gateway, plus a thin facade (`fiinquant_sidecar.py`) that reuses that session and adds the historical stock-valuation endpoint used by the P/E indicator (`GET /valuation/stock`, backed by `MarketDepth().get_stock_valuation()`).
 
 The provider runtime can lazily prepare a local Python 3.11+ virtual environment, start the sidecar, wait for health, and auto-login from the sidecar `.env` when credentials/token are configured.
 
@@ -103,6 +105,8 @@ Vnstock sidecar
 ```
 
 `examples/providers/vnstock.ts` uses the shared browser history cache for historical ranges and polls `/latest` for subscribed symbols. Poll subscriptions are grouped by interval and chunked, with a maximum batch of 50 symbols in the current browser adapter.
+
+The Vnstock sidecar also exposes `GET /fundamentals/pe`, which reads quarterly trailing-EPS/P/E rows through the Vnstock `Fundamental` API and feeds the P/E indicator's quarterly markers.
 
 Daily realtime candles are normalized to the same trading-day key as history before cache merge.
 
@@ -138,7 +142,7 @@ All visible replay participants must use the same symbol. The session chooses a 
 
 Replay loads one common historical range and rejects an estimated raw range over 20,000 bars.
 
-Before Replay starts, completed target-timeframe history is retained as seed context so recursive Heikin Ashi values do not restart at the replay selection point.
+Before Replay starts, closed target-timeframe history from before the first projected bucket is retained as a display-only seed (read from browser cache first), so recursive Heikin Ashi values do not restart at the replay selection point. Projected candles always win in the merged dataset, so the selected/partial bucket is rebuilt from raw replay data and no live-chart future candle can leak into Replay.
 
 ## 9. MarketHub and paper trading
 

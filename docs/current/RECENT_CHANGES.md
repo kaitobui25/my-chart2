@@ -1,9 +1,41 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
+
+## 2026-08-12
+
+### P/E indicator v1 merged into main
+
+A P/E indicator (`pe`, registered via `src/indicators/all.ts`) now renders a FiinQuant daily P/E valuation line and Vnstock quarterly reported-P/E markers on eligible Vietnam equity tickers. Async data is scoped to the active chart symbol through the `setWatermark()` runtime-context adapter (`src/indicators/runtime-context.ts`), and unsupported instruments are excluded before any cache/network work. Daily valuation points and quarterly fundamentals are cached separately in IndexedDB (`l2chart.valuations.v1` and `l2chart.fundamentals.v1`), and valuation cache reads are coverage-aware so only missing ranges are refetched.
+
+Relevant implementation: `src/indicators/builtin/pe.ts`, `pe-model.ts`, `pe-client.ts`, `pe-cache.ts`, `pe-valuation-client.ts`, `pe-valuation-cache.ts`, `pe-eligibility.ts`, `runtime-context.ts`, unit tests under `tests/unit/pe-*`.
+
+### FiinQuant sidecar split with historical stock valuation
+
+The FiinQuant sidecar was split into `fiinquant_sidecar_core.py` (FiinQuantX session, OHLC history cache, realtime subscriptions, gateway) and a thin `fiinquant_sidecar.py` facade that reuses that session and adds `GET /valuation/stock` (via `MarketDepth().get_stock_valuation()`), which the P/E indicator consumes. The existing history/realtime endpoints and cache behavior are preserved.
+
+Relevant implementation: `examples/sidecars/fiinquant/fiinquant_sidecar.py`, `examples/sidecars/fiinquant/fiinquant_sidecar_core.py`, `examples/sidecars/fiinquant/test_fiinquant_valuation.py`.
+
+### Vnstock sidecar gained quarterly P/E fundamentals
+
+`GET /fundamentals/pe` on the Vnstock sidecar normalizes quarterly trailing-EPS/P/E rows through the Vnstock `Fundamental` API, with canonical `YYYY-Q#` periods winning over suffixed duplicates.
+
+Relevant implementation: `examples/sidecars/vnstock/vnstock_sidecar.py`, `examples/sidecars/vnstock/test_vnstock_sidecar.py`.
+
+### Replay preserves history before the selected candle
+
+Replay now restores only *closed* target-timeframe history from before the first projected bucket as a display-only seed (`mergeReplayInitialCandles`), read from the browser history cache first. Projected candles always win in the merged dataset, so the selected/partial bucket is rebuilt from raw replay data and no future live-chart candle leaks into Replay. Older visible history is no longer part of the raw replay clock range.
+
+Relevant implementation: `examples/workstation/replay/replay-session.ts`, `tests/unit/replay-history-seed.test.ts`, `tests/browser/workstation.spec.ts`.
+
+### Developer terminal trace diagnostics
+
+Dev/Playwright Vite runs now use `scripts/vite-dev.config.mjs`, which merges the workstation config with the `dev-trace-vite.mjs` plugin. The plugin injects a browser script that reports network-fetch timing, IndexedDB operations, long tasks and window errors to the Vite terminal via `/__l2chart_dev_trace`, with token/secret query parameters redacted. The launcher and Playwright config include the trace health check when reusing an existing dev server.
+
+Relevant implementation: `scripts/dev-trace-vite.mjs`, `scripts/vite-dev.config.mjs`, `scripts/run-assistant.mjs`, `playwright.config.ts`, `tests/browser/dev-terminal-trace.spec.ts`.
 
 ## 2026-08-10
 

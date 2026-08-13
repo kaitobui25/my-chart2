@@ -1,7 +1,7 @@
 # Current Feature Inventory
 
-**Generated:** 2026-08-12  
-**Documented main:** `4e8e46ab78d9e28d1f77cd82ff6920639883e919`  
+**Generated:** 2026-08-13  
+**Documented main:** `5b89aaeca901dd186d3811ebc8dd3b5dac4c945e`  
 
 Status vocabulary used here:
 
@@ -33,6 +33,9 @@ Status vocabulary used here:
 | FiinQuant watchlist quota protection | Experimental | injected by `examples/workstation/scanner/vite-plugin-v6.ts`; background FiinQuant watchlist feed work is suppressed |
 | Vnstock chart provider | Verified at repository integration level | `examples/providers/vnstock.ts`, `examples/sidecars/vnstock/`, Vnstock tests |
 | Vnstock polling realtime approximation | Implemented | `/latest` polling in `examples/providers/vnstock.ts`; not an exchange push stream |
+| P/E indicator (v1) | Verified at repository integration level | `src/indicators/builtin/pe.ts`; registered via `src/indicators/all.ts`; unit tests in `tests/unit/pe-indicator.test.ts`, `pe-load-policy.test.ts`, `pe-eligibility.test.ts`. Runtime P/E data still depends on Vnstock/FiinQuant credentials/access. |
+| P/E quarterly fundamentals markers | Implemented | quarterly Vnstock P/E rows rendered as markers with a reported-P/E legend; data via Vnstock sidecar `/fundamentals/pe` and IndexedDB cache `l2chart.fundamentals.v1` |
+| P/E daily valuation line | Implemented | raw FiinQuant daily valuation points mapped onto Day / Week / Month candles; data via FiinQuant sidecar `/valuation/stock` and IndexedDB cache `l2chart.valuations.v1` |
 | Synchronized multi-chart Replay | Verified | `examples/workstation/replay/`, replay tests and workstation browser coverage |
 | Replay future-leak protection during timeframe projection | Verified | `examples/workstation/replay/replay-projection.ts`, replay unit tests |
 | Replay + Heikin Ashi historical context preservation | Verified | seed-history behavior in `examples/workstation/replay/replay-session.ts` |
