@@ -254,31 +254,28 @@
           <button data-provider-tab="fiinquant">FiinQuant</button>
         </div>
         <div id="provider-source-summary" aria-live="polite"></div>
-        <div id="provider-status"></div>
-        <section class="provider-panel" data-provider-panel="demo">
-          <span class="provider-note">Dữ liệu mô phỏng chạy offline. Không cần tài khoản hoặc thông tin đăng nhập.</span>
+        <div id="provider-status" hidden></div>
+        <section class="provider-panel" data-provider-panel="demo" hidden>
           <div class="provider-actions">
             <span class="spacer"></span>
-            <button id="demo-use">Dùng dữ liệu demo</button>
+            <button id="demo-use" hidden></button>
           </div>
         </section>
         <section class="provider-panel" data-provider-panel="binance-spot" hidden>
-          <span class="provider-note">Dữ liệu Binance Spot công khai qua REST và WebSocket. Không cần API key. Lịch sử được cache riêng trong IndexedDB của trình duyệt.</span>
           <div class="provider-actions">
-            <button type="button" data-binance-cache-clear="spot">Xóa cache Spot</button>
+            <button type="button" data-binance-cache-clear="spot" hidden></button>
             <span class="spacer"></span>
-            <button id="binance-spot-use" type="button">Dùng Binance Spot</button>
+            <button id="binance-spot-use" type="button" hidden></button>
           </div>
         </section>
         <section class="provider-panel" data-provider-panel="binance-usdm" hidden>
-          <span class="provider-note">Dữ liệu hợp đồng vĩnh viễn Binance USD-M Futures công khai qua REST và WebSocket. Không cần API key. Cache Futures tách biệt hoàn toàn với Spot.</span>
           <div class="provider-actions">
-            <button type="button" data-binance-cache-clear="usdm">Xóa cache Futures</button>
+            <button type="button" data-binance-cache-clear="usdm" hidden></button>
             <span class="spacer"></span>
-            <button id="binance-usdm-use" type="button">Dùng Binance Futures</button>
+            <button id="binance-usdm-use" type="button" hidden></button>
           </div>
         </section>
-        <form id="dnse-credential-form" class="provider-panel" data-provider-panel="dnse" autocomplete="on">
+        <form id="dnse-credential-form" class="provider-panel" data-provider-panel="dnse" autocomplete="on" hidden aria-hidden="true">
           <div class="provider-credential-modes" role="group" aria-label="Cách cung cấp credential DNSE">
             <button type="button" data-credential-provider="dnse" data-credential-mode="session">Phiên trình duyệt</button>
             <button type="button" data-credential-provider="dnse" data-credential-mode="server">Server .env</button>
@@ -351,10 +348,19 @@
           </div>
         </form>
         <div class="provider-actions provider-footer">
-          <span class="provider-note">Chỉ URL/cấu hình không nhạy cảm được lưu trong trình duyệt.</span>
           <span class="spacer"></span>
           <button id="provider-done">Xong</button>
         </div>
+      </div>
+    </div>
+    <div id="provider-error-overlay" hidden>
+      <div id="provider-error-box" role="alertdialog" aria-modal="true" aria-labelledby="provider-error-title" aria-describedby="provider-error-message">
+        <div class="provider-error-icon" aria-hidden="true">!</div>
+        <div>
+          <strong id="provider-error-title"></strong>
+          <p id="provider-error-message"></p>
+        </div>
+        <button id="provider-error-close" type="button">OK</button>
       </div>
     </div>
     <div id="param-overlay" hidden>

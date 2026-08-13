@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import math
 import os
 import threading
 import time
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -29,9 +31,10 @@ NATIVE_INTERVALS = {
 }
 
 
-def _read_simple_env(path: Path) -> None:
+def _read_simple_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
     if not path.exists():
-        return
+        return values
     for raw in path.read_text(encoding='utf-8').splitlines():
         line = raw.strip()
         if not line or line.startswith('#') or '=' not in line:
@@ -39,15 +42,42 @@ def _read_simple_env(path: Path) -> None:
         key, value = line.split('=', 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
+        if key:
+            values[key] = value
+            if key not in os.environ:
+                os.environ[key] = value
+    return values
 
 
-_read_simple_env(Path(__file__).with_name('.env'))
+VNSTOCK_ENV_PATH = Path(__file__).with_name('.env')
+_read_simple_env(VNSTOCK_ENV_PATH)
 HOST = os.getenv('HOST', '127.0.0.1').strip() or '127.0.0.1'
 PORT = int(os.getenv('PORT', '8740'))
-POLL_INTERVAL_SECONDS = max(2.0, float(os.getenv('POLL_INTERVAL_SECONDS', '5')))
+POLL_INTERVAL_SECONDS = max(300.0, float(os.getenv('POLL_INTERVAL_SECONDS', '300')))
 SYMBOL_CACHE_SECONDS = max(60, int(os.getenv('SYMBOL_CACHE_SECONDS', '3600')))
+
+
+def _load_vnstock_api_key(path: Path = VNSTOCK_ENV_PATH) -> bool:
+    values = _read_simple_env(path)
+    api_key = (values.get('VNSTOCK_API_KEY') or values.get('APIKEY') or '').strip()
+    if not api_key:
+        return bool(os.getenv('VNSTOCK_API_KEY', '').strip())
+    os.environ['VNSTOCK_API_KEY'] = api_key
+    return True
+
+
+class VnstockQuotaError(RuntimeError):
+    pass
+
+
+def _call_vnstock(function: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return function(*args, **kwargs)
+    except SystemExit as exc:
+        if 'rate limit exceeded' in str(exc).lower():
+            raise VnstockQuotaError('Vnstock rate limit reached; retry later') from None
+        raise
 
 
 @dataclass(slots=True)
@@ -234,6 +264,7 @@ class VnstockGateway:
 
     def _ensure_clients(self) -> tuple[Any, Any]:
         with self._lock:
+            _load_vnstock_api_key()
             if self._market is None or self._reference is None:
                 Market, Reference = self._load_classes()
                 self._market = Market()
@@ -265,7 +296,7 @@ class VnstockGateway:
         with self._lock:
             if not self._symbols or now - self._symbols_at > SYMBOL_CACHE_SECONDS:
                 _, reference = self._ensure_clients()
-                rows = _records(reference.equity.list())
+                rows = _records(_call_vnstock(lambda: reference.equity.list()))
                 items: dict[str, SymbolItem] = {}
                 for row in rows:
                     symbol = _normalize_symbol(str(_first(row, ('symbol', 'ticker', 'code')) or ''))
@@ -330,7 +361,6 @@ class VnstockGateway:
             raise ValueError(f'unsupported interval: {interval}')
         native_interval, output_interval = self._native_interval(interval)
         market, _ = self._ensure_clients()
-        asset = self._asset(market, symbol)
 
         kwargs: dict[str, Any] = {'interval': native_interval}
         if from_time is not None or to_time is not None:
@@ -356,13 +386,14 @@ class VnstockGateway:
             kwargs['count'] = min(max(native_limit, 2), 50_000)
 
         with self._lock:
+            asset = _call_vnstock(self._asset, market, symbol)
             try:
-                raw = asset.ohlcv(**kwargs)
+                raw = _call_vnstock(asset.ohlcv, **kwargs)
             except TypeError:
                 # Compatibility with adapters using length instead of count.
                 if 'count' in kwargs:
                     kwargs['length'] = kwargs.pop('count')
-                raw = asset.ohlcv(**kwargs)
+                raw = _call_vnstock(asset.ohlcv, **kwargs)
         candles = [item for row in _records(raw) if (item := normalize_candle(row)) is not None]
         candles = aggregate_candles(candles, output_interval)
         if from_time is not None:
@@ -376,36 +407,14 @@ class VnstockGateway:
         symbols = [symbol for symbol in dict.fromkeys(symbols) if symbol]
         if not symbols:
             return {}
-        market, _ = self._ensure_clients()
-        if interval == '1d':
-            try:
-                with self._lock:
-                    raw = market.quote(symbols)
-                result: dict[str, Candle] = {}
-                now = int(time.time())
-                for row in _records(raw):
-                    symbol = _normalize_symbol(str(_first(row, ('symbol', 'ticker', 'code')) or ''))
-                    if not symbol:
-                        continue
-                    price = _finite(_first(row, ('price', 'last_price', 'lastprice', 'match_price', 'matchprice', 'close')))
-                    if price is None or price <= 0:
-                        continue
-                    open_ = _finite(_first(row, ('open', 'open_price', 'openprice'))) or price
-                    high = _finite(_first(row, ('high', 'high_price', 'highprice'))) or max(open_, price)
-                    low = _finite(_first(row, ('low', 'low_price', 'lowprice'))) or min(open_, price)
-                    volume = _finite(_first(row, ('volume', 'total_volume', 'totalvolume', 'match_volume', 'matchvolume')))
-                    stamp = _timestamp(_first(row, ('time', 'datetime', 'date', 'trading_date', 'tradingdate', 'timestamp'))) or now
-                    result[symbol] = Candle(stamp, open_, max(high, open_, price), min(low, open_, price), price, volume)
-                if result:
-                    return result
-            except Exception:
-                pass
         result: dict[str, Candle] = {}
         for symbol in symbols:
             try:
                 candles = self.history(symbol, interval, 2)
                 if candles:
                     result[symbol] = candles[-1]
+            except VnstockQuotaError:
+                raise
             except Exception:
                 continue
         return result
@@ -433,6 +442,8 @@ async def symbols_handler(request: web.Request) -> web.Response:
     try:
         items = await asyncio.to_thread(GATEWAY.symbols, query, limit)
         return _json({'symbols': [asdict(item) for item in items]})
+    except VnstockQuotaError as exc:
+        return _json({'message': str(exc)}, 429)
     except Exception as exc:
         return _json({'message': str(exc)}, 502)
 
@@ -451,6 +462,8 @@ async def history_handler(request: web.Request) -> web.Response:
             'source': 'vnstock-unified',
             'candles': [asdict(item) for item in candles],
         })
+    except VnstockQuotaError as exc:
+        return _json({'message': str(exc)}, 429)
     except ValueError as exc:
         return _json({'message': str(exc)}, 400)
     except Exception as exc:
@@ -469,6 +482,8 @@ async def latest_handler(request: web.Request) -> web.Response:
             'source': 'vnstock-unified',
             'candles': {symbol: asdict(candle) for symbol, candle in latest.items()},
         })
+    except VnstockQuotaError as exc:
+        return _json({'message': str(exc)}, 429)
     except Exception as exc:
         return _json({'message': str(exc)}, 502)
 

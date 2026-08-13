@@ -34,7 +34,7 @@ describe('lazy chart provider lifecycle', () => {
     const code = await transformedWorkstation();
     expect(code).toContain("type VnstockConnectionState = 'idle' | 'checking' | 'connected' | 'offline';");
     expect(code).toContain("let vnstockConnectionState: VnstockConnectionState = 'idle';");
-    expect(code).toContain("if (await reportVnstockHealth()) setActiveProvider('vnstock');");
+    expect(code).toContain("showProviderActivationError('vnstock'");
     expect(code).not.toContain('refreshProviderUi();\nvoid reportVnstockHealth(false);');
   });
 
@@ -49,9 +49,22 @@ describe('lazy chart provider lifecycle', () => {
     const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
     const code = await transformedWorkstation();
     expect(main).toContain("const ACTIVE_PROVIDER_KEY = 'l2chart.priceProvider';");
+    expect(main).toContain("const PROVIDER_ENABLED_KEY = 'l2chart.priceProviderEnabled';");
+    expect(main).toContain("let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';");
+    expect(main).toContain("let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';");
     expect(main).toContain('localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);');
     expect(code).toContain("if (activeProvider === 'fiinquant') {");
     expect(code).toContain("} else if (activeProvider === 'vnstock') {");
+  });
+
+  it('renders provider controls as persistent switches and disables data access when off', async () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const code = await transformedWorkstation();
+    expect(main).toContain("action.setAttribute('role', 'switch');");
+    expect(main).toContain("action.setAttribute('aria-checked', String(isOn));");
+    expect(main).toContain("localStorage.setItem(PROVIDER_ENABLED_KEY, 'false');");
+    expect(main).toContain('if (!providerEnabled) {');
+    expect(code).toContain("showProviderActivationError('vnstock'");
   });
 
   it('opens scanner results without loading hidden or stale symbols', async () => {
@@ -65,6 +78,14 @@ describe('lazy chart provider lifecycle', () => {
     const switchProvider = code.indexOf('setActiveProvider(targetProvider, true);');
     expect(stageSymbol).toBeGreaterThan(-1);
     expect(switchProvider).toBeGreaterThan(stageSymbol);
+  });
+
+  it('opens Vietnamese scanner results with the Vnstock chart provider', async () => {
+    const code = await transformedWorkstation();
+    expect(code).toContain("fiinquant: 'vnstock'");
+    expect(code).toContain("vn_eod: 'vnstock'");
+    expect(code).toContain("vnstock: 'vnstock'");
+    expect(code).toContain("if (targetProvider === 'vnstock' && !(await reportVnstockHealth(false))) return;");
   });
 
   it('gates persisted FiinQuant startup before chart and watchlist data requests', async () => {
@@ -105,6 +126,18 @@ describe('lazy chart provider lifecycle', () => {
     expect(fiinQuantReturn).toBeGreaterThan(clearSubscriptions);
     expect(providerLookup).toBeGreaterThan(fiinQuantReturn);
     expect(bulkSubscription).toBeGreaterThan(providerLookup);
+  });
+
+  it('lets Vnstock schedule the watchlist without bulk history seeding', async () => {
+    const code = await transformedWorkstation();
+    const watchlistStart = code.indexOf('function syncWatchlistFeeds(seedSymbols: string[] = []): void {');
+    const watchlistBlock = code.slice(watchlistStart, watchlistStart + 5000);
+    const bulkSubscription = watchlistBlock.indexOf('provider.feed.subscribeMany');
+    const vnstockReturn = watchlistBlock.indexOf("if (activeProvider === 'vnstock') return;");
+    const seedQueue = watchlistBlock.indexOf('const seedQueue =');
+    expect(bulkSubscription).toBeGreaterThan(-1);
+    expect(vnstockReturn).toBeGreaterThan(bulkSubscription);
+    expect(seedQueue).toBeGreaterThan(vnstockReturn);
   });
 
   it('upgrades a stale managed FiinQuant environment to the pinned provider stack', () => {
