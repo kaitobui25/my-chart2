@@ -125,6 +125,31 @@ jobs:
           status=${PIPESTATUS[0]}
           exit "$status"
 
+      - name: Collapse agent commits into pending changes
+        if: steps.state.outputs.should_run == 'true'
+        env:
+          TARGET_SHA: ${{ steps.state.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+
+          current_head="$(git rev-parse HEAD)"
+          if [ "$current_head" = "$TARGET_SHA" ]; then
+            echo "OpenCode left HEAD unchanged."
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "$TARGET_SHA" "$current_head"; then
+            echo "::error::OpenCode moved HEAD away from the target history; refusing to normalize it."
+            exit 1
+          fi
+
+          agent_commit_count="$(git rev-list --count "${TARGET_SHA}..${current_head}")"
+          echo "OpenCode created ${agent_commit_count} local commit(s); collapsing them into one pending docs change."
+
+          # Preserve the agent's file edits but remove every agent-created commit from history.
+          # The validated commit step below is the only place allowed to create a docs commit.
+          git reset --mixed "$TARGET_SHA"
+
       - name: Detect semantic doc changes
         if: steps.state.outputs.should_run == 'true'
         id: semantic
@@ -240,6 +265,11 @@ jobs:
           TARGET_SHA: ${{ steps.state.outputs.target_sha }}
         run: |
           set -euo pipefail
+
+          if [ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]; then
+            echo "::error::HEAD moved after normalization; refusing to push multiple commits."
+            exit 1
+          fi
 
           git fetch --prune origin main
           remote_main_sha="$(git rev-parse origin/main)"
