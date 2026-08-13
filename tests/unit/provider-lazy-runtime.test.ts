@@ -45,13 +45,14 @@ describe('lazy chart provider lifecycle', () => {
     expect(code).toContain("FiinQuant chưa kết nối. Bấm Dùng để khởi động sidecar.");
   });
 
-  it('restores only the provider persisted by the workstation', async () => {
+  it('restores the provider from auto save before the regular workstation preference', async () => {
     const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
     const code = await transformedWorkstation();
     expect(main).toContain("const ACTIVE_PROVIDER_KEY = 'l2chart.priceProvider';");
     expect(main).toContain("const PROVIDER_ENABLED_KEY = 'l2chart.priceProviderEnabled';");
-    expect(main).toContain("let providerEnabled = localStorage.getItem(PROVIDER_ENABLED_KEY) === 'true';");
-    expect(main).toContain("let activeProvider: PriceProviderId = providerEnabled ? readActiveProvider() : 'demo';");
+    expect(main).toContain('let providerEnabled = autoSaveWorkspaceAtStartup?.provider.enabled');
+    expect(main).toContain('let activeProvider: PriceProviderId = autoSaveWorkspaceAtStartup?.provider.id');
+    expect(main).toContain("?? (providerEnabled ? readActiveProvider() : 'demo');");
     expect(main).toContain('localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);');
     expect(code).toContain("if (activeProvider === 'fiinquant') {");
     expect(code).toContain("} else if (activeProvider === 'vnstock') {");
@@ -65,6 +66,47 @@ describe('lazy chart provider lifecycle', () => {
     expect(main).toContain("localStorage.setItem(PROVIDER_ENABLED_KEY, 'false');");
     expect(main).toContain('if (!providerEnabled) {');
     expect(code).toContain("showProviderActivationError('vnstock'");
+  });
+
+  it('keeps the compact Auto save row at the top after rebuilding the overflow menu', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const toolbar = main.slice(
+      main.indexOf('function setupToolbarOverflow()'),
+      main.indexOf('function defaultPreferences()'),
+    );
+    const finalMenuReset = toolbar.lastIndexOf('menu.replaceChildren();');
+    const autoSaveMount = toolbar.indexOf('menu.appendChild(autoSaveSection);', finalMenuReset);
+    const overflowRows = toolbar.indexOf('for (const entry of entries)', finalMenuReset);
+    expect(finalMenuReset).toBeGreaterThan(-1);
+    expect(autoSaveMount).toBeGreaterThan(finalMenuReset);
+    expect(autoSaveMount).toBeLessThan(overflowRows);
+    expect(toolbar).not.toContain('toolbar-more-save-button');
+  });
+
+  it('keeps replay state out of auto save snapshots and startup restore', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const snapshotType = main.slice(
+      main.indexOf('interface AutoSaveWorkspaceSnapshot'),
+      main.indexOf('const marketHub = new MarketHub();'),
+    );
+    const snapshotWriter = main.slice(
+      main.indexOf('function saveAutoSaveWorkspaceSnapshot()'),
+      main.indexOf('function configureAutoSaveTimer()'),
+    );
+    expect(snapshotType).not.toContain('replay:');
+    expect(snapshotWriter).not.toContain('replaySession');
+    expect(main).not.toContain('autoSaveWorkspaceAtStartup?.replay');
+  });
+
+  it('shows replay day labels independently of candle rendering mode', () => {
+    const main = readFileSync(path.resolve('examples/workstation/main.ts'), 'utf8');
+    const refreshLabels = main.slice(
+      main.indexOf('function refreshReplayDayLabels('),
+      main.indexOf('function createTileForSlot('),
+    );
+    expect(refreshLabels).toContain("visible[0].interval === '1M'");
+    expect(refreshLabels).toContain("visible[1].interval === '1d'");
+    expect(refreshLabels).not.toContain(".mode === 'candles'");
   });
 
   it('opens scanner results without loading hidden or stale symbols', async () => {

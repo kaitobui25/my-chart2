@@ -41,7 +41,17 @@ test('horizontal two-chart layout shares one replay clock', async ({ browser }) 
 
   await page.goto('http://127.0.0.1:53173/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__L2CHART_ASSISTANT__?.getContext() !== null);
-  await page.locator('#layouts button[data-layout="2h"]').click();
+  const sourceButton = page.getByRole('button', { name: /Configure market data source/ });
+  await sourceButton.click();
+  await page.getByRole('switch', { name: /Demo/ }).click();
+  await expect(sourceButton).toHaveAccessibleName(/Demo/);
+  await page.locator('#provider-close').click();
+
+  const stackedLayoutButton = page.locator('#layouts button[data-layout="2h"]');
+  if (!await stackedLayoutButton.isVisible()) {
+    await page.getByRole('button', { name: 'More tools' }).click();
+  }
+  await stackedLayoutButton.click();
 
   const allTiles = page.locator('#charts > .tile');
   const firstTile = allTiles.nth(0);

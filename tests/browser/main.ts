@@ -1,4 +1,11 @@
-import { L2Chart, lightTheme, type Candle, type PriceSeriesMode, type SerializedDrawing } from '../../src';
+import {
+  L2Chart,
+  lightTheme,
+  type Candle,
+  type ManualPriceViewport,
+  type PriceSeriesMode,
+  type SerializedDrawing,
+} from '../../src';
 
 const container = document.getElementById('chart');
 if (!container) throw new Error('Missing chart fixture container');
@@ -30,6 +37,10 @@ interface ChartTestState {
 
 interface ChartTestApi {
   state(): ChartTestState;
+  priceViewport(): ManualPriceViewport | null;
+  refreshData(): void;
+  prependHistory(): void;
+  fitPriceScale(): void;
   updateLatest(close: number): void;
   appendCandle(): void;
   setMode(mode: PriceSeriesMode): void;
@@ -67,6 +78,27 @@ window.chartTest = {
     chartRootCount: container.childElementCount,
     mode: chart.mainSeries.mode,
   }),
+  priceViewport: () => chart.panes[0]?.priceScale.captureManualViewport() ?? null,
+  refreshData: () => {
+    chart.setData(chart.getCandles().map((candle) => ({ ...candle })));
+  },
+  prependHistory: () => {
+    const first = chart.getCandles()[0];
+    if (!first) return;
+    chart.prependData(Array.from({ length: 5 }, (_, offset) => {
+      const time = first.time - (5 - offset) * 60;
+      const close = first.open - (5 - offset) * 0.2;
+      return {
+        time,
+        open: close - 0.4,
+        high: close + 0.8,
+        low: close - 0.8,
+        close,
+        volume: 900 + offset,
+      };
+    }));
+  },
+  fitPriceScale: () => chart.fitPriceScale(),
   updateLatest: (close) => {
     const current = chart.getCandles();
     const latest = current[current.length - 1];

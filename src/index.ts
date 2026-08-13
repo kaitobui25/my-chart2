@@ -1,11 +1,14 @@
+export { L2Chart } from './core/stable-chart';
 export {
-  L2Chart,
   type ChartOptions,
   type CrosshairEvent,
   type BarClickEvent,
   type VisibleRangeChangeEvent,
   type ChartMarketQuote,
   type IndicatorAppearance,
+  type BarLabel,
+  type BarLabelStyle,
+  type BarProgressMarker,
 } from './core/chart';
 export {
   type DrawingTool,
@@ -41,7 +44,11 @@ export {
   type Params,
 } from './indicators/registry';
 export { TimeScale } from './core/time-scale';
-export { PriceScale, type PriceScaleMode } from './core/price-scale';
+export {
+  PriceScale,
+  type PriceScaleMode,
+  type ManualPriceViewport,
+} from './core/price-scale';
 export { getChartLocale, setChartLocale, type ChartLocale } from './core/i18n';
 export { darkTheme, lightTheme, type Theme, type Candle, type LinePoint } from './core/types';
 export { heikinAshi, heikinAshiCandle } from './core/heikin-ashi';

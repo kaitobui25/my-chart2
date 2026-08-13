@@ -2,6 +2,11 @@ import { niceStep, decimalsForStep, formatPrice } from './utils';
 
 export type PriceScaleMode = 'regular' | 'percent' | 'indexed' | 'log';
 
+export interface ManualPriceViewport {
+  topPrice: number;
+  bottomPrice: number;
+}
+
 /** Vertical price → pixel mapping for one pane. Auto-scales to the visible range. */
 export class PriceScale {
   height = 0;
@@ -74,6 +79,29 @@ export class PriceScale {
     const deltaValue = (deltaPx / this.height) * range * (this.inverted ? -1 : 1);
     this.min += deltaValue;
     this.max += deltaValue;
+    this.manual = true;
+  }
+
+  /**
+   * Capture only an explicitly user-controlled viewport. Auto-scale state is
+   * intentionally omitted so background data refreshes can continue autoscaling.
+   */
+  captureManualViewport(): ManualPriceViewport | null {
+    if (!this.manual || this.height <= 0) return null;
+    return {
+      topPrice: this.priceFor(0),
+      bottomPrice: this.priceFor(this.height),
+    };
+  }
+
+  /** Restore a viewport previously captured with `captureManualViewport()`. */
+  restoreManualViewport(viewport: ManualPriceViewport | null): void {
+    if (!viewport) return;
+    const top = this.transform(viewport.topPrice);
+    const bottom = this.transform(viewport.bottomPrice);
+    if (!Number.isFinite(top) || !Number.isFinite(bottom) || top === bottom) return;
+    this.min = Math.min(top, bottom);
+    this.max = Math.max(top, bottom);
     this.manual = true;
   }
 

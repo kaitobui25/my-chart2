@@ -47,6 +47,43 @@ test('renders on Canvas and supports wheel zoom and pointer pan', async ({ page 
   ).not.toBe(beforePan);
 });
 
+test('keeps manual vertical pan across data refresh and history prepend', async ({ page }) => {
+  const canvas = page.locator('#chart canvas').first();
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  expect(await page.evaluate(() => window.chartTest.priceViewport())).toBeNull();
+
+  const x = box.x + box.width * 0.55;
+  const y = box.y + box.height * 0.5;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + 110, { steps: 4 });
+  await page.mouse.up();
+
+  const afterDrag = await page.evaluate(() => window.chartTest.priceViewport());
+  expect(afterDrag).not.toBeNull();
+  if (!afterDrag) return;
+
+  // Simulates IndexedDB-first rendering followed by a fresh network response.
+  await page.evaluate(() => window.chartTest.refreshData());
+  const afterRefresh = await page.evaluate(() => window.chartTest.priceViewport());
+  expect(afterRefresh?.topPrice).toBeCloseTo(afterDrag.topPrice, 8);
+  expect(afterRefresh?.bottomPrice).toBeCloseTo(afterDrag.bottomPrice, 8);
+
+  // Loading older history must preserve the same manual vertical viewport too.
+  await page.evaluate(() => window.chartTest.prependHistory());
+  await expect.poll(() => page.evaluate(() => window.chartTest.state().candleCount)).toBe(125);
+  const afterPrepend = await page.evaluate(() => window.chartTest.priceViewport());
+  expect(afterPrepend?.topPrice).toBeCloseTo(afterDrag.topPrice, 8);
+  expect(afterPrepend?.bottomPrice).toBeCloseTo(afterDrag.bottomPrice, 8);
+
+  // Explicit user fit/reset remains the only way back to automatic price scale.
+  await page.evaluate(() => window.chartTest.fitPriceScale());
+  expect(await page.evaluate(() => window.chartTest.priceViewport())).toBeNull();
+});
+
 test('renders Heikin Ashi from raw candles and keeps realtime updates working', async ({ page }) => {
   const before = await page.evaluate(() => window.chartTest.lastCloses());
   expect(before.raw).toBe(before.displayed);

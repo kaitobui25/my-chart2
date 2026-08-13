@@ -8,7 +8,8 @@ import {
   type BrowserHistoryCacheApi,
 } from './browser-history-cache';
 
-export const VNSTOCK_HISTORY_SOURCE = 'vnstock:ohlcv:v1';
+// v2 invalidates v1 coverage entries that could claim ranges the API never returned.
+export const VNSTOCK_HISTORY_SOURCE = 'vnstock:ohlcv:v2';
 const VNSTOCK_UTC_OFFSET_MINUTES = 7 * 60;
 const MAX_HISTORY_REQUEST = 50_000;
 const DEFAULT_POLL_MS = 5 * 60_000;
@@ -126,6 +127,28 @@ export class VnstockDatafeed implements Datafeed {
       }));
   }
 
+  async getCachedHistory(
+    symbol: string,
+    interval: string,
+    limit = 500,
+    range?: HistoryRange,
+  ): Promise<Candle[]> {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!normalizedSymbol) return [];
+    const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
+    if (!range) {
+      return this.cache.readLatest(VNSTOCK_HISTORY_SOURCE, normalizedSymbol, interval, requestedLimit);
+    }
+    return this.cache.readRange(
+      VNSTOCK_HISTORY_SOURCE,
+      normalizedSymbol,
+      interval,
+      Math.min(range.from, range.to),
+      Math.max(range.from, range.to),
+      requestedLimit,
+    );
+  }
+
   async getHistory(symbol: string, interval: string, limit = 500, range?: HistoryRange): Promise<Candle[]> {
     const normalizedSymbol = symbol.trim().toUpperCase();
     if (!normalizedSymbol) return [];
@@ -171,7 +194,12 @@ export class VnstockDatafeed implements Datafeed {
       try {
         const remote = await this.fetchHistory(normalizedSymbol, interval, requestedLimit, gap);
         fetched = mergeCandles(fetched, remote);
-        await this.persistHistory(normalizedSymbol, interval, remote, gap);
+        await this.persistHistory(
+          normalizedSymbol,
+          interval,
+          remote,
+          this.returnedCoverage(remote, interval),
+        );
       } catch (error) {
         const partial = mergeCandles(cached, fetched);
         if (partial.length > 0) {
