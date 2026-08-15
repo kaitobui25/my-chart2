@@ -1,7 +1,7 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-14  
-**Documented main:** `114f9e18697b73759cbacccae6eed8936d902335`  
+**Generated:** 2026-08-16  
+**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
 
