@@ -1,0 +1,125 @@
+REPLAY BINANCE / INDEXEDDB CONTENTION FIX PLAN
+Repo: kaitobui25/my-chart2
+Branch: fix/replay-binance-idb-contention
+Base: main @ 1ddc163c8f29129011920f48ce16bc67343c8352
+
+1. Problem statement
+- Replay can stay indefinitely at "Đang tải raw candles…" on Binance.
+- Runtime trace shows Binance REST already returned HTTP 200 while IndexedDB openCursor waits 17–30+ seconds before first success.
+- Replay enters phase=loading before Tile.enterReplay() is called, so live/background work can continue during raw/seed loading.
+- Binance getHistory() also places cache reads/writes on the user-visible critical path: cache read -> network gap fill -> await cache write -> cache reread -> return.
+- Vnstock uses the same browser cache, but it creates much less concurrent DB traffic; therefore the lifecycle race is exposed much more reliably by Binance.
+
+2. Goals
+- Replay loading must not compete with new live/background chart work once a start candle has been selected.
+- Slow/stuck IndexedDB must never hold Binance market history or Replay hostage.
+- Keep behavior provider-neutral at the Replay lifecycle layer.
+- Keep Binance cache as an optimization, not a correctness dependency.
+- Preserve existing cache reuse, replay projections, history seed behavior, and stale-load protection.
+- Keep changes small, explicit, testable, and maintainable.
+
+3. Non-goals
+- Do not add Binance-specific conditionals to Replay session logic.
+- Do not rewrite BrowserHistoryCache globally.
+- Do not change Vnstock/FiinQuant behavior unless shared Replay lifecycle requires it.
+- Do not remove IndexedDB caching.
+- Do not change Replay clock/projection semantics.
+
+4. Fix design
+
+4.1 Replay lifecycle: freeze participants before raw history I/O
+Current:
+  select start
+    -> phase=loading
+    -> getHistory(raw)
+    -> load display seeds
+    -> participant.enterReplay()
+    -> paused
+
+Target:
+  select start
+    -> validate replay window/size
+    -> phase=loading
+    -> participant.enterReplay() for every participant
+       - invalidates Tile loadToken
+       - stops current UI loading state
+       - sets replayActive=true
+       - unsubscribes realtime/quotes
+       - blocks future loadOlderHistory/realtime-gap scheduling
+    -> getHistory(raw)
+    -> load display seeds
+    -> setReplayData()
+    -> paused
+
+Implementation:
+- Add a small session state flag (participantsPrepared / participantsEntered).
+- Add private prepareParticipantsForReplay() helper.
+- Call it exactly once after all synchronous validation and before the first awaited raw history request.
+- Remove the late enterReplay() call from the success loop.
+- On load failure/cancel after preparation, restore participants with leaveReplay(true).
+- On stop during loading, existing loadToken invalidation plus leaveReplay(reload) must prevent stale async completion from re-entering Replay.
+- Keep early validation failures (before preparation) side-effect free.
+
+4.2 Binance cache: bounded reads
+- Add configurable cacheReadTimeoutMs to BinanceDatafeedOptions.
+- Default: 1000 ms.
+- Add a small generic helper that resolves a cache promise to a fallback value when cache rejects or the timeout expires.
+- Underlying IndexedDB request may still finish later, but the caller no longer waits for it.
+- Use bounded cache reads in getCachedHistory() and every getHistory() cache-read path.
+- On timeout, treat cache as a miss and continue with Binance REST.
+
+4.3 Binance cache: non-blocking writes
+- Network data is authoritative for the current request; writing it to IndexedDB is an optimization.
+- Replace awaited cache writes on getHistory() critical paths with a fire-and-forget persistence helper that catches errors.
+- For fixed-step range gap filling, accumulate fetched candles and schedule one background cache write after gap fetching.
+- Do not change websocket closed-candle writes, which are already fire-and-forget.
+
+4.4 Remove redundant final Binance cache reread
+Current fixed-step range path:
+  read cached -> fetch gaps -> write gaps -> read same range from cache again -> merge
+
+Target:
+  bounded read cached -> fetch gaps -> schedule one background write -> merge cached + fetched -> return
+
+5. Failure / cancellation behavior
+- If raw history fails after participants were frozen: cancel session, leaveReplay(true), reload normal market data.
+- If user presses Stop while raw history is still pending: increment session loadToken, leaveReplay(reload), ignore stale completion.
+- Cache timeout is not an error; it is a cache miss.
+- Binance REST timeout/error behavior remains unchanged.
+
+6. Regression tests
+- Replay: participant freezes before raw load resolves.
+- Replay: raw load failure restores live mode and reloads.
+- Replay: stop during loading ignores stale completion.
+- Binance: stalled readRange does not block REST history.
+- Binance: stalled readLatest does not block latest history.
+- Binance: stalled write does not block returned history.
+- Binance: fixed-step range does not require final cache reread.
+- Keep all existing replay/provider tests passing.
+
+7. Full verification
+- git diff --check
+- npm run typecheck
+- npm run test:unit
+- npm run build:demo
+- npm run test:package
+- npm audit --audit-level=high
+- npm run test:browser
+- Python sidecar tests
+- secrets scan
+- docs validation
+
+8. Acceptance criteria
+- Binance Replay no longer waits indefinitely on IndexedDB after REST data is available.
+- During Replay phase=loading, participants are already replayActive and no new chart older-history/realtime work is scheduled.
+- Failed/cancelled Replay returns cleanly to normal live mode.
+- Vnstock and other providers keep working because the Replay lifecycle change is provider-neutral.
+- Binance cache remains functional when fast, but a slow cache cannot delay user-visible history beyond the configured cache-read deadline.
+- All regression tests and full GitHub Actions CI pass.
+
+9. Maintainability rules
+- Keep timeout logic inside BinanceDatafeed rather than scattering Promise.race calls.
+- Keep replay preparation/rollback logic inside SyncedReplaySession rather than provider-specific UI code.
+- No magic provider checks in Replay.
+- No duplicated state transitions.
+- Use descriptive helpers and comments only where concurrency intent is non-obvious.
