@@ -1,9 +1,19 @@
 # Recent Meaningful Changes
 
-**Generated:** 2026-08-16  
-**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
+**Generated:** 2026-08-20  
+**Documented main:** `1ddc163c8f29129011920f48ce16bc67343c8352`  
 
 This is a bounded implementation-oriented recap, not a complete commit log. It omits formatting/no-op/temporary-workflow churn and focuses on behavior or architecture that matters when entering the project.
+
+## 2026-08-19
+
+### Institutional flow indicator (Dòng tiền tổ chức)
+
+A new `institutional-flow` indicator renders monthly net foreign and proprietary ("tự doanh") cash flow as a signed, stacked histogram pinned to a fixed region at the top of the main pane. The series deliberately opts out of PriceScale so flow values can never distort stock-price autoscaling. It becomes eligible only when the chart runs on the Vnstock provider with a monthly (1M) interval and a listed 3-letter Vietnamese equity ticker; calendar months are aligned using Vietnamese time regardless of browser/OS timezone. The zero line is draggable (the moved position is patched back into the saved indicator params) and value labels use billion-implied formatting, with `tr` appended to million-scale values.
+
+The indicator runtime context gained per-chart provider tracking and a direct-manipulation parameter-patch channel in addition to the existing symbol tracking. Data is fetched through the workstation `/stock-flow-api` route, which proxies to an external stockdata web service (`GET /api/chart-flow`, default `http://127.0.0.1:8765`, overridable with `STOCKDATA_WEB_URL`), with a 5-minute browser cache and an 8-second timeout.
+
+Relevant implementation: `src/indicators/builtin/institutional-flow.ts`, `institutional-flow-model.ts`, `institutional-flow-client.ts`, `institutional-flow-series.ts`, `src/indicators/runtime-context.ts`, `examples/workstation/stock-flow/vite-plugin.ts`, `examples/workstation/vite.config.ts`, `tests/unit/institutional-flow-model.test.ts`, `tests/unit/institutional-flow-series.test.ts`, `tests/browser/institutional-flow.spec.ts`.
 
 ## 2026-08-13
 

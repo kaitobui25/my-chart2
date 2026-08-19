@@ -1,7 +1,7 @@
 # my-chart2 — Current State
 
-**Generated:** 2026-08-16  
-**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
+**Generated:** 2026-08-20  
+**Documented main:** `1ddc163c8f29129011920f48ce16bc67343c8352`  
 **Documentation role:** canonical snapshot of the implementation at the commit above.
 
 `docs/current/` describes what the repository currently implements. Historical design and build plans under `agent/plan/` are useful context but are not implementation evidence.
@@ -24,6 +24,7 @@ The stable chart package remains under `src/`; provider- and workstation-specifi
 - FiinQuant cache-first chart history with lazy/background refresh for daily/week/month data, plus range-aware browser cache coverage used by Replay. Evidence: `examples/providers/fiinquant.ts`.
 - Vnstock chart provider with shared browser history cache and polling-based latest-candle updates. Evidence: `examples/providers/vnstock.ts`, `examples/sidecars/vnstock/`.
 - P/E indicator combining Vnstock quarterly fundamentals (reported-P/E markers) with a FiinQuant daily valuation line, each backed by its own IndexedDB cache. Evidence: `src/indicators/builtin/pe.ts`, `examples/sidecars/fiinquant/fiinquant_sidecar.py`, `examples/sidecars/vnstock/vnstock_sidecar.py`.
+- Institutional-flow indicator ("Dòng tiền tổ chức"): monthly net foreign and proprietary cash-flow histogram on Vnstock 1M charts for Vietnamese equity tickers, rendered in a fixed pane region so it never distorts price autoscaling. Evidence: `src/indicators/builtin/institutional-flow.ts`, `examples/workstation/stock-flow/vite-plugin.ts`.
 - TradingView-style scanner UI with price, volume, optional market-cap and Week/Month Heikin Ashi filters. Evidence: `examples/workstation/scanner/index.ts`.
 - Scanner backend using aiohttp + SQLite with a two-stage filter pipeline. Evidence: `examples/sidecars/scanner/engine.py`, `examples/sidecars/scanner/db.py`.
 - Vietnamese-stock local scanner source `vn_eod`: adjusted CafeF EOD data is imported once, then scans run locally without market-data network calls. Evidence: `examples/sidecars/scanner/cafef_eod.py`, `examples/sidecars/scanner/local_eod_provider.py`.

@@ -1,7 +1,7 @@
 # Current Feature Inventory
 
-**Generated:** 2026-08-16  
-**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
+**Generated:** 2026-08-20  
+**Documented main:** `1ddc163c8f29129011920f48ce16bc67343c8352`  
 
 Status vocabulary used here:
 
@@ -36,6 +36,9 @@ Status vocabulary used here:
 | P/E indicator (v1) | Verified at repository integration level | `src/indicators/builtin/pe.ts`; registered via `src/indicators/all.ts`; unit tests in `tests/unit/pe-indicator.test.ts`, `pe-load-policy.test.ts`, `pe-eligibility.test.ts`. Runtime P/E data still depends on Vnstock/FiinQuant credentials/access. |
 | P/E quarterly fundamentals markers | Implemented | quarterly Vnstock P/E rows rendered as markers with a reported-P/E legend; data via Vnstock sidecar `/fundamentals/pe` and IndexedDB cache `l2chart.fundamentals.v1` |
 | P/E daily valuation line | Implemented | raw FiinQuant daily valuation points mapped onto Day / Week / Month candles; data via FiinQuant sidecar `/valuation/stock` and IndexedDB cache `l2chart.valuations.v1` |
+| Institutional flow indicator (net foreign + proprietary cash flow) | Verified at repository integration level | `src/indicators/builtin/institutional-flow.ts`, `institutional-flow-model.ts`, `institutional-flow-client.ts`, `institutional-flow-series.ts`; registered via `src/indicators/all.ts`; unit tests in `tests/unit/institutional-flow-model.test.ts` and `institutional-flow-series.test.ts`, browser coverage in `tests/browser/institutional-flow.spec.ts`. Runtime data still requires the external stockdata web service behind the workstation `/stock-flow-api` proxy. |
+| Institutional flow data path | Implemented | browser → workstation `/stock-flow-api` Vite proxy → external stockdata web service `GET /api/chart-flow` (default `http://127.0.0.1:8765`, overridable via `STOCKDATA_WEB_URL`); 5-minute repository cache with 8-second timeout |
+| Institutional flow rendering and gating | Implemented | signed stacked histogram pinned to a fixed region above the main pane, deliberately excluded from PriceScale so flow can never distort price autoscaling; draggable zero line; eligible only for the Vnstock provider on a 1M interval for 3-letter Vietnamese equity tickers |
 | Synchronized multi-chart Replay | Verified | `examples/workstation/replay/`, replay tests and workstation browser coverage |
 | Replay future-leak protection during timeframe projection | Verified | `examples/workstation/replay/replay-projection.ts`, replay unit tests |
 | Replay + Heikin Ashi historical context preservation | Verified | seed-history behavior in `examples/workstation/replay/replay-session.ts` |
