@@ -32,6 +32,7 @@ export interface BinanceDatafeedOptions {
   fetchImpl?: typeof fetch;
   websocketFactory?: (url: string) => WebSocket;
   requestTimeoutMs?: number;
+  cacheReadTimeoutMs?: number;
 }
 
 interface BinanceKlinePayload {
@@ -76,6 +77,7 @@ const MAX_PAGE_SIZE = 1000;
 const MAX_HISTORY_REQUEST = 50_000;
 const SYMBOL_CACHE_MS = 30 * 60 * 1000;
 const RECONNECT_MAX_MS = 30_000;
+const DEFAULT_CACHE_READ_TIMEOUT_MS = 1000;
 
 function normalizedSymbol(symbol: string): string {
   return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -113,6 +115,20 @@ function rowToCandle(row: unknown): Candle | null {
     l: String(row[3]),
     c: String(row[4]),
     v: String(row[5]),
+  });
+}
+
+function resolveWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: T) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timeout);
+      resolve(value);
+    };
+    const timeout = globalThis.setTimeout(() => finish(fallback), Math.max(0, timeoutMs));
+    promise.then(finish, () => finish(fallback));
   });
 }
 
@@ -184,6 +200,7 @@ export class BinanceDatafeed implements Datafeed {
   private readonly fetchImpl: typeof fetch;
   private readonly websocketFactory: (url: string) => WebSocket;
   private readonly requestTimeoutMs: number;
+  private readonly cacheReadTimeoutMs: number;
   private readonly realtimeConnectedListeners = new Set<() => void>();
   private symbolCache: SymbolSearchResult[] | null = null;
   private symbolCacheAt = 0;
@@ -206,6 +223,7 @@ export class BinanceDatafeed implements Datafeed {
     this.fetchImpl = objectOptions.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.websocketFactory = objectOptions.websocketFactory ?? ((url) => new WebSocket(url));
     this.requestTimeoutMs = objectOptions.requestTimeoutMs ?? 10_000;
+    this.cacheReadTimeoutMs = Math.max(0, objectOptions.cacheReadTimeoutMs ?? DEFAULT_CACHE_READ_TIMEOUT_MS);
   }
 
   get cacheAvailable(): boolean {
@@ -234,14 +252,22 @@ export class BinanceDatafeed implements Datafeed {
     const normalized = normalizedSymbol(symbol);
     if (!normalized) return [];
     const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
-    if (!range) return this.cache.readLatest(this.market, normalized, interval, requestedLimit);
-    return this.cache.readRange(
-      this.market,
-      normalized,
-      interval,
-      Math.min(range.from, range.to),
-      Math.max(range.from, range.to),
-      requestedLimit,
+    if (!range) {
+      return this.readCache(
+        this.cache.readLatest(this.market, normalized, interval, requestedLimit),
+        [],
+      );
+    }
+    return this.readCache(
+      this.cache.readRange(
+        this.market,
+        normalized,
+        interval,
+        Math.min(range.from, range.to),
+        Math.max(range.from, range.to),
+        requestedLimit,
+      ),
+      [],
     );
   }
 
@@ -258,12 +284,15 @@ export class BinanceDatafeed implements Datafeed {
     const calendarInterval = isCalendarInterval(interval);
 
     if (!range) {
-      const cached = await this.cache.readLatest(this.market, normalized, interval, requestedLimit);
+      const cached = await this.readCache(
+        this.cache.readLatest(this.market, normalized, interval, requestedLimit),
+        [],
+      );
       const lastCached = cached[cached.length - 1]?.time;
       if (calendarInterval) {
         try {
           const remote = await this.fetchRecent(normalized, interval, requestedLimit);
-          await this.writeClosedCandles(normalized, interval, remote);
+          this.persistClosedCandles(normalized, interval, remote);
           return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
         } catch (error) {
           if (cached.length > 0) return cached;
@@ -281,12 +310,12 @@ export class BinanceDatafeed implements Datafeed {
             { from: missingFrom, to: currentBar },
             requestedLimit,
           );
-          await this.writeClosedCandles(normalized, interval, remote);
+          this.persistClosedCandles(normalized, interval, remote);
           return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
         }
 
         const remote = await this.fetchRecent(normalized, interval, requestedLimit);
-        await this.writeClosedCandles(normalized, interval, remote);
+        this.persistClosedCandles(normalized, interval, remote);
         return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
       } catch (error) {
         if (cached.length > 0) return cached;
@@ -296,12 +325,20 @@ export class BinanceDatafeed implements Datafeed {
 
     if (calendarInterval) {
       const requested = { from: Math.min(range.from, range.to), to: Math.max(range.from, range.to) };
-      const cached = await this.cache.readRange(
-        this.market, normalized, interval, requested.from, requested.to, requestedLimit,
+      const cached = await this.readCache(
+        this.cache.readRange(
+          this.market,
+          normalized,
+          interval,
+          requested.from,
+          requested.to,
+          requestedLimit,
+        ),
+        [],
       );
       try {
         const remote = await this.fetchRange(normalized, interval, requested, requestedLimit);
-        await this.writeClosedCandles(normalized, interval, remote);
+        this.persistClosedCandles(normalized, interval, remote);
         return mergeBinanceCandles(cached, remote)
           .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
           .slice(-requestedLimit);
@@ -316,13 +353,16 @@ export class BinanceDatafeed implements Datafeed {
     if (rangeFrom > rangeTo) return [];
     const effectiveFrom = Math.max(rangeFrom, rangeTo - (requestedLimit - 1) * step);
     const requested = { from: effectiveFrom, to: rangeTo };
-    const cached = await this.cache.readRange(
-      this.market,
-      normalized,
-      interval,
-      requested.from,
-      requested.to,
-      requestedLimit,
+    const cached = await this.readCache(
+      this.cache.readRange(
+        this.market,
+        normalized,
+        interval,
+        requested.from,
+        requested.to,
+        requestedLimit,
+      ),
+      [],
     );
     const gaps = missingBinanceHistoryRanges(cached, requested, step);
     let fetched: Candle[] = [];
@@ -337,18 +377,9 @@ export class BinanceDatafeed implements Datafeed {
           Math.min(requestedLimit, Math.max(1, gapBars)),
         );
         fetched = mergeBinanceCandles(fetched, remote);
-        await this.writeClosedCandles(normalized, interval, remote);
       }
-
-      const complete = await this.cache.readRange(
-        this.market,
-        normalized,
-        interval,
-        requested.from,
-        requested.to,
-        requestedLimit,
-      );
-      return mergeBinanceCandles(cached, complete, fetched)
+      this.persistClosedCandles(normalized, interval, fetched);
+      return mergeBinanceCandles(cached, fetched)
         .filter((candle) => candle.time >= requested.from && candle.time <= requested.to)
         .slice(-requestedLimit);
     } catch (error) {
@@ -453,6 +484,14 @@ export class BinanceDatafeed implements Datafeed {
       });
     this.symbolCacheAt = Date.now();
     return this.symbolCache;
+  }
+
+  private readCache<T>(promise: Promise<T>, fallback: T): Promise<T> {
+    return resolveWithin(promise, this.cacheReadTimeoutMs, fallback);
+  }
+
+  private persistClosedCandles(symbol: string, interval: string, candles: Candle[]): void {
+    void this.writeClosedCandles(symbol, interval, candles).catch(() => undefined);
   }
 
   private async writeClosedCandles(symbol: string, interval: string, candles: Candle[]): Promise<void> {
