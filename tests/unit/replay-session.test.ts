@@ -25,12 +25,24 @@ function idleReplayState(): ReplaySessionSnapshot {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 class TestParticipant implements ReplayParticipant {
   data: Candle[] = [];
   selecting = false;
   active = false;
   status = '';
   reloads = 0;
+  enterCalls = 0;
+  leaveCalls = 0;
   replayTime: number | null = null;
 
   constructor(
@@ -60,6 +72,7 @@ class TestParticipant implements ReplayParticipant {
   }
 
   enterReplay() {
+    this.enterCalls += 1;
     this.active = true;
   }
 
@@ -80,8 +93,10 @@ class TestParticipant implements ReplayParticipant {
   }
 
   leaveReplay(reload: boolean) {
+    this.leaveCalls += 1;
+    const wasActive = this.active;
     this.active = false;
-    if (reload) this.reloads += 1;
+    if (wasActive && reload) this.reloads += 1;
   }
 }
 
@@ -126,6 +141,106 @@ describe('SyncedReplaySession', () => {
     expect(state.phase).toBe('selecting');
     expect(ready.selecting).toBe(true);
     expect(empty.selecting).toBe(true);
+  });
+
+  it('freezes participant market work before raw history finishes loading', async () => {
+    const selectedTime = utc('2026-08-07T10:30:00Z');
+    const participant = new TestParticipant('BTCUSDT', '15m', selectedTime);
+    const raw = deferred<Candle[]>();
+    let state = idleReplayState();
+    const feed: Datafeed = {
+      name: 'Binance test',
+      getHistory: vi.fn(() => raw.promise),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant],
+      getFeed: () => ({ feed, label: 'Binance', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: (next) => { state = next; },
+    });
+
+    expect(session.beginSelection()).toBe(true);
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(state.phase).toBe('loading'));
+    expect(participant.active).toBe(true);
+    expect(participant.selecting).toBe(false);
+    expect(participant.enterCalls).toBe(1);
+
+    raw.resolve(sourceCandles());
+    await vi.waitFor(() => expect(state.phase).toBe('paused'));
+    expect(participant.active).toBe(true);
+    expect(participant.enterCalls).toBe(1);
+  });
+
+  it('restores live mode when raw replay loading fails after preparation', async () => {
+    const selectedTime = utc('2026-08-07T10:30:00Z');
+    const participant = new TestParticipant('BTCUSDT', '15m', selectedTime);
+    let state = idleReplayState();
+    const feed: Datafeed = {
+      name: 'Binance test',
+      getHistory: vi.fn(async () => { throw new Error('raw load failed'); }),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant],
+      getFeed: () => ({ feed, label: 'Binance', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: (next) => { state = next; },
+    });
+
+    expect(session.beginSelection()).toBe(true);
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(state.error).toContain('raw load failed'));
+
+    expect(state.phase).toBe('idle');
+    expect(participant.active).toBe(false);
+    expect(participant.enterCalls).toBe(1);
+    expect(participant.leaveCalls).toBe(1);
+    expect(participant.reloads).toBe(1);
+  });
+
+  it('ignores stale raw history if replay is stopped while loading', async () => {
+    const selectedTime = utc('2026-08-07T10:30:00Z');
+    const participant = new TestParticipant('BTCUSDT', '15m', selectedTime);
+    const raw = deferred<Candle[]>();
+    let state = idleReplayState();
+    const feed: Datafeed = {
+      name: 'Binance test',
+      getHistory: vi.fn(() => raw.promise),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant],
+      getFeed: () => ({ feed, label: 'Binance', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: (next) => { state = next; },
+    });
+
+    expect(session.beginSelection()).toBe(true);
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(state.phase).toBe('loading'));
+    expect(participant.active).toBe(true);
+
+    session.stop(false);
+    expect(state.phase).toBe('idle');
+    expect(participant.active).toBe(false);
+    expect(participant.leaveCalls).toBe(1);
+    expect(participant.reloads).toBe(0);
+
+    raw.resolve(sourceCandles());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(state.phase).toBe('idle');
+    expect(participant.active).toBe(false);
+    expect(participant.enterCalls).toBe(1);
+    expect(participant.data).toEqual([]);
   });
 
   it('projects an empty monthly chart from the daily replay source', async () => {
@@ -273,5 +388,4 @@ describe('SyncedReplaySession', () => {
     expect(session.beginSelection()).toBe(false);
     expect(state.error).toContain('cung mot symbol');
   });
-
 });
