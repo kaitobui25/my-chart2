@@ -33,7 +33,7 @@ const DEFAULT_BASE_URL = 'http://127.0.0.1:8750';
 
 export function normalizeBinanceLocalSymbol(value: string): string {
   let symbol = value.trim().toUpperCase();
-  for (const separator of ['/', '-', '_']) symbol = symbol.replaceAll(separator, '');
+  for (const separator of ['/', '-', '_']) symbol = symbol.split(separator).join('');
   symbol = symbol.replace(/\s+/g, '');
   return /^[A-Z0-9]{5,20}$/.test(symbol) ? symbol : '';
 }
