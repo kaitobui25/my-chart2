@@ -8,7 +8,7 @@ The assistant is integrated into the workstation. It does not change the provide
 2. Install Codex CLI and sign in with ChatGPT.
 3. Run `npm run dev`.
 
-This single command starts the loopback-only Codex sidecar on `127.0.0.1:8788` and the complete workstation. On Windows, `scripts/windows/open-ai-chart.bat` remains a convenience shortcut for the same command.
+This single command starts the loopback-only Codex sidecar on `127.0.0.1:8788` and the complete workstation. On Windows, `open-ai-chart.bat` remains a convenience shortcut for the same command.
 
 ## Design
 
