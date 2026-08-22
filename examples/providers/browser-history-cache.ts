@@ -491,6 +491,19 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     }
   }
 
+  private async hasCurrentBinanceHistory(database: IDBDatabase): Promise<boolean> {
+    try {
+      const transaction = database.transaction(SERIES_STORE, 'readonly');
+      const series = await requestResult(
+        transaction.objectStore(SERIES_STORE).getAll() as IDBRequest<StoredSeries[]>,
+      );
+      return series.some((item) =>
+        item.source === BINANCE_SPOT_HISTORY_SOURCE || item.source === BINANCE_USDM_HISTORY_SOURCE);
+    } catch {
+      return false;
+    }
+  }
+
   private async markLegacyBinanceMigrated(database: IDBDatabase): Promise<void> {
     try {
       const transaction = database.transaction(META_STORE, 'readwrite');
@@ -507,6 +520,10 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
 
   private async migrateLegacyBinance(database: IDBDatabase): Promise<void> {
     if (await this.hasLegacyBinanceMigrationMarker(database)) return;
+    if (await this.hasCurrentBinanceHistory(database)) {
+      await this.markLegacyBinanceMigrated(database);
+      return;
+    }
     const legacy = await this.openLegacyBinanceDatabase();
     if (!legacy) {
       await this.markLegacyBinanceMigrated(database);
