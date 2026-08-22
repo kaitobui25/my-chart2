@@ -5,6 +5,7 @@ import {
   BinanceIdleRefreshCoordinator,
   type BinanceDatafeedOptions,
 } from './binance';
+import { BinanceHistoryCache } from './binance-cache';
 
 interface WorkstationIdleRunOptions {
   retryOnInterrupt?: boolean;
@@ -13,6 +14,7 @@ interface WorkstationIdleRunOptions {
 
 const DEFAULT_WORKSTATION_IDLE_MS = 650;
 const LATEST_RETRY_DELAY_MS = 150;
+const SPOT_FALLBACK_REST_BASE = 'https://api.binance.com';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, ms)));
@@ -78,12 +80,35 @@ export class WorkstationBinanceIdleRefreshCoordinator extends BinanceIdleRefresh
 
 /** Binance datafeed profile used only by the multi-chart workstation. */
 export class BinanceDatafeed extends BaseBinanceDatafeed {
+  private readonly fallbackLatestFeed: BaseBinanceDatafeed | null;
+
   constructor(options: BinanceDatafeedOptions = {}) {
+    const market = options.market ?? 'spot';
+    const cache = options.cache ?? new BinanceHistoryCache();
+    const refreshCoordinator = options.refreshCoordinator
+      ?? new WorkstationBinanceIdleRefreshCoordinator();
     super({
       ...options,
-      refreshCoordinator: options.refreshCoordinator
-        ?? new WorkstationBinanceIdleRefreshCoordinator(),
+      market,
+      cache,
+      refreshCoordinator,
     });
+    this.fallbackLatestFeed = market === 'spot' && !options.restBase
+      ? new BaseBinanceDatafeed({
+        ...options,
+        market,
+        cache,
+        restBase: SPOT_FALLBACK_REST_BASE,
+        refreshCoordinator,
+      })
+      : null;
+  }
+
+  override async clearCache(): Promise<void> {
+    await super.clearCache();
+    // Both feeds share the same persistent cache, but the fallback keeps its own
+    // short-lived recent snapshot map, so clear it too.
+    await this.fallbackLatestFeed?.clearCache();
   }
 
   override async getHistory(
@@ -95,14 +120,24 @@ export class BinanceDatafeed extends BaseBinanceDatafeed {
     try {
       return await super.getHistory(symbol, interval, limit, range);
     } catch (error) {
-      // In the base Binance feed, the internal request timeout is implemented by
-      // AbortController.abort(), so a timeout is surfaced as AbortError. Latest
-      // chart loads have no caller cancellation signal, therefore one retry is
-      // safe and prevents a transient 10s network stall from leaving a tile empty.
-      // Explicit range / load-older requests remain single-shot background work.
+      // The base Binance feed implements its request timeout with
+      // AbortController.abort(), so an internal timeout surfaces as AbortError.
+      // Latest chart loads have no caller cancellation signal here. Give them one
+      // second chance; for default Spot, use Binance's official primary REST base
+      // as a different network path. Explicit range/load-older work stays
+      // single-shot and low priority.
       if (range || !isAbortError(error)) throw error;
       await delay(LATEST_RETRY_DELAY_MS);
-      return super.getHistory(symbol, interval, limit, range);
+      if (!this.fallbackLatestFeed) return super.getHistory(symbol, interval, limit, range);
+      try {
+        return await this.fallbackLatestFeed.getHistory(symbol, interval, limit, range);
+      } catch (fallbackError) {
+        console.warn(`Binance Spot fallback latest load failed for ${symbol} ${interval}`, fallbackError);
+        // Preserve AbortError semantics so the workstation keeps the provider on
+        // and reports an interrupted load instead of treating fallback routing as
+        // a provider-fatal error.
+        throw error;
+      }
     }
   }
 }
