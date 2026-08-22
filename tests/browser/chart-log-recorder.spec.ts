@@ -13,6 +13,10 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   await expect(button).toBeVisible();
   await expect(button).toHaveText('LOG');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
+  const followsTrash = await page.locator('#global-drawing-toolbar-host .drawing-tool-button.danger').evaluate(
+    (trash) => trash.nextElementSibling?.classList.contains('chart-log-button') ?? false,
+  );
+  expect(followsTrash).toBe(true);
 
   await button.click();
   await expect(button).toHaveAttribute('aria-pressed', 'true');
@@ -22,7 +26,7 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   await page.evaluate(async () => {
     await fetch('/provider-runtime/health');
   });
-  await page.getByRole('button', { name: 'Chỉ báo' }).click();
+  await page.locator('#ind-btn').click();
 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Stop chart log and download' }).click();
@@ -54,7 +58,6 @@ test('starting a new chart log creates a fresh session', async ({ page }) => {
 
   const start = page.getByRole('button', { name: 'Start chart log' });
   await start.click();
-  console.log('outside-browser-console-does-not-enter-log');
   const firstDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Stop chart log and download' }).click();
   await firstDownload;
