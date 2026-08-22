@@ -78,6 +78,7 @@ import {
   DEFAULT_REPLAY_DAY_LABEL_COLORS,
 } from './replay/replay-day-labels';
 import { buildReplayMonthProgress } from './replay/replay-month-progress';
+import { CandleDataCoordinator, candleDatasetKey } from './data/candle-data-coordinator';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -265,6 +266,7 @@ interface AutoSaveWorkspaceSnapshot {
 }
 
 const marketHub = new MarketHub();
+const candleDataCoordinator = new CandleDataCoordinator();
 const paperEngine = new PaperTradingEngine(marketHub);
 let tradingWorkspace: TradingWorkspace | null = null;
 
@@ -2604,6 +2606,7 @@ class Tile implements ReplayParticipant {
   }
 
   enterReplay(): void {
+    candleDataCoordinator.noteDataActivity();
     this.loadToken += 1;
     this.loading = false;
     this.replayActive = true;
@@ -2746,6 +2749,10 @@ class Tile implements ReplayParticipant {
   async load(): Promise<void> {
     if (this.replayActive) return;
     const token = ++this.loadToken;
+    const symbol = this.symbol;
+    const interval = this.interval;
+    const rangeRequest = this.historyRange ? { ...this.historyRange } : undefined;
+    candleDataCoordinator.noteDataActivity();
     let finishCurrentLoad!: () => void;
     this.currentLoadPromise = new Promise<void>((resolve) => {
       finishCurrentLoad = resolve;
@@ -2756,6 +2763,7 @@ class Tile implements ReplayParticipant {
     this.historyPageRetryAfter = 0;
     let hadRenderableData = this.history.length > 0;
     let renderedCachedHistory = false;
+    let cachedSource = 'IndexedDB';
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
     this.renderMarketStatus();
@@ -2768,8 +2776,8 @@ class Tile implements ReplayParticipant {
 
     const providerId = activeProvider;
     const provider = currentFeed();
-    this.chart.setLegendTitle(`${this.symbol} · ${intervalLabel(this.interval)}`);
-    this.chart.setWatermark(this.symbol);
+    this.chart.setLegendTitle(`${symbol} · ${intervalLabel(interval)}`);
+    this.chart.setWatermark(symbol);
     if (!provider.feed) {
       this.history = [];
       this.chart.setData([]);
@@ -2781,14 +2789,15 @@ class Tile implements ReplayParticipant {
       return;
     }
 
-    this.setFeedStatus('loading', this.historyRange ? 'đang tải lịch sử...' : 'đang tải...');
-    this.setLoadState('loading', `${this.symbol} · ${this.interval}`);
+    this.setFeedStatus('loading', rangeRequest ? 'đang tải lịch sử...' : 'đang tải...');
+    this.setLoadState('loading', `${symbol} · ${interval}`);
     try {
-      const step = intervalApproxSeconds(this.interval);
-      const pageSize = historyPageSizeFor(this.interval);
-      const range = this.historyRange ? { ...this.historyRange } : undefined;
-      const requestedBars = range ? estimateIntervalBars(range.from, range.to, this.interval) + 2 : pageSize;
+      const step = intervalApproxSeconds(interval);
+      const pageSize = historyPageSizeFor(interval);
+      const range = rangeRequest;
+      const requestedBars = range ? estimateIntervalBars(range.from, range.to, interval) + 2 : pageSize;
       const limit = range ? Math.min(20000, Math.max(50, requestedBars)) : pageSize;
+      const latestKey = range ? null : candleDatasetKey(providerId, symbol, interval);
       const renderHistory = (candles: Candle[], fitContent: boolean) => {
         this.chart.setIntervalSec(step);
         this.history = candles.map((candle) => ({ ...candle }));
@@ -2796,7 +2805,25 @@ class Tile implements ReplayParticipant {
         if (fitContent) this.chart.fitContent();
         this.publishCandle(this.history[this.history.length - 1], provider.label);
       };
-      const cached = await provider.feed.getCachedHistory?.(this.symbol, this.interval, limit, range) ?? [];
+
+      let cached: Candle[] = [];
+      if (latestKey) {
+        const memoryCandles = candleDataCoordinator.peek(latestKey, limit);
+        if (memoryCandles) {
+          cached = memoryCandles;
+          cachedSource = 'RAM';
+        } else {
+          try {
+            cached = await provider.feed.getCachedHistory?.(symbol, interval, limit) ?? [];
+          } catch (cacheError) {
+            console.warn(`Unable to read cached ${provider.label} history for ${symbol} ${interval}`, cacheError);
+          }
+          if (token !== this.loadToken) return;
+          if (cached.length > 0) candleDataCoordinator.remember(latestKey, cached, limit);
+        }
+      } else {
+        cached = await provider.feed.getCachedHistory?.(symbol, interval, limit, range) ?? [];
+      }
       if (token !== this.loadToken) return;
       const cachedCandles = range
         ? cached.filter((candle) => candle.time >= range.from && candle.time <= range.to)
@@ -2806,10 +2833,19 @@ class Tile implements ReplayParticipant {
         hadRenderableData = true;
         renderedCachedHistory = true;
         this.setLoadState(null);
-        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        this.setFeedStatus('sample', `${provider.label} · ${cachedSource}`);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (token !== this.loadToken) return;
       }
-      const loaded = await provider.feed.getHistory(this.symbol, this.interval, limit, range);
+
+      const loaded = latestKey
+        ? await candleDataCoordinator.loadLatest(
+          latestKey,
+          limit,
+          (requestedLimit) => provider.feed!.getHistory(symbol, interval, requestedLimit),
+          { refresh: true },
+        )
+        : await provider.feed.getHistory(symbol, interval, limit, range);
       if (token !== this.loadToken) return;
       const candles = range
         ? loaded.filter((candle) => candle.time >= range.from && candle.time <= range.to)
@@ -2817,7 +2853,7 @@ class Tile implements ReplayParticipant {
       if (candles.length === 0) {
         if (renderedCachedHistory) return;
         if (!hadRenderableData) this.history = [];
-        const message = `không có dữ liệu ${this.symbol}`;
+        const message = `không có dữ liệu ${symbol}`;
         this.setFeedStatus('error', message);
         this.setLoadState('error', message);
         return;
@@ -2834,7 +2870,7 @@ class Tile implements ReplayParticipant {
       this.realtimeConnectionUnsubscribe = provider.feed.onRealtimeConnected?.(() => {
         if (token === this.loadToken) void this.recoverRealtimeGap();
       }) ?? null;
-      this.unsubscribe = provider.feed.subscribe(this.symbol, this.interval, (c) => {
+      this.unsubscribe = provider.feed.subscribe(symbol, interval, (c) => {
         if (token !== this.loadToken || this.replayActive) return;
         const last = this.history[this.history.length - 1];
         const offset = providerCalendarOffsetMinutes(activeProvider);
@@ -2845,7 +2881,7 @@ class Tile implements ReplayParticipant {
         this.publishCandle(candle, provider.label);
         this.setFeedStatus('live', `${provider.label} · ${new Date(candle.time * 1000).toLocaleTimeString()}`);
       });
-      this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([this.symbol], (quote) => {
+      this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([symbol], (quote) => {
         if (token !== this.loadToken || this.replayActive) return;
         this.publishDepth(quote, provider.label);
       }) ?? null;
@@ -2855,7 +2891,7 @@ class Tile implements ReplayParticipant {
       console.error(err);
       if (renderedCachedHistory) {
         this.setLoadState(null);
-        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        this.setFeedStatus('sample', `${provider.label} · ${cachedSource}`);
         return;
       }
       if (!hadRenderableData) {
@@ -2981,6 +3017,7 @@ class Tile implements ReplayParticipant {
   }
 
   destroy(): void {
+    this.loadToken += 1;
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
     if (this.countdownTimer !== null) window.clearInterval(this.countdownTimer);
@@ -3109,6 +3146,7 @@ function refreshLayoutVisibility(): void {
 }
 
 function setLayout(layout: LayoutId, templateSnapshots: TileTemplate[] = []): void {
+  candleDataCoordinator.noteDataActivity();
   if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
   activeLayout = layout;
   const count = LAYOUT_COUNTS[layout];
