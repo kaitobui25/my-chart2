@@ -4,16 +4,13 @@ on:
   push:
     branches:
       - agent/binance-local-archive
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[binance-local-built]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[binance-local-built]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
