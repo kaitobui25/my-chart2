@@ -28,7 +28,6 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   await page.evaluate(async () => {
     await fetch('/provider-runtime/health');
   });
-  await page.locator('#ind-btn').click();
   const symbolInput = page.locator('#watchlist-symbol');
   await symbolInput.click();
   await symbolInput.pressSequentially('Zx7');
