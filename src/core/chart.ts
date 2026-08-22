@@ -1,7 +1,7 @@
 import { type Candle, type Theme, darkTheme } from './types';
 import { heikinAshi, heikinAshiCandle } from './heikin-ashi';
 import { tr } from './i18n';
-import { ChevronDown, ChevronUp, createElement as createLucideElement, Settings2, Trash2, X } from 'lucide';
+import { ChevronDown, ChevronUp, createElement as createLucideElement, Eye, EyeOff, Settings2, Trash2, X } from 'lucide';
 import { TimeScale } from './time-scale';
 import { Pane } from './pane';
 import type { PriceScaleMode } from './price-scale';
@@ -148,6 +148,8 @@ const legendIcon = (icon: Parameters<typeof createLucideElement>[0]): string =>
 
 interface LegendIcons {
   settings: string;
+  visible: string;
+  hidden: string;
   remove: string;
   collapse: string;
   expand: string;
@@ -160,6 +162,8 @@ function getLegendIcons(): LegendIcons {
   if (!cachedLegendIcons) {
     cachedLegendIcons = {
       settings: legendIcon(Settings2),
+      visible: legendIcon(Eye),
+      hidden: legendIcon(EyeOff),
       remove: legendIcon(X),
       collapse: legendIcon(ChevronUp),
       expand: legendIcon(ChevronDown),
@@ -681,6 +685,15 @@ export class L2Chart {
     return true;
   }
 
+  private toggleIndicatorVisibility(id: string): void {
+    const series = this.panes.flatMap((pane) => pane.series).filter((item) => item.indicatorId === id);
+    if (series.length === 0) return;
+    const visible = series.some((item) => item.visible);
+    for (const item of series) item.visible = !visible;
+    if (visible && this.selectedIndicatorId === id) this.clearIndicatorSelection();
+    this.invalidate();
+  }
+
   removeSeries(series: Series): void {
     if (series === this.mainSeries) return;
     for (const pane of this.panes) {
@@ -1003,6 +1016,8 @@ export class L2Chart {
         event.stopPropagation();
         if (button.dataset.indicatorAction === 'settings') {
           for (const cb of this.indicatorSettingsListeners) cb(id);
+        } else if (button.dataset.indicatorAction === 'visibility') {
+          this.toggleIndicatorVisibility(id);
         } else if (button.dataset.indicatorAction === 'remove') {
           for (const cb of this.indicatorRemoveListeners) cb(id);
         }
@@ -2595,7 +2610,7 @@ export class L2Chart {
         height: Math.max(rect.height, priceRows * 26 + 8),
       };
     }
-    const indicatorRows = pane.series.filter((series) => series.visible && series.title).length;
+    const indicatorRows = pane.series.filter((series) => series.title).length;
     return {
       width: Math.max(rect.width, priceRows ? 300 : 180),
       height: Math.max(rect.height, priceRows * 24 + indicatorRows * 26 + 10),
@@ -2640,15 +2655,20 @@ export class L2Chart {
     }
     const removableIndicators = new Set<string>();
     for (const s of pane.series) {
-      if (!s.title || !s.visible) continue;
+      if (!s.title) continue;
       const v = s.valueAt(idx);
       const color = escAttr(s.legendColor ?? this.theme.textDim);
       const removable = s.indicatorId && !removableIndicators.has(s.indicatorId);
       if (s.indicatorId) removableIndicators.add(s.indicatorId);
+      const indicatorVisible = s.indicatorId
+        ? this.panes.some((itemPane) => itemPane.series.some((item) => item.indicatorId === s.indicatorId && item.visible))
+        : s.visible;
+      const visibilityTitle = indicatorVisible ? tr('Ẩn chỉ báo') : tr('Hiện chỉ báo');
       const actions = removable
         ? `<span class="l2chart-legend-actions">` +
           `<button type="button" class="l2chart-legend-action l2chart-legend-settings" data-indicator-action="settings" data-indicator-id="${escAttr(s.indicatorId!)}" title="${tr('Cấu hình')} ${escAttr(s.title)}" aria-label="${tr('Cấu hình chỉ báo')} ${escAttr(s.title)}">` +
           `${icons.settings}</button>` +
+          `<button type="button" class="l2chart-legend-action l2chart-legend-settings l2chart-legend-visibility" data-indicator-action="visibility" data-indicator-id="${escAttr(s.indicatorId!)}" title="${visibilityTitle} ${escAttr(s.title)}" aria-label="${visibilityTitle} ${escAttr(s.title)}">${indicatorVisible ? icons.visible : icons.hidden}</button>` +
           `<button type="button" class="l2chart-legend-action l2chart-legend-remove" data-indicator-action="remove" data-indicator-id="${escAttr(s.indicatorId!)}" title="${tr('Xóa')} ${escAttr(s.title)}" aria-label="${tr('Xóa chỉ báo')} ${escAttr(s.title)}">${icons.remove}</button>` +
           `</span>`
         : '';
