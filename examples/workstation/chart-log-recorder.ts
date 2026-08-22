@@ -129,7 +129,19 @@ function activeChartContext(): unknown {
     __L2CHART_ASSISTANT__?: { getContext(): unknown };
   }).__L2CHART_ASSISTANT__;
   try {
-    return bridge?.getContext() ?? null;
+    const raw = bridge?.getContext();
+    if (!raw || typeof raw !== 'object') return raw ?? null;
+    const context = raw as Record<string, unknown>;
+    return {
+      version: context.version ?? null,
+      symbol: context.symbol ?? null,
+      timeframe: context.timeframe ?? null,
+      mode: context.mode ?? null,
+      replay: context.replay ?? null,
+      historyRange: context.historyRange ?? null,
+      candleCount: context.candleCount ?? null,
+      indicators: context.indicators ?? null,
+    };
   } catch (error) {
     return { error: safeText(error, 500) };
   }
@@ -170,7 +182,10 @@ class ChartLogRecorder {
 
   install(): void {
     this.attachButton();
-    new MutationObserver(() => this.attachButton()).observe(document.documentElement, {
+    const observer = new MutationObserver(() => {
+      if (!this.button?.isConnected) this.attachButton();
+    });
+    observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
     });
@@ -221,7 +236,12 @@ class ChartLogRecorder {
     if (this.records.length >= MAX_RECORDS) {
       if (!this.truncated) {
         this.truncated = true;
-        this.records.push({ at: Date.now(), scope: 'SESSION', phase: 'LIMIT', detail: `maximum ${MAX_RECORDS} records reached; later events dropped` });
+        this.records.push({
+          at: Date.now(),
+          scope: 'SESSION',
+          phase: 'LIMIT',
+          detail: `maximum ${MAX_RECORDS} records reached; later events dropped`,
+        });
       }
       return;
     }
@@ -261,7 +281,8 @@ class ChartLogRecorder {
     this.button.setAttribute('aria-label', this.activeState ? 'Stop chart log and download' : 'Start chart log');
     this.button.title = this.activeState ? 'Log Stop · tải file TXT xuống Downloads' : 'Log Start · ghi log toàn chart';
     const label = this.button.querySelector<HTMLElement>('.chart-log-button-label');
-    if (label) label.textContent = this.activeState ? 'STOP' : 'LOG';
+    const nextLabel = this.activeState ? 'STOP' : 'LOG';
+    if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
   }
 
   private captureConsole(): void {
@@ -330,7 +351,9 @@ class ChartLogRecorder {
       };
       Object.defineProperty(proto, method, { configurable: true, writable: true, value: wrapped });
       this.restores.push(() => {
-        if (proto[method] === wrapped) Object.defineProperty(proto, method, { configurable: true, writable: true, value: original });
+        if (proto[method] === wrapped) {
+          Object.defineProperty(proto, method, { configurable: true, writable: true, value: original });
+        }
       });
     }
   }
@@ -340,7 +363,9 @@ class ChartLogRecorder {
       const where = event.filename ? ` · ${event.filename}:${event.lineno}:${event.colno}` : '';
       this.record('ERR', 'ERROR', undefined, undefined, safeText(`${event.message || 'window error'}${where}`, 4_000));
     };
-    const onRejection = (event: PromiseRejectionEvent) => this.record('ERR', 'REJECT', undefined, undefined, safeText(event.reason ?? 'Unhandled promise rejection', 4_000));
+    const onRejection = (event: PromiseRejectionEvent) => {
+      this.record('ERR', 'REJECT', undefined, undefined, safeText(event.reason ?? 'Unhandled promise rejection', 4_000));
+    };
     addEventListener('error', onError);
     addEventListener('unhandledrejection', onRejection);
     this.restores.push(() => removeEventListener('error', onError));
@@ -349,22 +374,40 @@ class ChartLogRecorder {
 
   private captureUi(): void {
     const onClick = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest('button,[role="button"],a,input,select') : null;
+      const target = event.target instanceof Element
+        ? event.target.closest('button,[role="button"],a,input,select')
+        : null;
       if (target) this.record('UI', 'CLICK', undefined, undefined, summarizeElement(target));
     };
     const onChange = (event: Event) => {
-      if (event.target instanceof Element) this.record('UI', 'CHANGE', undefined, undefined, summarizeElement(event.target));
+      if (event.target instanceof Element) {
+        this.record('UI', 'CHANGE', undefined, undefined, summarizeElement(event.target));
+      }
     };
     const onPointer = (phase: 'POINTER_DOWN' | 'POINTER_UP') => (event: PointerEvent) => {
       if (!(event.target instanceof Element)) return;
       const target = event.target.closest('canvas,.pane,.chart-tile') ?? event.target;
-      this.record('UI', phase, undefined, undefined, `${summarizeElement(target)} x=${Math.round(event.clientX)} y=${Math.round(event.clientY)} button=${event.button}`);
+      this.record(
+        'UI',
+        phase,
+        undefined,
+        undefined,
+        `${summarizeElement(target)} x=${Math.round(event.clientX)} y=${Math.round(event.clientY)} button=${event.button}`,
+      );
     };
     const onPointerDown = onPointer('POINTER_DOWN');
     const onPointerUp = onPointer('POINTER_UP');
     const onKey = (event: KeyboardEvent) => {
-      const modifiers = [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', event.metaKey && 'Meta'].filter(Boolean).join('+');
-      this.record('UI', 'KEY', undefined, undefined, `${modifiers ? `${modifiers}+` : ''}${event.key}`);
+      const modifiers = [
+        event.ctrlKey && 'Ctrl',
+        event.altKey && 'Alt',
+        event.shiftKey && 'Shift',
+        event.metaKey && 'Meta',
+      ].filter(Boolean).join('+');
+      const editable = event.target instanceof Element
+        && Boolean(event.target.closest('input,textarea,[contenteditable]'));
+      const key = editable && event.key.length === 1 ? '[char]' : event.key;
+      this.record('UI', 'KEY', undefined, undefined, `${modifiers ? `${modifiers}+` : ''}${key}`);
     };
 
     document.addEventListener('click', onClick, true);
@@ -384,7 +427,9 @@ class ChartLogRecorder {
     try {
       this.performanceObserver = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
-          if (entry.duration >= LONG_TASK_MIN_MS) this.record('JS', 'LONG', undefined, Math.round(entry.duration), `name=${entry.name || 'longtask'}`);
+          if (entry.duration >= LONG_TASK_MIN_MS) {
+            this.record('JS', 'LONG', undefined, Math.round(entry.duration), `name=${entry.name || 'longtask'}`);
+          }
         }
       });
       this.performanceObserver.observe({ entryTypes: ['longtask'] });
