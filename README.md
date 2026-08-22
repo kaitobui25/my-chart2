@@ -251,8 +251,8 @@ plus the complete optional Python provider environment and scans tracked files
 for secrets. FiinQuantX itself is not indexed on PyPI, so its source and release
 provenance remain a separately documented provider trust boundary.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution rules and
-[`SECURITY.md`](SECURITY.md) for reporting security issues. Maintainers should
+See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for contribution rules and
+[`docs/SECURITY.md`](docs/SECURITY.md) for reporting security issues. Maintainers should
 follow [`docs/RELEASING.md`](docs/RELEASING.md); npm publishing is intentionally blocked
 until the one-time first-package bootstrap and trusted-publisher setup are done.
 
@@ -264,7 +264,7 @@ until the one-time first-package bootstrap and trusted-publisher setup are done.
 - Optional reference adapters and sidecars depend on third-party SDKs and
   services under their own licenses and terms.
 
-See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for bundled dependency
+See [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md) for bundled dependency
 notices and optional integration boundaries.
 
 This software is provided as-is and does not provide investment advice.

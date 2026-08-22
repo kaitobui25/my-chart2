@@ -18,8 +18,8 @@
     "examples/workstation",
     "examples/providers",
     "tests",
-    "playwright.config.ts",
-    "vitest.config.ts"
+    "config/playwright.config.ts",
+    "config/vitest.config.ts"
   ],
   "exclude": ["examples/workstation/vite.config.ts"]
 }
