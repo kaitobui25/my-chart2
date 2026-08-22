@@ -33,6 +33,7 @@ export interface BinanceDatafeedOptions {
   websocketFactory?: (url: string) => WebSocket;
   requestTimeoutMs?: number;
   cacheReadTimeoutMs?: number;
+  refreshCoordinator?: BinanceIdleRefreshCoordinator;
 }
 
 interface BinanceKlinePayload {
@@ -52,6 +53,18 @@ interface BinanceExchangeSymbol {
   quoteAsset?: string;
   contractType?: string;
   isSpotTradingAllowed?: boolean;
+}
+
+interface RecentHistorySnapshot {
+  at: number;
+  limit: number;
+  candles: Candle[];
+  fresh: boolean;
+}
+
+interface IdleRunOptions {
+  retryOnInterrupt?: boolean;
+  cancelSignal?: AbortSignal;
 }
 
 const DEFAULT_ENDPOINTS: Record<BinanceMarket, BinanceEndpoints> = {
@@ -78,6 +91,8 @@ const MAX_HISTORY_REQUEST = 50_000;
 const SYMBOL_CACHE_MS = 30 * 60 * 1000;
 const RECONNECT_MAX_MS = 30_000;
 const DEFAULT_CACHE_READ_TIMEOUT_MS = 1000;
+const DEFAULT_REMOTE_IDLE_MS = 650;
+const RECENT_SNAPSHOT_MS = 2_000;
 
 function normalizedSymbol(symbol: string): string {
   return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -131,6 +146,55 @@ function resolveWithin<T>(promise: Promise<T>, timeoutMs: number, fallback: T): 
     promise.then(finish, () => finish(fallback));
   });
 }
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, ms)));
+}
+
+export class BinanceIdleRefreshCoordinator {
+  private generation = 0;
+  private quietUntil = 0;
+  private readonly activeControllers = new Set<AbortController>();
+
+  constructor(private readonly idleMs = DEFAULT_REMOTE_IDLE_MS) {}
+
+  noteActivity(): void {
+    this.generation += 1;
+    this.quietUntil = Date.now() + Math.max(0, this.idleMs);
+    for (const controller of this.activeControllers) controller.abort();
+  }
+
+  async runWhenIdle<T>(
+    task: (signal: AbortSignal) => Promise<T>,
+    options: IdleRunOptions = {},
+  ): Promise<T | undefined> {
+    const retryOnInterrupt = options.retryOnInterrupt ?? false;
+    while (!options.cancelSignal?.aborted) {
+      const generation = this.generation;
+      const waitMs = this.quietUntil - Date.now();
+      if (waitMs > 0) await delay(waitMs);
+      if (options.cancelSignal?.aborted) return undefined;
+      if (generation !== this.generation || Date.now() < this.quietUntil) continue;
+
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      options.cancelSignal?.addEventListener('abort', cancel, { once: true });
+      this.activeControllers.add(controller);
+      try {
+        return await task(controller.signal);
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+        if (options.cancelSignal?.aborted || !retryOnInterrupt) return undefined;
+      } finally {
+        options.cancelSignal?.removeEventListener('abort', cancel);
+        this.activeControllers.delete(controller);
+      }
+    }
+    return undefined;
+  }
+}
+
+const sharedRefreshCoordinator = new BinanceIdleRefreshCoordinator();
 
 export function mergeBinanceCandles(...groups: Candle[][]): Candle[] {
   const byTime = new Map<number, Candle>();
@@ -201,7 +265,9 @@ export class BinanceDatafeed implements Datafeed {
   private readonly websocketFactory: (url: string) => WebSocket;
   private readonly requestTimeoutMs: number;
   private readonly cacheReadTimeoutMs: number;
+  private readonly refreshCoordinator: BinanceIdleRefreshCoordinator;
   private readonly realtimeConnectedListeners = new Set<() => void>();
+  private readonly recentHistory = new Map<string, RecentHistorySnapshot>();
   private symbolCache: SymbolSearchResult[] | null = null;
   private symbolCacheAt = 0;
 
@@ -224,6 +290,7 @@ export class BinanceDatafeed implements Datafeed {
     this.websocketFactory = objectOptions.websocketFactory ?? ((url) => new WebSocket(url));
     this.requestTimeoutMs = objectOptions.requestTimeoutMs ?? 10_000;
     this.cacheReadTimeoutMs = Math.max(0, objectOptions.cacheReadTimeoutMs ?? DEFAULT_CACHE_READ_TIMEOUT_MS);
+    this.refreshCoordinator = objectOptions.refreshCoordinator ?? sharedRefreshCoordinator;
   }
 
   get cacheAvailable(): boolean {
@@ -232,6 +299,7 @@ export class BinanceDatafeed implements Datafeed {
 
   async clearCache(): Promise<void> {
     await this.cache.clearMarket(this.market);
+    this.recentHistory.clear();
   }
 
   async ping(): Promise<boolean> {
@@ -253,10 +321,13 @@ export class BinanceDatafeed implements Datafeed {
     if (!normalized) return [];
     const requestedLimit = Math.min(MAX_HISTORY_REQUEST, Math.max(1, Math.floor(limit)));
     if (!range) {
-      return this.readCache(
+      this.refreshCoordinator.noteActivity();
+      const cached = await this.readCache(
         this.cache.readLatest(this.market, normalized, interval, requestedLimit),
         [],
       );
+      this.rememberRecent(normalized, interval, requestedLimit, cached, false);
+      return cached;
     }
     return this.readCache(
       this.cache.readRange(
@@ -284,43 +355,23 @@ export class BinanceDatafeed implements Datafeed {
     const calendarInterval = isCalendarInterval(interval);
 
     if (!range) {
-      const cached = await this.readCache(
+      const remembered = this.recentSnapshot(normalized, interval, requestedLimit);
+      const cached = remembered?.candles ?? await this.readCache(
         this.cache.readLatest(this.market, normalized, interval, requestedLimit),
         [],
       );
-      const lastCached = cached[cached.length - 1]?.time;
-      if (calendarInterval) {
-        try {
-          const remote = await this.fetchRecent(normalized, interval, requestedLimit);
-          this.persistClosedCandles(normalized, interval, remote);
-          return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
-        } catch (error) {
-          if (cached.length > 0) return cached;
-          throw error;
-        }
+      if (cached.length > 0) {
+        this.rememberRecent(normalized, interval, requestedLimit, cached, false);
+        return cached.slice(-requestedLimit);
       }
-      const currentBar = Math.floor(Date.now() / 1000 / step) * step;
-      try {
-        if (lastCached !== undefined && cached.length >= requestedLimit) {
-          const missingFrom = lastCached + step;
-          if (missingFrom >= currentBar) return cached;
-          const remote = await this.fetchRange(
-            normalized,
-            interval,
-            { from: missingFrom, to: currentBar },
-            requestedLimit,
-          );
-          this.persistClosedCandles(normalized, interval, remote);
-          return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
-        }
 
-        const remote = await this.fetchRecent(normalized, interval, requestedLimit);
-        this.persistClosedCandles(normalized, interval, remote);
-        return mergeBinanceCandles(cached, remote).slice(-requestedLimit);
-      } catch (error) {
-        if (cached.length > 0) return cached;
-        throw error;
-      }
+      const remote = await this.refreshCoordinator.runWhenIdle(
+        (signal) => this.fetchRecent(normalized, interval, requestedLimit, signal),
+      );
+      if (!remote) return [];
+      this.persistClosedCandles(normalized, interval, remote);
+      this.rememberRecent(normalized, interval, requestedLimit, remote, true);
+      return remote.slice(-requestedLimit);
     }
 
     if (calendarInterval) {
@@ -392,15 +443,63 @@ export class BinanceDatafeed implements Datafeed {
   subscribe(symbol: string, interval: string, onCandle: (candle: Candle) => void): () => void {
     const normalized = normalizedSymbol(symbol);
     if (!normalized) return () => undefined;
+
+    const cancellation = new AbortController();
+    let closeSocket: (() => void) | null = null;
     const stream = `${normalized.toLowerCase()}@kline_${interval}`;
-    return this.openReconnectableSocket(`${this.endpoints.websocketBase}/${stream}`, (payload) => {
-      const kline = payload?.k as BinanceKlinePayload | undefined;
-      if (!kline) return;
-      const candle = klineToCandle(kline);
-      if (!candle) return;
-      onCandle(candle);
-      if (kline.x) void this.cache.write(this.market, normalized, interval, [candle]);
+    const openSocket = () => {
+      if (cancellation.signal.aborted || closeSocket) return;
+      closeSocket = this.openReconnectableSocket(`${this.endpoints.websocketBase}/${stream}`, (payload) => {
+        const kline = payload?.k as BinanceKlinePayload | undefined;
+        if (!kline) return;
+        const candle = klineToCandle(kline);
+        if (!candle) return;
+        onCandle(candle);
+        if (kline.x) void this.cache.write(this.market, normalized, interval, [candle]);
+      });
+    };
+
+    void (async () => {
+      const remembered = this.recentSnapshot(normalized, interval);
+      const requestedLimit = remembered?.limit ?? 500;
+      const cached = remembered?.candles ?? await this.readCache(
+        this.cache.readLatest(this.market, normalized, interval, requestedLimit),
+        [],
+      );
+      if (cancellation.signal.aborted) return;
+
+      const recentlyFresh = remembered?.fresh === true && Date.now() - remembered.at < RECENT_SNAPSHOT_MS;
+      if (!recentlyFresh) {
+        const refreshed = await this.refreshCoordinator.runWhenIdle(
+          (signal) => this.refreshLatest(normalized, interval, requestedLimit, cached, signal),
+          { retryOnInterrupt: true, cancelSignal: cancellation.signal },
+        );
+        if (cancellation.signal.aborted) return;
+        if (refreshed && refreshed.length > 0) {
+          const baseline = cached[cached.length - 1]?.time;
+          for (const candle of refreshed) {
+            if (baseline === undefined || candle.time >= baseline) onCandle(candle);
+          }
+          this.rememberRecent(normalized, interval, requestedLimit, refreshed, true);
+        }
+      } else {
+        await this.refreshCoordinator.runWhenIdle(
+          async () => true,
+          { retryOnInterrupt: true, cancelSignal: cancellation.signal },
+        );
+      }
+      if (!cancellation.signal.aborted) openSocket();
+    })().catch((error) => {
+      if (cancellation.signal.aborted) return;
+      console.warn(`Unable to refresh Binance ${normalized} ${interval} before realtime`, error);
+      openSocket();
     });
+
+    return () => {
+      cancellation.abort();
+      closeSocket?.();
+      closeSocket = null;
+    };
   }
 
   onRealtimeConnected(listener: () => void): () => void {
@@ -416,7 +515,7 @@ export class BinanceDatafeed implements Datafeed {
     const normalized = [...new Set(symbols.map(normalizedSymbol).filter(Boolean))];
     if (normalized.length === 0) return () => undefined;
     const streams = normalized.map((symbol) => `${symbol.toLowerCase()}@kline_${interval}`).join('/');
-    return this.openReconnectableSocket(`${this.endpoints.combinedWebsocketBase}?streams=${streams}`, (payload) => {
+    return this.openSocketWhenIdle(`${this.endpoints.combinedWebsocketBase}?streams=${streams}`, (payload) => {
       const data = payload?.data ?? payload;
       const symbol = normalizedSymbol(String(data?.s ?? data?.k?.s ?? ''));
       const kline = data?.k as BinanceKlinePayload | undefined;
@@ -432,7 +531,7 @@ export class BinanceDatafeed implements Datafeed {
     const normalized = [...new Set(symbols.map(normalizedSymbol).filter(Boolean))];
     if (normalized.length === 0) return () => undefined;
     const streams = normalized.map((symbol) => `${symbol.toLowerCase()}@bookTicker`).join('/');
-    return this.openReconnectableSocket(`${this.endpoints.combinedWebsocketBase}?streams=${streams}`, (payload) => {
+    return this.openSocketWhenIdle(`${this.endpoints.combinedWebsocketBase}?streams=${streams}`, (payload) => {
       const data = payload?.data ?? payload;
       const symbol = normalizedSymbol(String(data?.s ?? ''));
       const bid = finiteNumber(data?.b);
@@ -486,6 +585,32 @@ export class BinanceDatafeed implements Datafeed {
     return this.symbolCache;
   }
 
+  private historyKey(symbol: string, interval: string): string {
+    return `${this.market}:${symbol}:${interval}`;
+  }
+
+  private recentSnapshot(symbol: string, interval: string, limit?: number): RecentHistorySnapshot | null {
+    const snapshot = this.recentHistory.get(this.historyKey(symbol, interval));
+    if (!snapshot || Date.now() - snapshot.at > RECENT_SNAPSHOT_MS) return null;
+    if (limit !== undefined && snapshot.limit < limit) return null;
+    return snapshot;
+  }
+
+  private rememberRecent(
+    symbol: string,
+    interval: string,
+    limit: number,
+    candles: Candle[],
+    fresh: boolean,
+  ): void {
+    this.recentHistory.set(this.historyKey(symbol, interval), {
+      at: Date.now(),
+      limit,
+      candles: candles.map((candle) => ({ ...candle })),
+      fresh,
+    });
+  }
+
   private readCache<T>(promise: Promise<T>, fallback: T): Promise<T> {
     return resolveWithin(promise, this.cacheReadTimeoutMs, fallback);
   }
@@ -500,13 +625,68 @@ export class BinanceDatafeed implements Datafeed {
     await this.cache.write(this.market, symbol, interval, closed);
   }
 
-  private async fetchRecent(symbol: string, interval: string, limit: number): Promise<Candle[]> {
+  private async refreshLatest(
+    symbol: string,
+    interval: string,
+    limit: number,
+    cached: Candle[],
+    signal: AbortSignal,
+  ): Promise<Candle[]> {
+    const lastCached = cached[cached.length - 1]?.time;
+    if (isCalendarInterval(interval)) {
+      if (lastCached !== undefined) {
+        const now = Math.floor(Date.now() / 1000);
+        const approxStep = Math.max(1, intervalApproxSeconds(interval));
+        const refreshLimit = Math.min(limit, Math.max(2, Math.ceil((now - lastCached) / approxStep) + 2));
+        const remote = await this.fetchRange(
+          symbol,
+          interval,
+          { from: lastCached, to: now },
+          refreshLimit,
+          signal,
+        );
+        this.persistClosedCandles(symbol, interval, remote);
+        return mergeBinanceCandles(cached, remote).slice(-limit);
+      }
+      const remote = await this.fetchRecent(symbol, interval, limit, signal);
+      this.persistClosedCandles(symbol, interval, remote);
+      return remote.slice(-limit);
+    }
+
+    const step = INTERVAL_SECONDS[interval] ?? intervalApproxSeconds(interval);
+    const currentBar = Math.floor(Date.now() / 1000 / step) * step;
+    if (lastCached !== undefined && cached.length >= limit) {
+      const missingFrom = lastCached + step;
+      if (missingFrom >= currentBar) return cached.slice(-limit);
+      const remote = await this.fetchRange(
+        symbol,
+        interval,
+        { from: missingFrom, to: currentBar },
+        limit,
+        signal,
+      );
+      this.persistClosedCandles(symbol, interval, remote);
+      return mergeBinanceCandles(cached, remote).slice(-limit);
+    }
+
+    const remote = await this.fetchRecent(symbol, interval, limit, signal);
+    this.persistClosedCandles(symbol, interval, remote);
+    return mergeBinanceCandles(cached, remote).slice(-limit);
+  }
+
+  private async fetchRecent(
+    symbol: string,
+    interval: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Candle[]> {
     let remaining = limit;
     let endTime: number | undefined;
     let result: Candle[] = [];
     while (remaining > 0) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const pageLimit = Math.min(MAX_PAGE_SIZE, remaining);
-      const page = await this.fetchKlines(symbol, interval, pageLimit, undefined, endTime);
+      const page = await this.fetchKlines(symbol, interval, pageLimit, undefined, endTime, signal);
       if (page.length === 0) break;
       result = mergeBinanceCandles(page, result);
       remaining = limit - result.length;
@@ -522,12 +702,14 @@ export class BinanceDatafeed implements Datafeed {
     interval: string,
     range: HistoryRange,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<Candle[]> {
     let endTime = range.to * 1000;
     let result: Candle[] = [];
     while (result.length < limit) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const pageLimit = Math.min(MAX_PAGE_SIZE, limit - result.length);
-      const page = await this.fetchKlines(symbol, interval, pageLimit, undefined, endTime);
+      const page = await this.fetchKlines(symbol, interval, pageLimit, undefined, endTime, signal);
       if (page.length === 0) break;
       const inRange = page.filter((candle) => candle.time >= range.from && candle.time <= range.to);
       result = mergeBinanceCandles(inRange, result);
@@ -546,6 +728,7 @@ export class BinanceDatafeed implements Datafeed {
     limit: number,
     startTime?: number,
     endTime?: number,
+    signal?: AbortSignal,
   ): Promise<Candle[]> {
     const url = new URL(this.endpoints.klinesPath, this.endpoints.restBase);
     url.searchParams.set('symbol', symbol);
@@ -553,7 +736,7 @@ export class BinanceDatafeed implements Datafeed {
     url.searchParams.set('limit', String(Math.min(MAX_PAGE_SIZE, Math.max(1, limit))));
     if (startTime !== undefined) url.searchParams.set('startTime', String(Math.floor(startTime)));
     if (endTime !== undefined) url.searchParams.set('endTime', String(Math.floor(endTime)));
-    const rows = await this.fetchJson(url);
+    const rows = await this.fetchJson(url, signal);
     if (!Array.isArray(rows)) throw new Error('Binance klines returned an invalid payload');
     return rows.flatMap((row) => {
       const candle = rowToCandle(row);
@@ -561,8 +744,11 @@ export class BinanceDatafeed implements Datafeed {
     });
   }
 
-  private async fetchJson(url: URL): Promise<unknown> {
+  private async fetchJson(url: URL, externalSignal?: AbortSignal): Promise<unknown> {
     const controller = new AbortController();
+    const abortFromExternal = () => controller.abort();
+    if (externalSignal?.aborted) controller.abort();
+    else externalSignal?.addEventListener('abort', abortFromExternal, { once: true });
     const timeout = globalThis.setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
       const response = await this.fetchImpl(url.toString(), { signal: controller.signal });
@@ -574,7 +760,24 @@ export class BinanceDatafeed implements Datafeed {
       return await response.json();
     } finally {
       globalThis.clearTimeout(timeout);
+      externalSignal?.removeEventListener('abort', abortFromExternal);
     }
+  }
+
+  private openSocketWhenIdle(url: string, onPayload: (payload: any) => void): () => void {
+    const cancellation = new AbortController();
+    let closeSocket: (() => void) | null = null;
+    void this.refreshCoordinator.runWhenIdle(
+      async () => true,
+      { retryOnInterrupt: true, cancelSignal: cancellation.signal },
+    ).then(() => {
+      if (!cancellation.signal.aborted) closeSocket = this.openReconnectableSocket(url, onPayload);
+    }).catch(() => undefined);
+    return () => {
+      cancellation.abort();
+      closeSocket?.();
+      closeSocket = null;
+    };
   }
 
   private openReconnectableSocket(url: string, onPayload: (payload: any) => void): () => void {
