@@ -26,16 +26,16 @@ function delay(ms: number): Promise<void> {
  * request. A tile unsubscribe still aborts its own task through cancelSignal.
  */
 export class WorkstationBinanceIdleRefreshCoordinator extends BinanceIdleRefreshCoordinator {
-  private generation = 0;
-  private quietUntil = 0;
+  private workstationGeneration = 0;
+  private workstationQuietUntil = 0;
 
   constructor(private readonly workstationIdleMs = DEFAULT_WORKSTATION_IDLE_MS) {
     super(workstationIdleMs);
   }
 
   override noteActivity(): void {
-    this.generation += 1;
-    this.quietUntil = Date.now() + Math.max(0, this.workstationIdleMs);
+    this.workstationGeneration += 1;
+    this.workstationQuietUntil = Date.now() + Math.max(0, this.workstationIdleMs);
   }
 
   override async runWhenIdle<T>(
@@ -44,11 +44,11 @@ export class WorkstationBinanceIdleRefreshCoordinator extends BinanceIdleRefresh
   ): Promise<T | undefined> {
     const retryOnInterrupt = options.retryOnInterrupt ?? false;
     while (!options.cancelSignal?.aborted) {
-      const generation = this.generation;
-      const waitMs = this.quietUntil - Date.now();
+      const generation = this.workstationGeneration;
+      const waitMs = this.workstationQuietUntil - Date.now();
       if (waitMs > 0) await delay(waitMs);
       if (options.cancelSignal?.aborted) return undefined;
-      if (generation !== this.generation || Date.now() < this.quietUntil) continue;
+      if (generation !== this.workstationGeneration || Date.now() < this.workstationQuietUntil) continue;
 
       const controller = new AbortController();
       const cancel = () => controller.abort();
