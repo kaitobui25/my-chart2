@@ -1,0 +1,43 @@
+name: Build Binance Local Archive once
+
+on:
+  push:
+    branches:
+      - agent/binance-local-archive
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[binance-local-built]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/binance-local-archive
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: python scripts/_apply_binance_local_build.py
+      - run: npm run typecheck
+      - run: npm run build:demo
+      - run: npx vitest run tests/unit/binance-local-datafeed.test.ts
+      - run: python -m unittest discover -s examples/sidecars/binance-local -v
+      - name: Commit generated source
+        run: |
+          if git diff --quiet; then
+            echo "No source changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add examples/workstation/main.ts
+          git commit -m "feat: integrate independent Binance local archive [binance-local-built]"
+          git push origin HEAD:agent/binance-local-archive
