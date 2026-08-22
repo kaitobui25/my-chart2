@@ -74,6 +74,21 @@ describe('Binance workstation multi-chart refresh isolation', () => {
     await expect(first).resolves.toBe('BTC');
   });
 
+  it('does not put foreground history behind the provider quiet period', async () => {
+    const coordinator = new WorkstationBinanceIdleRefreshCoordinator(10_000);
+    coordinator.noteActivity();
+    let started = false;
+
+    const request = coordinator.runWhenIdle(async () => {
+      started = true;
+      return 'ETH';
+    });
+
+    await Promise.resolve();
+    expect(started).toBe(true);
+    await expect(request).resolves.toBe('ETH');
+  });
+
   it('still aborts a task when its own tile cancellation signal fires', async () => {
     const coordinator = new WorkstationBinanceIdleRefreshCoordinator(5);
     const cancellation = new AbortController();
