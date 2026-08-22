@@ -29,7 +29,7 @@ describe('BinanceLocalDatafeed', () => {
   });
 
   it('does not auto-import a missing symbol from getHistory', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => jsonResponse({
       code: 'SYMBOL_NOT_INSTALLED',
       message: 'ETHUSDT is not downloaded yet',
     }, 404));
