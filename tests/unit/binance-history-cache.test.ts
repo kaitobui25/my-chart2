@@ -50,19 +50,19 @@ describe('BinanceHistoryCache transaction scheduling', () => {
 
   it('cancels a stale background write as soon as a new foreground read begins', async () => {
     let writeSignal: AbortSignal | undefined;
-    const writeStarted = new Promise<void>((resolveStarted) => {
-      const shared = baseCache({
-        write: vi.fn((_source, _symbol, _interval, _candles, signal) => {
-          writeSignal = signal;
-          resolveStarted();
-          return new Promise<void>((resolve) => {
-            signal?.addEventListener('abort', () => resolve(), { once: true });
-          });
-        }),
-      });
-      Object.assign(globalThis, { __binanceCacheTestShared: shared });
+    let resolveStarted: (() => void) | undefined;
+    const writeStarted = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
     });
-    const shared = (globalThis as typeof globalThis & { __binanceCacheTestShared: BrowserHistoryCacheApi }).__binanceCacheTestShared;
+    const shared = baseCache({
+      write: vi.fn((_source, _symbol, _interval, _candles, signal) => {
+        writeSignal = signal;
+        resolveStarted?.();
+        return new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }),
+    });
     const cache = new BinanceHistoryCache(shared, {
       readTimeoutMs: 50,
       writeTimeoutMs: 5000,
@@ -76,11 +76,16 @@ describe('BinanceHistoryCache transaction scheduling', () => {
     await cache.readLatest('spot', 'BTCUSDT', '1d', 500);
     await pendingWrite;
     expect(writeSignal?.aborted).toBe(true);
-    delete (globalThis as typeof globalThis & { __binanceCacheTestShared?: BrowserHistoryCacheApi }).__binanceCacheTestShared;
   });
 
   it('splits large refresh persistence into short transactions', async () => {
-    const write = vi.fn(async () => undefined);
+    const write = vi.fn(async (
+      _source: string,
+      _symbol: string,
+      _interval: string,
+      _candles: Candle[],
+      _signal?: AbortSignal,
+    ) => undefined);
     const shared = baseCache({ write });
     const cache = new BinanceHistoryCache(shared, {
       writeChunkSize: 3,
@@ -96,10 +101,15 @@ describe('BinanceHistoryCache transaction scheduling', () => {
   });
 
   it('abandons the remaining chunks when one cache transaction exceeds its deadline', async () => {
-    const write = vi.fn((_source, _symbol, _interval, _candles, signal?: AbortSignal) =>
-      new Promise<void>((resolve) => {
-        signal?.addEventListener('abort', () => resolve(), { once: true });
-      }));
+    const write = vi.fn((
+      _source: string,
+      _symbol: string,
+      _interval: string,
+      _candles: Candle[],
+      signal?: AbortSignal,
+    ) => new Promise<void>((resolve) => {
+      signal?.addEventListener('abort', () => resolve(), { once: true });
+    }));
     const shared = baseCache({ write });
     const cache = new BinanceHistoryCache(shared, {
       writeChunkSize: 2,
@@ -110,6 +120,8 @@ describe('BinanceHistoryCache transaction scheduling', () => {
     await wait(0);
 
     expect(write).toHaveBeenCalledTimes(1);
-    expect((write.mock.calls[0][4] as AbortSignal | undefined)?.aborted).toBe(true);
+    const firstCall = write.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    expect(firstCall?.[4]?.aborted).toBe(true);
   });
 });
