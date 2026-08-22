@@ -9,8 +9,9 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
 
   await page.goto('http://127.0.0.1:53173/', { waitUntil: 'domcontentloaded' });
 
-  const button = page.getByRole('button', { name: 'Start chart log' });
+  const button = page.locator('#global-drawing-toolbar-host .chart-log-button');
   await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute('aria-label', 'Start chart log');
   await expect(button).toHaveText('LOG');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   const followsTrash = await page.locator('#global-drawing-toolbar-host .drawing-tool-button.danger').evaluate(
@@ -19,6 +20,7 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   expect(followsTrash).toBe(true);
 
   await button.click();
+  await expect(button).toHaveAttribute('aria-label', 'Stop chart log and download');
   await expect(button).toHaveAttribute('aria-pressed', 'true');
   await expect(button).toHaveClass(/is-recording/);
   await expect(button).toHaveText('STOP');
@@ -32,9 +34,10 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   await symbolInput.pressSequentially('Zx7');
 
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Stop chart log and download' }).click();
+  await button.click();
   const download = await downloadPromise;
 
+  await expect(button).toHaveAttribute('aria-label', 'Start chart log');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(button).not.toHaveClass(/is-recording/);
   await expect(button).toHaveText('LOG');
@@ -63,16 +66,17 @@ test('starting a new chart log creates a fresh session', async ({ page }) => {
   });
   await page.goto('http://127.0.0.1:53173/', { waitUntil: 'domcontentloaded' });
 
-  const start = page.getByRole('button', { name: 'Start chart log' });
-  await start.click();
+  const button = page.locator('#global-drawing-toolbar-host .chart-log-button');
+  await expect(button).toBeVisible();
+  await button.click();
   const firstDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Stop chart log and download' }).click();
+  await button.click();
   await firstDownload;
 
-  await start.click();
+  await button.click();
   await page.evaluate(() => console.warn('second-session-marker'));
   const secondDownloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Stop chart log and download' }).click();
+  await button.click();
   const secondDownload = await secondDownloadPromise;
   const secondPath = await secondDownload.path();
   const secondContent = await readFile(secondPath!, 'utf8');
