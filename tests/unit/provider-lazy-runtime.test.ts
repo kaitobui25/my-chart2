@@ -152,7 +152,9 @@ describe('lazy chart provider lifecycle', () => {
     expect(code).toContain("activeProvider === 'fiinquant'");
     expect(code).toContain("? { symbol: directSymbol, name: 'Direct symbol', exchange: 'FiinQuant' } satisfies SymbolSearchResult");
     expect(code).toContain("const directSymbol = command.value.trim().toUpperCase();");
-    expect(code).toContain("const message = `không có dữ liệu ${this.symbol}`;");
+    expect(code).toContain('const symbol = this.symbol;');
+    expect(code).toContain('const interval = this.interval;');
+    expect(code).toContain("const message = `không có dữ liệu ${symbol}`;");
   });
 
   it('does not spend FiinQuant ticker quota on background watchlist feeds', async () => {
