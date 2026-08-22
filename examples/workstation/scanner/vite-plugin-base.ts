@@ -278,8 +278,8 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'binance-spot' | 'binance-usdm';",
-    "type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'vnstock' | 'binance-spot' | 'binance-usdm';",
+    "type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'binance-local' | 'binance-spot' | 'binance-usdm';",
+    "type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'vnstock' | 'binance-local' | 'binance-spot' | 'binance-usdm';",
   );
   code = replaceRequired(
     code,
@@ -288,13 +288,13 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "    || stored === 'fiinquant'\n    || stored === 'binance-spot'",
-    "    || stored === 'fiinquant'\n    || stored === 'vnstock'\n    || stored === 'binance-spot'",
+    "    || stored === 'fiinquant'\n    || stored === 'binance-local'\n    || stored === 'binance-spot'",
+    "    || stored === 'fiinquant'\n    || stored === 'vnstock'\n    || stored === 'binance-local'\n    || stored === 'binance-spot'",
   );
   code = replaceRequired(
     code,
-    "const demoFeed = new SampleDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
-    "const demoFeed = new SampleDatafeed();\nconst vnstockFeed = new VnstockDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
+    "const demoFeed = new SampleDatafeed();\nconst binanceLocalFeed = new BinanceLocalDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
+    "const demoFeed = new SampleDatafeed();\nconst vnstockFeed = new VnstockDatafeed();\nconst binanceLocalFeed = new BinanceLocalDatafeed();\nconst binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });",
   );
   code = replaceRequired(
     code,
@@ -328,28 +328,28 @@ function integrateVnstockMain(original: string): string {
   );
   code = replaceRequired(
     code,
-    "    fiinquant: 'FiinQuant',\n    'binance-spot': 'Binance Spot',",
-    "    fiinquant: 'FiinQuant',\n    vnstock: 'Vnstock',\n    'binance-spot': 'Binance Spot',",
+    "    fiinquant: 'FiinQuant',\n    'binance-local': 'Binance Local Archive',\n    'binance-spot': 'Binance Spot',",
+    "    fiinquant: 'FiinQuant',\n    vnstock: 'Vnstock',\n    'binance-local': 'Binance Local Archive',\n    'binance-spot': 'Binance Spot',",
   );
   code = replaceRequired(
     code,
-    "for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {",
-    "for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'vnstock', 'fiinquant'] as PriceProviderId[]) {",
+    "for (const provider of ['demo', 'binance-local', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {",
+    "for (const provider of ['demo', 'binance-local', 'binance-spot', 'binance-usdm', 'dnse', 'vnstock', 'fiinquant'] as PriceProviderId[]) {",
   );
   code = replaceRequired(
     code,
-    "  if (provider === 'fiinquant') return 'FiinQuant';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
-    "  if (provider === 'fiinquant') return 'FiinQuant';\n  if (provider === 'vnstock') return 'Vnstock';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
+    "  if (provider === 'fiinquant') return 'FiinQuant';\n  if (provider === 'binance-local') return 'Binance Local Archive';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
+    "  if (provider === 'fiinquant') return 'FiinQuant';\n  if (provider === 'vnstock') return 'Vnstock';\n  if (provider === 'binance-local') return 'Binance Local Archive';\n  return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';",
   );
   code = replaceRequired(
     code,
-    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'binance-spot'",
-    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'vnstock'\n          ? vnstockConnectionState === 'connected' ? 'REST polling' : vnstockConnectionState === 'checking' ? tr('đang kiểm tra') : tr('ngoại tuyến')\n        : activeProvider === 'binance-spot'",
+    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'binance-local'\n          ? 'SQLite · 30m+'\n          : activeProvider === 'binance-spot'",
+    "      : activeProvider === 'fiinquant'\n        ? fiinState\n        : activeProvider === 'binance-local'\n          ? 'SQLite · 30m+'\n          : activeProvider === 'vnstock'\n            ? vnstockConnectionState === 'connected' ? 'REST polling' : vnstockConnectionState === 'checking' ? tr('đang kiểm tra') : tr('ngoại tuyến')\n          : activeProvider === 'binance-spot'",
   );
   code = replaceRequired(
     code,
-    "    isBinanceProvider(activeProvider)\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
-    "    isBinanceProvider(activeProvider)\n      || (activeProvider === 'vnstock' && vnstockConnectionState === 'connected')\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
+    "    activeProvider === 'binance-local'\n      || isBinanceProvider(activeProvider)\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
+    "    activeProvider === 'binance-local'\n      || isBinanceProvider(activeProvider)\n      || (activeProvider === 'vnstock' && vnstockConnectionState === 'connected')\n      || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')",
   );
   code = replaceRequired(
     code,

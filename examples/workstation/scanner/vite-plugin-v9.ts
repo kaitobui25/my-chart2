@@ -11,14 +11,14 @@ function patchProviderAwareTileDefaults(code: string): string {
     '  const savedSymbol = uiPreferences.symbols[index]?.trim().toUpperCase();',
     '  const symbol = template?.symbol?.trim().toUpperCase()',
     '    || savedSymbol',
-    '    || DEFAULT_SYMBOLS[index % DEFAULT_SYMBOLS.length];',
+    '    || defaultSymbolsForProvider(activeProvider)[index % defaultSymbolsForProvider(activeProvider).length];',
   );
   const replacement = lines(
     'function createTileForSlot(index: number, template?: TileTemplate): Tile {',
     '  const providerDefaults = defaultSymbolsForProvider(activeProvider);',
     '  // Extra Binance slots can contain stale Vietnam symbols preserved from a',
     '  // previous one-chart workspace. Explicit template/autosave symbols still win.',
-    '  const savedSymbol = isBinanceProvider(activeProvider) && index > 0',
+    '  const savedSymbol = isCryptoProvider(activeProvider) && index > 0',
     '    ? undefined',
     '    : uiPreferences.symbols[index]?.trim().toUpperCase();',
     '  const symbol = template?.symbol?.trim().toUpperCase()',
