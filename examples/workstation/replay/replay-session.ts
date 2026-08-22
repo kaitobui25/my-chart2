@@ -143,6 +143,7 @@ export class SyncedReplaySession {
   private readonly clock: ReplayClock;
   private phase: ReplaySessionPhase = 'idle';
   private participants: ReplayParticipant[] = [];
+  private participantsPrepared = false;
   private projections = new Map<ReplayParticipant, ReplayProjection>();
   private sourceCandles: Candle[] = [];
   private baseInterval: string | null = null;
@@ -191,6 +192,7 @@ export class SyncedReplaySession {
 
     this.loadToken += 1;
     this.participants = candidates;
+    this.participantsPrepared = false;
     this.symbol = [...symbols][0];
     this.baseInterval = chooseReplayBaseInterval(candidates.map((participant) => participant.interval));
     this.error = null;
@@ -230,8 +232,9 @@ export class SyncedReplaySession {
     this.clock.stop();
     for (const participant of this.participants) {
       participant.setReplaySelecting(false);
-      participant.leaveReplay(reload);
+      if (this.participantsPrepared) participant.leaveReplay(reload);
     }
+    this.participantsPrepared = false;
     this.participants = [];
     this.projections.clear();
     this.sourceCandles = [];
@@ -282,11 +285,6 @@ export class SyncedReplaySession {
       return;
     }
 
-    this.sourceLabel = `${feedContext.label} Replay`;
-    this.phase = 'loading';
-    for (const participant of this.participants) participant.setReplaySelecting(false);
-    this.emitChange();
-
     // Raw replay source only needs the largest bucket containing the selected bar
     // and everything after it. Older visible history is restored separately as a
     // display-only seed, so it cannot influence the replay clock or partial candle.
@@ -307,7 +305,15 @@ export class SyncedReplaySession {
     }
     const limit = Math.max(50, estimated);
 
+    this.sourceLabel = `${feedContext.label} Replay`;
+    this.phase = 'loading';
+    for (const participant of this.participants) participant.setReplaySelecting(false);
+    this.emitChange();
+
     try {
+      // Freeze live/background market work before the first history await. This
+      // prevents Replay loading from competing with Tile history/realtime work.
+      this.prepareParticipantsForReplay();
       const loaded = await feedContext.feed.getHistory(this.symbol, this.baseInterval, limit, range);
       if (token !== this.loadToken || this.phase !== 'loading') return;
       const byTime = new Map<number, Candle>();
@@ -351,7 +357,6 @@ export class SyncedReplaySession {
       this.marketSourceClaimed = true;
       for (let index = 0; index < initialStates.length; index += 1) {
         const { participant, projection, projected } = initialStates[index];
-        participant.enterReplay();
         this.projections.set(participant, projection);
         participant.setReplayData(
           mergeReplayInitialCandles(seeds[index], projected),
@@ -369,6 +374,12 @@ export class SyncedReplaySession {
       if (token !== this.loadToken) return;
       this.cancelSelection(error instanceof Error ? error.message : 'Khong tai duoc du lieu replay');
     }
+  }
+
+  private prepareParticipantsForReplay(): void {
+    if (this.participantsPrepared) return;
+    this.participantsPrepared = true;
+    for (const participant of this.participants) participant.enterReplay();
   }
 
   private applySourceCandle(cursor: number, currentTime: number): void {
@@ -398,7 +409,11 @@ export class SyncedReplaySession {
 
   private cancelSelection(message: string): void {
     this.releaseMarketSource();
-    for (const participant of this.participants) participant.setReplaySelecting(false);
+    for (const participant of this.participants) {
+      participant.setReplaySelecting(false);
+      if (this.participantsPrepared) participant.leaveReplay(true);
+    }
+    this.participantsPrepared = false;
     this.participants = [];
     this.projections.clear();
     this.sourceCandles = [];

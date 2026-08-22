@@ -1,0 +1,86 @@
+import { readFile } from 'node:fs/promises';
+import { expect, test } from '@playwright/test';
+
+test('chart log button records diagnostics and downloads txt on stop', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.removeItem('l2chart.autoSave.workspace.v1');
+    localStorage.setItem('l2chart.priceProviderEnabled', 'false');
+  });
+
+  await page.goto('http://127.0.0.1:53173/', { waitUntil: 'domcontentloaded' });
+
+  const button = page.locator('#global-drawing-toolbar-host .chart-log-button');
+  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute('aria-label', 'Start chart log');
+  await expect(button).toHaveText('LOG');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  const followsTrash = await page.locator('#global-drawing-toolbar-host .drawing-tool-button.danger').evaluate(
+    (trash) => trash.nextElementSibling?.classList.contains('chart-log-button') ?? false,
+  );
+  expect(followsTrash).toBe(true);
+
+  await button.click();
+  await expect(button).toHaveAttribute('aria-label', 'Stop chart log and download');
+  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await expect(button).toHaveClass(/is-recording/);
+  await expect(button).toHaveText('STOP');
+
+  await page.evaluate(async () => {
+    await fetch('/provider-runtime/health');
+  });
+  const symbolInput = page.locator('#watchlist-symbol');
+  await symbolInput.click();
+  await symbolInput.pressSequentially('Zx7');
+
+  const downloadPromise = page.waitForEvent('download');
+  await button.click();
+  const download = await downloadPromise;
+
+  await expect(button).toHaveAttribute('aria-label', 'Start chart log');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await expect(button).not.toHaveClass(/is-recording/);
+  await expect(button).toHaveText('LOG');
+  expect(download.suggestedFilename()).toMatch(/^l2chart-log-\d{8}-\d{6}\.txt$/);
+
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const content = await readFile(path!, 'utf8');
+  expect(content).toContain('L2Chart chart log');
+  expect(content).toContain('[SESSION] START');
+  expect(content).toContain('[STATE] START');
+  expect(content).toContain('[NET NET');
+  expect(content).toContain('/provider-runtime/health');
+  expect(content).toContain('[UI] CLICK');
+  expect(content).toContain('[UI] KEY · [char]');
+  expect(content).not.toContain('[UI] KEY · Z');
+  expect(content).not.toContain('[UI] KEY · x');
+  expect(content).not.toContain('[UI] KEY · 7');
+  expect(content).toContain('[SESSION] STOP');
+});
+
+test('starting a new chart log creates a fresh session', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.removeItem('l2chart.autoSave.workspace.v1');
+    localStorage.setItem('l2chart.priceProviderEnabled', 'false');
+  });
+  await page.goto('http://127.0.0.1:53173/', { waitUntil: 'domcontentloaded' });
+
+  const button = page.locator('#global-drawing-toolbar-host .chart-log-button');
+  await expect(button).toBeVisible();
+  await button.click();
+  const firstDownload = page.waitForEvent('download');
+  await button.click();
+  await firstDownload;
+
+  await button.click();
+  await page.evaluate(() => console.warn('second-session-marker'));
+  const secondDownloadPromise = page.waitForEvent('download');
+  await button.click();
+  const secondDownload = await secondDownloadPromise;
+  const secondPath = await secondDownload.path();
+  const secondContent = await readFile(secondPath!, 'utf8');
+
+  expect(secondContent).toContain('second-session-marker');
+  expect(secondContent.match(/\[SESSION\] START/g)).toHaveLength(1);
+  expect(secondContent.match(/\[SESSION\] STOP/g)).toHaveLength(1);
+});
