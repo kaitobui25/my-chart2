@@ -14,6 +14,7 @@ export interface BinanceCacheCoverage {
 }
 
 export interface BinanceHistoryCacheOptions {
+  enabled?: boolean;
   readTimeoutMs?: number;
   writeTimeoutMs?: number;
   writeChunkSize?: number;
@@ -34,11 +35,14 @@ function nextTask(): Promise<void> {
 /**
  * Binance-specific scheduling over the shared browser cache.
  *
- * Reads are deliberately short-lived: a slow IndexedDB cursor is aborted instead
- * of being left behind as a zombie transaction. Writes are small, cancellable
- * chunks so a new chart read can immediately pre-empt stale background refreshes.
+ * Browser persistence is intentionally opt-in for the default Binance provider.
+ * On some Chromium/Opera sessions an IndexedDB transaction can remain blocked for
+ * many seconds even after abort(), which is worse than simply refetching Binance.
+ * Callers that explicitly inject a cache keep persistence enabled by default.
  */
 export class BinanceHistoryCache {
+  private readonly cache: BrowserHistoryCacheApi;
+  private readonly enabled: boolean;
   private readonly readTimeoutMs: number;
   private readonly writeTimeoutMs: number;
   private readonly writeChunkSize: number;
@@ -46,19 +50,23 @@ export class BinanceHistoryCache {
   private foregroundGeneration = 0;
 
   constructor(
-    private readonly cache: BrowserHistoryCacheApi = new BrowserHistoryCache(),
+    cache?: BrowserHistoryCacheApi,
     options: BinanceHistoryCacheOptions = {},
   ) {
+    const injectedCache = cache !== undefined;
+    this.cache = cache ?? new BrowserHistoryCache();
+    this.enabled = options.enabled ?? injectedCache;
     this.readTimeoutMs = Math.max(0, options.readTimeoutMs ?? DEFAULT_READ_TIMEOUT_MS);
     this.writeTimeoutMs = Math.max(0, options.writeTimeoutMs ?? DEFAULT_WRITE_TIMEOUT_MS);
     this.writeChunkSize = Math.max(1, Math.floor(options.writeChunkSize ?? DEFAULT_WRITE_CHUNK_SIZE));
   }
 
   get available(): boolean {
-    return this.cache.available;
+    return this.enabled && this.cache.available;
   }
 
   async coverage(market: BinanceMarket, symbol: string, interval: string): Promise<BinanceCacheCoverage | null> {
+    if (!this.enabled) return null;
     const ranges = await this.cache.coverage(sourceForMarket(market), symbol, interval);
     if (ranges.length === 0) return null;
     return {
@@ -73,6 +81,7 @@ export class BinanceHistoryCache {
     interval: string,
     limit: number,
   ): Promise<Candle[]> {
+    if (!this.enabled) return [];
     this.beginForegroundRead();
     return this.readWithDeadline((signal) =>
       this.cache.readLatest(sourceForMarket(market), symbol, interval, limit, signal));
@@ -86,6 +95,7 @@ export class BinanceHistoryCache {
     to: number,
     limit?: number,
   ): Promise<Candle[]> {
+    if (!this.enabled) return [];
     this.beginForegroundRead();
     return this.readWithDeadline((signal) =>
       this.cache.readRange(sourceForMarket(market), symbol, interval, from, to, limit, signal));
@@ -97,7 +107,7 @@ export class BinanceHistoryCache {
     interval: string,
     candles: Candle[],
   ): Promise<void> {
-    if (candles.length === 0) return;
+    if (!this.enabled || candles.length === 0) return;
 
     // Newer data wins. Never build a queue of stale full-history writes.
     this.cancelActiveWrites();
@@ -131,6 +141,7 @@ export class BinanceHistoryCache {
   async clearMarket(market: BinanceMarket): Promise<void> {
     this.foregroundGeneration += 1;
     this.cancelActiveWrites();
+    if (!this.enabled) return;
     await this.cache.clearSource(sourceForMarket(market));
   }
 
