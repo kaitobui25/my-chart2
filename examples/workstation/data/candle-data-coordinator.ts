@@ -137,6 +137,11 @@ export class CandleDataCoordinator {
     this.quietUntil = this.now() + this.idleMs;
   }
 
+  /** Allow lower-priority work to join the same workstation quiet-period gate. */
+  async waitUntilIdle(): Promise<void> {
+    await this.waitForIdle();
+  }
+
   /** Clear only this provider's session RAM. Provider-owned persistence is untouched. */
   clearProvider(providerId: string): void {
     const prefix = `${providerId}|`;
