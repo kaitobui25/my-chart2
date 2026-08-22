@@ -1,3 +1,5 @@
+import type { Candle } from '../../src/core/types';
+import type { HistoryRange } from '../../src/datafeed';
 import {
   BinanceDatafeed as BaseBinanceDatafeed,
   BinanceIdleRefreshCoordinator,
@@ -10,9 +12,17 @@ interface WorkstationIdleRunOptions {
 }
 
 const DEFAULT_WORKSTATION_IDLE_MS = 650;
+const LATEST_RETRY_DELAY_MS = 150;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, ms)));
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'name' in error
+    && (error as { name?: unknown }).name === 'AbortError';
 }
 
 /**
@@ -74,6 +84,26 @@ export class BinanceDatafeed extends BaseBinanceDatafeed {
       refreshCoordinator: options.refreshCoordinator
         ?? new WorkstationBinanceIdleRefreshCoordinator(),
     });
+  }
+
+  override async getHistory(
+    symbol: string,
+    interval: string,
+    limit = 500,
+    range?: HistoryRange,
+  ): Promise<Candle[]> {
+    try {
+      return await super.getHistory(symbol, interval, limit, range);
+    } catch (error) {
+      // In the base Binance feed, the internal request timeout is implemented by
+      // AbortController.abort(), so a timeout is surfaced as AbortError. Latest
+      // chart loads have no caller cancellation signal, therefore one retry is
+      // safe and prevents a transient 10s network stall from leaving a tile empty.
+      // Explicit range / load-older requests remain single-shot background work.
+      if (range || !isAbortError(error)) throw error;
+      await delay(LATEST_RETRY_DELAY_MS);
+      return super.getHistory(symbol, interval, limit, range);
+    }
   }
 }
 
