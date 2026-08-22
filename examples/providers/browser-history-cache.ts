@@ -267,7 +267,7 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     const valid = candles.filter((candle) => Number.isFinite(candle.time));
     if (valid.length === 0) return;
 
-    let releaseAbort = () => undefined;
+    let releaseAbort: () => void = () => undefined;
     try {
       const transaction = database.transaction([CANDLES_STORE, SERIES_STORE], 'readwrite');
       releaseAbort = abortTransactionOnSignal(transaction, signal);
@@ -383,7 +383,7 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     const database = await this.database();
     if (!database || signal?.aborted) return [];
     const normalizedLimit = limit === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.floor(limit));
-    let releaseAbort = () => undefined;
+    let releaseAbort: () => void = () => undefined;
     try {
       const transaction = database.transaction(CANDLES_STORE, 'readonly');
       releaseAbort = abortTransactionOnSignal(transaction, signal);
