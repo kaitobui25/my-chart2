@@ -32,6 +32,22 @@ function wait(ms: number): Promise<void> {
 }
 
 describe('BinanceHistoryCache transaction scheduling', () => {
+  it('can completely bypass browser persistence without touching IndexedDB', async () => {
+    const shared = baseCache();
+    const cache = new BinanceHistoryCache(shared, { enabled: false });
+
+    expect(cache.available).toBe(false);
+    await expect(cache.readLatest('spot', 'BTCUSDT', '1M', 120)).resolves.toEqual([]);
+    await expect(cache.readRange('spot', 'BTCUSDT', '1d', 100, 200, 50)).resolves.toEqual([]);
+    await cache.write('spot', 'BTCUSDT', '1w', [candle(1), candle(2)]);
+    await cache.clearMarket('spot');
+
+    expect(shared.readLatest).not.toHaveBeenCalled();
+    expect(shared.readRange).not.toHaveBeenCalled();
+    expect(shared.write).not.toHaveBeenCalled();
+    expect(shared.clearSource).not.toHaveBeenCalled();
+  });
+
   it('aborts the underlying IndexedDB read when the cache deadline expires', async () => {
     let seenSignal: AbortSignal | undefined;
     const shared = baseCache({
