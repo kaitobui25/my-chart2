@@ -138,9 +138,36 @@ describe('Binance workstation multi-chart refresh isolation', () => {
     expect((eth[0] as Candle).close).toBe(200);
   });
 
-  it('routes the workstation build through the multi-chart Binance adapter', async () => {
+  it('retries one interrupted latest request instead of leaving the chart empty', async () => {
+    const cache = emptyBrowserCache();
+    let attempts = 0;
+    const fetchImpl = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new DOMException('The user aborted a request.', 'AbortError');
+      return new Response(JSON.stringify([
+        klineRow(Math.floor(Date.now() / 1000) - 60, 150),
+      ]), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const feed = new BinanceDatafeed({
+      market: 'spot',
+      cache: new BinanceHistoryCache(cache),
+      fetchImpl,
+      requestTimeoutMs: 1000,
+      refreshCoordinator: new WorkstationBinanceIdleRefreshCoordinator(0),
+    });
+
+    const candles = await feed.getHistory('SOLUSDT', '1M', 1);
+    expect(attempts).toBe(2);
+    expect(candles).toHaveLength(1);
+    expect(candles[0].close).toBe(150);
+  });
+
+  it('routes workstation Binance through the adapter and deprioritizes older history', async () => {
     const code = await transformedWorkstation();
     expect(code).toContain("import { BinanceDatafeed } from '../providers/binance-workstation';");
     expect(code).not.toContain("import { BinanceDatafeed } from '../providers/binance';");
+    expect(code).toContain('await candleDataCoordinator.waitUntilIdle();');
+    expect(code).toContain('tiles.some((tile) => tile !== this && tile.loading)');
   });
 });
