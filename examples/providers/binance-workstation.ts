@@ -15,6 +15,12 @@ interface WorkstationIdleRunOptions {
 const DEFAULT_WORKSTATION_IDLE_MS = 650;
 const LATEST_RETRY_DELAY_MS = 150;
 const SPOT_FALLBACK_REST_BASE = 'https://api.binance.com';
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const REST_PROXY_ROUTES = new Map<string, string>([
+  ['https://data-api.binance.vision', '/binance-spot-api'],
+  ['https://api.binance.com', '/binance-spot-fallback-api'],
+  ['https://fapi.binance.com', '/binance-usdm-api'],
+]);
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, ms)));
@@ -25,6 +31,44 @@ function isAbortError(error: unknown): boolean {
     && error !== null
     && 'name' in error
     && (error as { name?: unknown }).name === 'AbortError';
+}
+
+function loopbackOrigin(): string | null {
+  const location = globalThis.location;
+  if (!location || !LOOPBACK_HOSTS.has(location.hostname)) return null;
+  return location.origin;
+}
+
+/** Rewrite official Binance REST URLs through the local Vite proxy used by the workstation. */
+export function rewriteWorkstationBinanceRestUrl(rawUrl: string, origin: string): string {
+  let upstream: URL;
+  let localOrigin: URL;
+  try {
+    upstream = new URL(rawUrl);
+    localOrigin = new URL(origin);
+  } catch {
+    return rawUrl;
+  }
+  const route = REST_PROXY_ROUTES.get(upstream.origin);
+  if (!route) return rawUrl;
+  localOrigin.pathname = `${route}${upstream.pathname}`;
+  localOrigin.search = upstream.search;
+  localOrigin.hash = '';
+  return localOrigin.toString();
+}
+
+function workstationFetchImpl(): typeof fetch {
+  const baseFetch = globalThis.fetch.bind(globalThis);
+  const origin = loopbackOrigin();
+  if (!origin) return baseFetch;
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const rawUrl = input instanceof Request ? input.url : String(input);
+    const rewritten = rewriteWorkstationBinanceRestUrl(rawUrl, origin);
+    if (input instanceof Request && rewritten !== rawUrl) {
+      return baseFetch(new Request(rewritten, input), init);
+    }
+    return baseFetch(rewritten, init);
+  }) as typeof fetch;
 }
 
 /**
@@ -87,10 +131,15 @@ export class BinanceDatafeed extends BaseBinanceDatafeed {
     const cache = options.cache ?? new BinanceHistoryCache();
     const refreshCoordinator = options.refreshCoordinator
       ?? new WorkstationBinanceIdleRefreshCoordinator();
+    // Browser-to-Binance REST can hang on some local networks even while the
+    // localhost workstation itself is healthy. Keep custom fetch implementations
+    // untouched for tests/embedders; otherwise local dev routes REST through Vite.
+    const fetchImpl = options.fetchImpl ?? workstationFetchImpl();
     super({
       ...options,
       market,
       cache,
+      fetchImpl,
       refreshCoordinator,
     });
     this.fallbackLatestFeed = market === 'spot' && !options.restBase
@@ -98,6 +147,7 @@ export class BinanceDatafeed extends BaseBinanceDatafeed {
         ...options,
         market,
         cache,
+        fetchImpl,
         restBase: SPOT_FALLBACK_REST_BASE,
         refreshCoordinator,
       })
