@@ -253,7 +253,7 @@ provenance remain a separately documented provider trust boundary.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution rules and
 [`SECURITY.md`](SECURITY.md) for reporting security issues. Maintainers should
-follow [`RELEASING.md`](RELEASING.md); npm publishing is intentionally blocked
+follow [`docs/RELEASING.md`](docs/RELEASING.md); npm publishing is intentionally blocked
 until the one-time first-package bootstrap and trusted-publisher setup are done.
 
 ## License and third-party software
