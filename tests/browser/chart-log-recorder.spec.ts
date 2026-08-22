@@ -27,6 +27,9 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
     await fetch('/provider-runtime/health');
   });
   await page.locator('#ind-btn').click();
+  const symbolInput = page.locator('#watchlist-symbol');
+  await symbolInput.click();
+  await symbolInput.pressSequentially('Zx7');
 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Stop chart log and download' }).click();
@@ -46,6 +49,10 @@ test('chart log button records diagnostics and downloads txt on stop', async ({ 
   expect(content).toContain('[NET NET');
   expect(content).toContain('/provider-runtime/health');
   expect(content).toContain('[UI] CLICK');
+  expect(content).toContain('[UI] KEY · [char]');
+  expect(content).not.toContain('[UI] KEY · Z');
+  expect(content).not.toContain('[UI] KEY · x');
+  expect(content).not.toContain('[UI] KEY · 7');
   expect(content).toContain('[SESSION] STOP');
 });
 
