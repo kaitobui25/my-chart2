@@ -329,6 +329,7 @@ export class BinanceDatafeed implements Datafeed {
       this.rememberRecent(normalized, interval, requestedLimit, cached, false);
       return cached;
     }
+    this.recentHistory.delete(this.historyKey(normalized, interval));
     return this.readCache(
       this.cache.readRange(
         this.market,
@@ -372,6 +373,16 @@ export class BinanceDatafeed implements Datafeed {
       this.persistClosedCandles(normalized, interval, remote);
       this.rememberRecent(normalized, interval, requestedLimit, remote, true);
       return remote.slice(-requestedLimit);
+    }
+
+    const remembered = this.recentSnapshot(normalized, interval);
+    if (remembered && this.rangeTouchesNow(range, interval)) {
+      const from = Math.min(range.from, range.to);
+      const to = Math.max(range.from, range.to);
+      const recent = remembered.candles
+        .filter((candle) => candle.time >= from && candle.time <= to)
+        .slice(-requestedLimit);
+      if (recent.length > 0) return recent;
     }
 
     if (calendarInterval) {
@@ -609,6 +620,12 @@ export class BinanceDatafeed implements Datafeed {
       candles: candles.map((candle) => ({ ...candle })),
       fresh,
     });
+  }
+
+  private rangeTouchesNow(range: HistoryRange, interval: string): boolean {
+    const to = Math.max(range.from, range.to);
+    const recentWindow = Math.max(300, intervalApproxSeconds(interval) * 2);
+    return to >= Math.floor(Date.now() / 1000) - recentWindow;
   }
 
   private readCache<T>(promise: Promise<T>, fallback: T): Promise<T> {
