@@ -94,6 +94,35 @@ describe('Binance cache-first idle refresh', () => {
     expect(sockets.factory).not.toHaveBeenCalled();
   });
 
+  it('does not let the workstation initial gap check bypass the deferred refresh', async () => {
+    const nowBar = Math.floor(Date.now() / 1000 / DAY) * DAY;
+    const cached = [
+      candle(nowBar - 4 * DAY, 15),
+      candle(nowBar - 3 * DAY, 16),
+      candle(nowBar - 2 * DAY, 17),
+    ];
+    const shared = fakeBrowserCache(cached);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify([
+      klineRow(nowBar - DAY, 18),
+    ]), { status: 200 })) as unknown as typeof fetch;
+    const feed = new BinanceDatafeed({
+      cache: new BinanceHistoryCache(shared),
+      fetchImpl,
+      refreshCoordinator: new BinanceIdleRefreshCoordinator(50),
+    });
+
+    await feed.getCachedHistory('BTCUSDT', '1d', 3);
+    await feed.getHistory('BTCUSDT', '1d', 3);
+    const tail = await feed.getHistory('BTCUSDT', '1d', 8, {
+      from: nowBar - 2 * DAY,
+      to: Math.floor(Date.now() / 1000),
+    });
+
+    expect(tail).toEqual([cached[2]]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(shared.readRange).not.toHaveBeenCalled();
+  });
+
   it('refreshes missing recent candles only after the quiet window, then opens realtime', async () => {
     const nowBar = Math.floor(Date.now() / 1000 / DAY) * DAY;
     const cached = [
