@@ -25,33 +25,78 @@ function isAllowedBrowserRequest(req: IncomingMessage): boolean {
   }
 }
 
-function installStockFlowProxy(middlewares: {
-  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
-}): void {
-  middlewares.use('/stock-flow-api', async (req, res) => {
+async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return chunks.length ? new Uint8Array(Buffer.concat(chunks)) : undefined;
+}
+
+function proxyStockdata(
+  req: IncomingMessage,
+  res: ServerResponse,
+  upstreamUrl: string,
+  allowedMethods: readonly string[],
+): void {
+  void (async () => {
     if (!isAllowedBrowserRequest(req)) {
       sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
       return;
     }
-    if (req.method !== 'GET') {
+    const method = req.method || 'GET';
+    if (!allowedMethods.includes(method)) {
       sendJson(res, 405, { error: 'Method not allowed' });
       return;
     }
 
     try {
-      const local = new URL(req.url || '/', 'http://127.0.0.1');
-      const upstream = await fetch(`${STOCKDATA_TARGET}/api/chart-flow${local.search}`, {
-        signal: AbortSignal.timeout(5_000),
+      const body = await readBody(req);
+      const upstream = await fetch(upstreamUrl, {
+        method,
+        headers: body ? { 'Content-Type': req.headers['content-type'] || 'application/json' } : undefined,
+        body,
+        signal: AbortSignal.timeout(15_000),
       });
       res.statusCode = upstream.status;
-      res.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json; charset=utf-8');
+      res.setHeader(
+        'content-type',
+        upstream.headers.get('content-type') ?? 'application/json; charset=utf-8',
+      );
       res.setHeader('cache-control', 'no-store');
       res.end(Buffer.from(await upstream.arrayBuffer()));
     } catch (error) {
       sendJson(res, 503, {
-        error: `Stockdata web is offline at ${STOCKDATA_TARGET}: ${error instanceof Error ? error.message : String(error)}`,
+        error: `Stockdata web is offline at ${STOCKDATA_TARGET}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       });
     }
+  })();
+}
+
+function installStockdataProxies(middlewares: {
+  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
+}): void {
+  middlewares.use('/stockdata-api', (req, res) => {
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    proxyStockdata(
+      req,
+      res,
+      `${STOCKDATA_TARGET}/api${local.pathname}${local.search}`,
+      ['GET', 'POST'],
+    );
+  });
+
+  middlewares.use('/stock-flow-api', (req, res) => {
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    proxyStockdata(
+      req,
+      res,
+      `${STOCKDATA_TARGET}/api/chart-flow${local.search}`,
+      ['GET'],
+    );
   });
 }
 
@@ -231,10 +276,10 @@ export function stockFlowIntegration(): Plugin {
     // the already-injected stock-flow controls.
     enforce: 'pre',
     configureServer(server) {
-      installStockFlowProxy(server.middlewares);
+      installStockdataProxies(server.middlewares);
     },
     configurePreviewServer(server) {
-      installStockFlowProxy(server.middlewares);
+      installStockdataProxies(server.middlewares);
     },
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
