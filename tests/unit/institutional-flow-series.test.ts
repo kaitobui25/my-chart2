@@ -3,7 +3,7 @@ import {
   formatInstitutionalFlowValue,
   institutionalFlowRegionLayout,
   institutionalFlowZeroPositionForY,
-} from '../../src/indicators/builtin/institutional-flow-series';
+} from '../../src/indicators/external/institutional-flow-series';
 
 describe('institutional flow value labels', () => {
   it('treats billions as the implicit unit and keeps million values explicit', () => {

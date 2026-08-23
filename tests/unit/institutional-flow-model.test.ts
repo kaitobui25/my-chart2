@@ -5,7 +5,7 @@ import {
   institutionalFlowRangeForCandles,
   isInstitutionalFlowVietnamEquitySymbol,
   vietnamMonthKey,
-} from '../../src/indicators/builtin/institutional-flow-model';
+} from '../../src/indicators/external/institutional-flow-model';
 
 function candle(time: number): Candle {
   return { time, open: 10, high: 11, low: 9, close: 10.5, volume: 100 };

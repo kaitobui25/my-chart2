@@ -1,9 +1,9 @@
 import { registerIndicator, type IndicatorDef } from './registry';
 import bollinger from './builtin/bollinger';
 import ema from './builtin/ema';
-import institutionalFlow from './builtin/institutional-flow';
+import institutionalFlow from './external/institutional-flow';
 import macd from './builtin/macd';
-import pe from './builtin/pe';
+import pe from './external/pe';
 import rsi from './builtin/rsi';
 import sma from './builtin/sma';
 import { indicators as taSuite } from './builtin/ta-suite';
@@ -11,10 +11,10 @@ import visibleRangeExtrema from './builtin/visible-range-extrema';
 import volume from './builtin/volume';
 
 /**
- * Built-ins are imported explicitly so the public bundle always contains the
- * full indicator registry. Local custom indicators remain auto-discovered.
+ * Bundled indicators are imported explicitly so the public bundle always
+ * contains the full indicator registry. Local custom indicators remain auto-discovered.
  */
-const builtins: IndicatorDef[] = [
+const bundled: IndicatorDef[] = [
   sma,
   ema,
   bollinger,
@@ -40,7 +40,7 @@ const modules = import.meta.glob('./custom/*.ts', { eager: true }) as Record<
  * be replaced independently, leaving the flag set while the registry is empty.
  */
 export function registerAllIndicators(): void {
-  for (const def of builtins) registerIndicator(def);
+  for (const def of bundled) registerIndicator(def);
 
   for (const mod of Object.values(modules)) {
     const def = mod.default;

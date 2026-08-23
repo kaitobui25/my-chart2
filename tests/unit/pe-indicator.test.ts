@@ -7,24 +7,24 @@ import {
   peQuarterEffectiveAt,
   peValuationRangeForCandles,
   type PeQuarter,
-} from '../../src/indicators/builtin/pe-model';
+} from '../../src/indicators/external/pe-model';
 import {
   mergePeFundamentals,
   type PeFundamentalsRecord,
-} from '../../src/indicators/builtin/pe-cache';
+} from '../../src/indicators/external/pe-cache';
 import {
   PeFundamentalsRepository,
   type PeCacheApi,
-} from '../../src/indicators/builtin/pe-client';
+} from '../../src/indicators/external/pe-client';
 import {
   mergePeValuation,
   missingPeValuationRanges,
   type PeValuationRecord,
-} from '../../src/indicators/builtin/pe-valuation-cache';
+} from '../../src/indicators/external/pe-valuation-cache';
 import {
   PeValuationRepository,
   type PeValuationCacheApi,
-} from '../../src/indicators/builtin/pe-valuation-client';
+} from '../../src/indicators/external/pe-valuation-client';
 
 const VN_OFFSET = 7 * 60 * 60;
 const DAY = 24 * 60 * 60;
