@@ -71,12 +71,7 @@ def _valuation_time(value: Any) -> int | None:
         except ValueError:
             pass
         if parsed is None:
-            for fmt in (
-                "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%d",
-                "%d/%m/%Y %H:%M:%S",
-                "%d/%m/%Y",
-            ):
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
                 try:
                     parsed = datetime.strptime(text, fmt)
                     break
@@ -91,52 +86,24 @@ def _valuation_time(value: Any) -> int | None:
     return int(parsed.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
 
 
-def _normalize_symbols(symbols: list[str]) -> list[str]:
-    return list(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))
-
-
-def normalize_stock_valuation_many(
-    value: Any,
-    symbols: list[str],
-) -> dict[str, list[dict[str, float | int | None]]]:
-    normalized = _normalize_symbols(symbols)
-    allowed = set(normalized)
-    by_symbol: dict[str, dict[int, dict[str, float | int | None]]] = {
-        symbol: {} for symbol in normalized
-    }
-    fallback_symbol = normalized[0] if len(normalized) == 1 else ""
-
+def normalize_stock_valuation(value: Any, symbol: str) -> list[dict[str, float | int | None]]:
+    normalized_symbol = symbol.strip().upper()
+    by_time: dict[int, dict[str, float | int | None]] = {}
     for row in _records(value):
         row_symbol = str(
-            row.get("ticker")
-            or row.get("Ticker")
-            or row.get("symbol")
-            or row.get("Symbol")
-            or fallback_symbol
+            row.get("ticker") or row.get("Ticker") or row.get("symbol") or row.get("Symbol") or normalized_symbol
         ).strip().upper()
-        if row_symbol not in allowed:
+        if row_symbol and row_symbol != normalized_symbol:
             continue
         timestamp = _valuation_time(
-            row.get("timestamp")
-            or row.get("Timestamp")
-            or row.get("date")
-            or row.get("Date")
+            row.get("timestamp") or row.get("Timestamp") or row.get("date") or row.get("Date")
         )
         pe = _finite(row.get("pe") if "pe" in row else row.get("PE"))
         pb = _finite(row.get("pb") if "pb" in row else row.get("PB"))
         if timestamp is None or (pe is None and pb is None):
             continue
-        by_symbol[row_symbol][timestamp] = {"time": timestamp, "pe": pe, "pb": pb}
-
-    return {
-        symbol: [by_symbol[symbol][key] for key in sorted(by_symbol[symbol])]
-        for symbol in normalized
-    }
-
-
-def normalize_stock_valuation(value: Any, symbol: str) -> list[dict[str, float | int | None]]:
-    normalized = symbol.strip().upper()
-    return normalize_stock_valuation_many(value, [normalized]).get(normalized, [])
+        by_time[timestamp] = {"time": timestamp, "pe": pe, "pb": pb}
+    return [by_time[key] for key in sorted(by_time)]
 
 
 class FiinQuantGateway(core.FiinQuantGateway):
@@ -148,31 +115,20 @@ class FiinQuantGateway(core.FiinQuantGateway):
         global _ACTIVE_GATEWAY
         _ACTIVE_GATEWAY = self
 
-    def fetch_stock_valuations(
-        self,
-        symbols: list[str],
-        from_time: int,
-        to_time: int,
-    ) -> dict[str, list[dict[str, float | int | None]]]:
-        normalized = _normalize_symbols(symbols)
+    def fetch_stock_valuation(self, symbol: str, from_time: int, to_time: int) -> list[dict]:
+        normalized = symbol.strip().upper()
         if not normalized:
-            return {}
+            return []
         start = min(from_time, to_time)
         end = max(from_time, to_time)
         client = self._ensure_client()
         with self._valuation_slot, self._history_slots:
             raw = client.MarketDepth().get_stock_valuation(
-                tickers=normalized,
+                tickers=[normalized],
                 from_date=datetime.fromtimestamp(start, core.VN_TZ).strftime("%Y-%m-%d"),
                 to_date=datetime.fromtimestamp(end, core.VN_TZ).strftime("%Y-%m-%d"),
             )
-        return normalize_stock_valuation_many(raw, normalized)
-
-    def fetch_stock_valuation(self, symbol: str, from_time: int, to_time: int) -> list[dict]:
-        normalized = symbol.strip().upper()
-        if not normalized:
-            return []
-        return self.fetch_stock_valuations([normalized], from_time, to_time).get(normalized, [])
+        return normalize_stock_valuation(raw, normalized)
 
 
 # The core session endpoint resolves FiinQuantGateway from its module globals at
@@ -193,15 +149,9 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
         current_gateway = _ACTIVE_GATEWAY
         if current_gateway is None:
             return web.json_response({"message": "FiinQuant session is not configured"}, status=503)
-
-        symbols_param = request.query.get("symbols", "").strip()
-        symbols = _normalize_symbols(symbols_param.split(",")) if symbols_param else []
-        if not symbols:
-            symbol = request.query.get("symbol", "").strip().upper()
-            symbols = [symbol] if symbol else []
-        if not symbols:
-            return web.json_response({"message": "symbol or symbols is required"}, status=400)
-
+        symbol = request.query.get("symbol", "").strip().upper()
+        if not symbol:
+            return web.json_response({"message": "symbol is required"}, status=400)
         try:
             from_time = int(request.query.get("from", ""))
             to_time = int(request.query.get("to", ""))
@@ -209,32 +159,21 @@ def build_app(gateway: FiinQuantGateway | None) -> web.Application:
             return web.json_response({"message": "from/to must be unix timestamps"}, status=400)
         if from_time <= 0 or to_time <= 0:
             return web.json_response({"message": "from/to are required"}, status=400)
-
         try:
-            series = await asyncio.get_running_loop().run_in_executor(
+            points = await asyncio.get_running_loop().run_in_executor(
                 None,
-                current_gateway.fetch_stock_valuations,
-                symbols,
+                current_gateway.fetch_stock_valuation,
+                symbol,
                 from_time,
                 to_time,
             )
         except Exception as exc:  # noqa: BLE001
             return web.json_response({"message": str(exc)[:300]}, status=502)
-
-        if symbols_param:
-            return web.json_response({
-                "symbols": symbols,
-                "source": "fiinquant-stock-valuation",
-                "cadence": "1d",
-                "series": series,
-            })
-
-        symbol = symbols[0]
         return web.json_response({
             "symbol": symbol,
             "source": "fiinquant-stock-valuation",
             "cadence": "1d",
-            "points": series.get(symbol, []),
+            "points": points,
         })
 
     app.router.add_get("/valuation/stock", stock_valuation)
@@ -247,10 +186,7 @@ def main() -> None:
     password = os.environ.get("FIINQUANT_PASSWORD", "")
     gateway = FiinQuantGateway(username, password) if username and password else None
     if gateway is None:
-        print(
-            "[warning] FIINQUANT_USERNAME/PASSWORD are not configured; "
-            "/history and /valuation/stock return 503"
-        )
+        print("[warning] FIINQUANT_USERNAME/PASSWORD are not configured; /history and /valuation/stock return 503")
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8720"))
     print(f"FiinQuant sidecar listening on http://{host}:{port}")
