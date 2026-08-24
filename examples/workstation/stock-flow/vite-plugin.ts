@@ -3,6 +3,7 @@ import type { Plugin } from 'vite';
 import {
   readInstitutionalFlowFromSqlite,
   resolveStockdataDbPath,
+  StockFlowDatabaseError,
   StockFlowInputError,
 } from './sqlite-reader';
 
@@ -106,7 +107,10 @@ function serveInstitutionalFlow(req: IncomingMessage, res: ServerResponse, dbPat
         sendJson(res, 400, { error: error.message });
         return;
       }
-      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) });
+      const detail = error instanceof StockFlowDatabaseError || error instanceof Error
+        ? error.message
+        : String(error);
+      sendJson(res, 503, { error: detail });
     }
   })();
 }
