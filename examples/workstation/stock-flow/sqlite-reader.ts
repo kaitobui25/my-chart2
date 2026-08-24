@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolveStockdataDbPath } from '../stockdata/db-path';
 
 const SYMBOL_RE = /^[A-Z0-9]{1,10}$/;
 const PERIOD_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
 const MAX_CHART_FLOW_MONTHS = 600;
+
+export { resolveStockdataDbPath };
 
 export interface InstitutionalFlowSqliteMonth {
   period: string;
@@ -21,15 +23,6 @@ export interface InstitutionalFlowSqlitePayload {
 
 export class StockFlowInputError extends Error {}
 export class StockFlowDatabaseError extends Error {}
-
-export function resolveStockdataDbPath(
-  configuredPath = process.env.STOCKDATA_DB_PATH?.trim() ?? '',
-  cwd = process.cwd(),
-): string {
-  return configuredPath
-    ? resolve(cwd, configuredPath)
-    : resolve(cwd, '..', 'stockdata', 'data', 'stockdata.sqlite3');
-}
 
 function cleanSymbol(symbol: string): string {
   const cleaned = symbol.trim().toUpperCase();
