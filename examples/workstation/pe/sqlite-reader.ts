@@ -73,10 +73,11 @@ export async function readQuarterlyPeFromSqlite(
       source: string;
       fetched_at: string;
     }>;
+    const latestRow = rows.length > 0 ? rows[rows.length - 1] : undefined;
 
     return {
       symbol: normalizedSymbol,
-      source: rows.at(-1)?.source ?? DEFAULT_SOURCE,
+      source: latestRow?.source ?? DEFAULT_SOURCE,
       fetchedAt: rows.reduce((latest, row) => Math.max(latest, timestampSeconds(row.fetched_at)), 0),
       quarters: rows.map((row) => ({
         period: row.period,
