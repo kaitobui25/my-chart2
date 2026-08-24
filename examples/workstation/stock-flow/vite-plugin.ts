@@ -1,13 +1,17 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import {
+  PeDatabaseError,
+  PeInputError,
+  readQuarterlyPeFromSqlite,
+} from '../pe/sqlite-reader';
+import {
   readInstitutionalFlowFromSqlite,
   resolveStockdataDbPath,
   StockFlowDatabaseError,
   StockFlowInputError,
 } from './sqlite-reader';
 
-const STOCKDATA_TARGET = (process.env.STOCKDATA_WEB_URL || 'http://127.0.0.1:8765').replace(/\/$/, '');
 const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -29,57 +33,6 @@ function isAllowedBrowserRequest(req: IncomingMessage): boolean {
   } catch {
     return false;
   }
-}
-
-async function readBody(req: IncomingMessage): Promise<string | undefined> {
-  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
-}
-
-function proxyStockdata(
-  req: IncomingMessage,
-  res: ServerResponse,
-  upstreamUrl: string,
-  allowedMethods: readonly string[],
-): void {
-  void (async () => {
-    if (!isAllowedBrowserRequest(req)) {
-      sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
-      return;
-    }
-    const method = req.method || 'GET';
-    if (!allowedMethods.includes(method)) {
-      sendJson(res, 405, { error: 'Method not allowed' });
-      return;
-    }
-
-    try {
-      const body = await readBody(req);
-      const upstream = await fetch(upstreamUrl, {
-        method,
-        headers: body ? { 'Content-Type': req.headers['content-type'] || 'application/json' } : undefined,
-        body,
-        signal: AbortSignal.timeout(15_000),
-      });
-      res.statusCode = upstream.status;
-      res.setHeader(
-        'content-type',
-        upstream.headers.get('content-type') ?? 'application/json; charset=utf-8',
-      );
-      res.setHeader('cache-control', 'no-store');
-      res.end(Buffer.from(await upstream.arrayBuffer()));
-    } catch (error) {
-      sendJson(res, 503, {
-        error: `Stockdata web is offline at ${STOCKDATA_TARGET}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      });
-    }
-  })();
 }
 
 function serveInstitutionalFlow(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
@@ -115,23 +68,46 @@ function serveInstitutionalFlow(req: IncomingMessage, res: ServerResponse, dbPat
   })();
 }
 
+function serveQuarterlyPe(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
+  void (async () => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if ((req.method || 'GET') !== 'GET') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    try {
+      sendJson(
+        res,
+        200,
+        await readQuarterlyPeFromSqlite(dbPath, local.searchParams.get('symbol') ?? ''),
+      );
+    } catch (error) {
+      if (error instanceof PeInputError) {
+        sendJson(res, 400, { error: error.message });
+        return;
+      }
+      const detail = error instanceof PeDatabaseError || error instanceof Error
+        ? error.message
+        : String(error);
+      sendJson(res, 503, { error: detail });
+    }
+  })();
+}
+
 function installStockdataRoutes(middlewares: {
   use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
 }): void {
-  // P/E still uses stockdata-web for its SQLite cache. Institutional Flow does not.
-  middlewares.use('/stockdata-api', (req, res) => {
-    const local = new URL(req.url || '/', 'http://127.0.0.1');
-    proxyStockdata(
-      req,
-      res,
-      `${STOCKDATA_TARGET}/api${local.pathname}${local.search}`,
-      ['GET', 'POST'],
-    );
-  });
-
   const stockdataDbPath = resolveStockdataDbPath();
   middlewares.use('/stock-flow-api', (req, res) => {
     serveInstitutionalFlow(req, res, stockdataDbPath);
+  });
+  middlewares.use('/pe-quarterly-api', (req, res) => {
+    serveQuarterlyPe(req, res, stockdataDbPath);
   });
 }
 
