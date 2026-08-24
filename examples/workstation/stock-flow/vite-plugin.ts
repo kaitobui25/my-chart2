@@ -1,5 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import {
+  readInstitutionalFlowFromSqlite,
+  resolveStockdataDbPath,
+  StockFlowDatabaseError,
+  StockFlowInputError,
+} from './sqlite-reader';
 
 const STOCKDATA_TARGET = (process.env.STOCKDATA_WEB_URL || 'http://127.0.0.1:8765').replace(/\/$/, '');
 const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
@@ -76,9 +82,43 @@ function proxyStockdata(
   })();
 }
 
-function installStockdataProxies(middlewares: {
+function serveInstitutionalFlow(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
+  void (async () => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if ((req.method || 'GET') !== 'GET') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    try {
+      const payload = await readInstitutionalFlowFromSqlite(
+        dbPath,
+        local.searchParams.get('symbol') ?? '',
+        local.searchParams.get('from') ?? '',
+        local.searchParams.get('to') ?? '',
+      );
+      sendJson(res, 200, payload);
+    } catch (error) {
+      if (error instanceof StockFlowInputError) {
+        sendJson(res, 400, { error: error.message });
+        return;
+      }
+      const detail = error instanceof StockFlowDatabaseError || error instanceof Error
+        ? error.message
+        : String(error);
+      sendJson(res, 503, { error: detail });
+    }
+  })();
+}
+
+function installStockdataRoutes(middlewares: {
   use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
 }): void {
+  // P/E still uses stockdata-web for its SQLite cache. Institutional Flow does not.
   middlewares.use('/stockdata-api', (req, res) => {
     const local = new URL(req.url || '/', 'http://127.0.0.1');
     proxyStockdata(
@@ -89,14 +129,9 @@ function installStockdataProxies(middlewares: {
     );
   });
 
+  const stockdataDbPath = resolveStockdataDbPath();
   middlewares.use('/stock-flow-api', (req, res) => {
-    const local = new URL(req.url || '/', 'http://127.0.0.1');
-    proxyStockdata(
-      req,
-      res,
-      `${STOCKDATA_TARGET}/api/chart-flow${local.search}`,
-      ['GET'],
-    );
+    serveInstitutionalFlow(req, res, stockdataDbPath);
   });
 }
 
@@ -276,10 +311,10 @@ export function stockFlowIntegration(): Plugin {
     // the already-injected stock-flow controls.
     enforce: 'pre',
     configureServer(server) {
-      installStockdataProxies(server.middlewares);
+      installStockdataRoutes(server.middlewares);
     },
     configurePreviewServer(server) {
-      installStockdataProxies(server.middlewares);
+      installStockdataRoutes(server.middlewares);
     },
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
