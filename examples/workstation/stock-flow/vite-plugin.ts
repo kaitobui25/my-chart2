@@ -3,7 +3,6 @@ import type { Plugin } from 'vite';
 import {
   readInstitutionalFlowFromSqlite,
   resolveStockdataDbPath,
-  StockFlowDatabaseError,
   StockFlowInputError,
 } from './sqlite-reader';
 
@@ -31,13 +30,13 @@ function isAllowedBrowserRequest(req: IncomingMessage): boolean {
   }
 }
 
-async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+async function readBody(req: IncomingMessage): Promise<string | undefined> {
   if (req.method === 'GET' || req.method === 'HEAD') return undefined;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  return chunks.length ? new Uint8Array(Buffer.concat(chunks)) : undefined;
+  return chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
 }
 
 function proxyStockdata(
@@ -107,10 +106,7 @@ function serveInstitutionalFlow(req: IncomingMessage, res: ServerResponse, dbPat
         sendJson(res, 400, { error: error.message });
         return;
       }
-      const detail = error instanceof StockFlowDatabaseError || error instanceof Error
-        ? error.message
-        : String(error);
-      sendJson(res, 503, { error: detail });
+      sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) });
     }
   })();
 }
