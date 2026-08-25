@@ -108,6 +108,107 @@ def aggregate_closed_weeks(
     return [bar for bar in buckets if bar.bucket_end <= now_ts]
 
 
+def diagnose_breakout_volume(
+    daily: list[Candle],
+    timezone_name: str,
+    config: BreakoutVolumeScan,
+    *,
+    now: int | None = None,
+) -> dict[str, object]:
+    """Explain Scanner 04 against the latest fully closed week without running a market scan."""
+    now_ts = int(time.time()) if now is None else int(now)
+    weeks = aggregate_closed_weeks(daily, timezone_name, now=now_ts)
+    if len(weeks) < 12:
+        raise ValueError(f'cần ít nhất 12 tuần đã đóng; hiện có {len(weeks)} tuần')
+
+    current = weeks[-1]
+    previous = weeks[-2]
+    baseline = weeks[-9:-1]
+    baseline_closes = [float(item.close) for item in baseline]
+    baseline_volumes = [None if item.volume is None else float(item.volume) for item in baseline]
+    baseline_values = [None if item.traded_value is None else float(item.traded_value) for item in baseline]
+
+    median_volume = (
+        None
+        if any(value is None for value in baseline_volumes)
+        else float(median([float(value) for value in baseline_volumes if value is not None]))
+    )
+    median_traded_value = (
+        None
+        if any(value is None for value in baseline_values)
+        else float(median([float(value) for value in baseline_values if value is not None]))
+    )
+    breakout_level = float(max(baseline_closes))
+    weekly_change_pct = (
+        None
+        if previous.close <= 0
+        else (float(current.close) / float(previous.close) - 1.0) * 100.0
+    )
+    volume_w0 = None if current.volume is None else float(current.volume)
+    rvol = (
+        None
+        if volume_w0 is None or median_volume is None or median_volume <= 0
+        else volume_w0 / median_volume
+    )
+
+    w0_closed = current.bucket_end <= now_ts
+    weekly_change_pass = (
+        weekly_change_pct is not None
+        and weekly_change_pct >= config.min_weekly_change_pct
+    )
+    breakout_pass = float(current.close) > breakout_level
+    median_volume_pass = (
+        median_volume is not None
+        and median_volume >= config.min_median_volume
+    )
+    median_traded_value_pass = (
+        median_traded_value is not None
+        and median_traded_value >= config.min_median_traded_value
+    )
+    rvol_pass = rvol is not None and rvol >= config.min_rvol
+    strong = rvol is not None and rvol >= config.strong_rvol
+    overall_pass = all((
+        w0_closed,
+        weekly_change_pass,
+        breakout_pass,
+        median_volume_pass,
+        median_traded_value_pass,
+        rvol_pass,
+    ))
+
+    return {
+        'evaluatedAt': now_ts,
+        'w0Start': int(current.time),
+        'w0End': int(current.bucket_end - 86400),
+        'w0Closed': w0_closed,
+        'closeW1': float(previous.close),
+        'closeW0': float(current.close),
+        'weeklyChangePct': weekly_change_pct,
+        'weeklyChangePass': weekly_change_pass,
+        'breakoutLevel': breakout_level,
+        'breakoutPass': breakout_pass,
+        'medianVolume': median_volume,
+        'medianVolumePass': median_volume_pass,
+        'medianTradedValue': median_traded_value,
+        'medianTradedValuePass': median_traded_value_pass,
+        'volumeW0': volume_w0,
+        'rvol': rvol,
+        'rvolPass': rvol_pass,
+        'strong': strong,
+        'overallPass': overall_pass,
+        'baselineCloses': baseline_closes,
+        'baselineVolumes': baseline_volumes,
+        'baselineTradedValues': baseline_values,
+        'thresholds': {
+            'minMedianTradedValue': float(config.min_median_traded_value),
+            'minMedianVolume': float(config.min_median_volume),
+            'minWeeklyChangePct': float(config.min_weekly_change_pct),
+            'minRvol': float(config.min_rvol),
+            'strongRvol': float(config.strong_rvol),
+        },
+    }
+
+
 def _signal_at(
     weeks: list[WeeklyBar],
     index: int,

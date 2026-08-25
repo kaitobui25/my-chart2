@@ -1,0 +1,149 @@
+.scanner-eod-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.scanner-eod-check-data {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scanner-eod-data-dialog {
+  width: min(980px, calc(100vw - 40px));
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 14px;
+  padding: 0;
+  background: var(--bg, #0f1216);
+  color: var(--text, #e7edf2);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 44%);
+}
+
+.scanner-eod-data-dialog::backdrop {
+  background: rgb(0 0 0 / 58%);
+  backdrop-filter: blur(4px);
+}
+
+.scanner-eod-data-head {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.scanner-eod-data-head > div { min-width: 0; display: grid; gap: 3px; }
+.scanner-eod-data-head small { font-size: 9px; font-weight: 800; letter-spacing: .14em; opacity: .5; }
+.scanner-eod-data-head h3 { margin: 0; font-size: 16px; }
+.scanner-eod-data-head p { margin: 0; font-size: 10px; color: color-mix(in srgb, currentColor 58%, transparent); }
+
+.scanner-eod-data-close {
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-size: 20px;
+}
+
+.scanner-eod-data-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+.scanner-eod-data-summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 9px;
+  font-size: 11px;
+}
+.scanner-eod-data-summary strong { font-size: 11px; }
+.scanner-eod-data-summary[data-tone='pass'] strong { color: #31c48d; }
+.scanner-eod-data-summary[data-tone='fail'] strong { color: #ff7474; }
+
+.scanner-eod-data-note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: color-mix(in srgb, currentColor 58%, transparent);
+}
+
+.scanner-eod-data-table-wrap {
+  max-height: 510px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 10px;
+}
+
+.scanner-eod-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scanner-eod-data-table th,
+.scanner-eod-data-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.scanner-eod-data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg, #0f1216);
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.scanner-eod-data-table tbody tr:last-child td { border-bottom: 0; }
+.scanner-eod-data-table tr[data-tone='fail'] { background: color-mix(in srgb, #ff7474 5%, transparent); }
+.scanner-eod-data-table td:first-child { min-width: 74px; }
+.scanner-eod-data-table td:first-child strong { display: block; font-size: 12px; }
+.scanner-eod-data-table td:first-child small { display: block; margin-top: 2px; font-size: 9px; opacity: .5; }
+
+.scanner-eod-data-status {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+}
+.scanner-eod-data-status[data-tone='pass'] { color: #31c48d; background: color-mix(in srgb, #31c48d 12%, transparent); }
+.scanner-eod-data-status[data-tone='fail'] { color: #ff7474; background: color-mix(in srgb, #ff7474 12%, transparent); }
+.scanner-eod-data-missing { min-width: 210px; line-height: 1.45; }
+.scanner-eod-data-error {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, #ff7474 30%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, #ff7474 8%, transparent);
+  color: #ff9a9a;
+  font-size: 11px;
+}
+
+@media (max-width: 820px) {
+  .scanner-eod-actions { flex-direction: column; align-items: stretch; }
+  .scanner-eod-data-dialog { width: calc(100vw - 20px); }
+}

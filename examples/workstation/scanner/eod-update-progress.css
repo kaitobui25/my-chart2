@@ -1,0 +1,285 @@
+@property --scanner-eod-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.scanner-eod-update {
+  --scanner-eod-progress: 0%;
+  --scanner-eod-angle: 0deg;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.scanner-eod-update > span {
+  position: relative;
+  z-index: 2;
+}
+
+.scanner-eod-update-fill {
+  position: absolute;
+  z-index: 1;
+  top: 1px;
+  bottom: 1px;
+  left: 1px;
+  width: var(--scanner-eod-progress);
+  max-width: calc(100% - 2px);
+  overflow: hidden;
+  border-radius: 8px 3px 3px 8px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--scanner-accent) 24%, transparent),
+    color-mix(in srgb, var(--scanner-accent) 50%, transparent)
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: width .3s cubic-bezier(.22, .8, .32, 1), opacity .15s ease;
+}
+
+.scanner-eod-update-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 24%), transparent);
+  transform: translateX(-140%);
+  animation: scanner-eod-fill-shine 1.2s ease-in-out infinite;
+}
+
+.scanner-eod-update.is-eod-progress,
+.scanner-eod-update.is-eod-progress:disabled {
+  border-color: transparent;
+  opacity: 1 !important;
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--scanner-accent) 18%, var(--scanner-panel-3)),
+      color-mix(in srgb, var(--scanner-accent) 18%, var(--scanner-panel-3))
+    ) padding-box,
+    conic-gradient(
+      from var(--scanner-eod-angle),
+      transparent 0deg 252deg,
+      color-mix(in srgb, var(--scanner-accent) 70%, transparent) 278deg,
+      white 305deg,
+      color-mix(in srgb, var(--scanner-accent) 86%, white 14%) 326deg,
+      transparent 360deg
+    ) border-box;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--scanner-accent) 18%, transparent),
+    0 0 18px color-mix(in srgb, var(--scanner-accent) 22%, transparent);
+  animation: scanner-eod-border-chase 1.15s linear infinite;
+}
+
+.scanner-eod-update.is-eod-progress .scanner-eod-update-fill {
+  opacity: 1;
+}
+
+.scanner-eod-update-error-dialog {
+  width: min(820px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #ff7474 38%, transparent);
+  border-radius: 14px;
+  background: var(--bg, #0f1216);
+  color: var(--text, #e7edf2);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
+}
+
+.scanner-eod-update-error-dialog::backdrop {
+  background: rgb(0 0 0 / 62%);
+  backdrop-filter: blur(5px);
+}
+
+.scanner-eod-update-error-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.scanner-eod-update-error-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.scanner-eod-update-error-head small {
+  color: #ff8a8a;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+}
+
+.scanner-eod-update-error-head h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.scanner-eod-update-error-head p {
+  margin: 0;
+  color: color-mix(in srgb, currentColor 58%, transparent);
+  font-size: 11px;
+}
+
+.scanner-eod-update-error-close {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+}
+
+.scanner-eod-update-error-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 18px 18px;
+  overflow: auto;
+}
+
+.scanner-eod-update-error-final {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #ff7474 28%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, #ff7474 9%, transparent);
+  color: #ff9a9a;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.scanner-eod-update-diagnosis {
+  display: grid;
+  gap: 7px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--scanner-accent, #5b9cff) 24%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--scanner-accent, #5b9cff) 7%, transparent);
+}
+
+.scanner-eod-update-diagnosis > strong,
+.scanner-eod-update-log-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.scanner-eod-update-diagnosis > div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.scanner-eod-update-diagnosis > div b {
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-weight: 700;
+}
+
+.scanner-eod-update-diagnosis > div span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.scanner-eod-update-log-title {
+  margin-top: 2px;
+  color: color-mix(in srgb, currentColor 70%, transparent);
+}
+
+.scanner-eod-update-log {
+  display: grid;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scanner-eod-update-log-row {
+  display: grid;
+  grid-template-columns: 72px 58px 46px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.scanner-eod-update-log-row:nth-child(odd) {
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+
+.scanner-eod-update-log-row time,
+.scanner-eod-update-log-elapsed {
+  color: color-mix(in srgb, currentColor 48%, transparent);
+}
+
+.scanner-eod-update-log-row strong {
+  color: color-mix(in srgb, var(--scanner-accent, #5b9cff) 78%, white 22%);
+}
+
+.scanner-eod-update-log-row[data-tone='error'] .scanner-eod-update-log-message,
+.scanner-eod-update-log-row[data-tone='error'] strong {
+  color: #ff8a8a;
+}
+
+.scanner-eod-update-log-row[data-tone='success'] .scanner-eod-update-log-message,
+.scanner-eod-update-log-row[data-tone='success'] strong {
+  color: #43d39e;
+}
+
+.scanner-eod-update-log-message {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.scanner-eod-update-log-message small {
+  color: color-mix(in srgb, currentColor 46%, transparent);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.scanner-eod-update-log-row[data-tone='error'] .scanner-eod-update-log-message small {
+  color: color-mix(in srgb, #ff8a8a 72%, transparent);
+}
+
+@media (max-width: 620px) {
+  .scanner-eod-update-diagnosis > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .scanner-eod-update-log-row {
+    grid-template-columns: 64px 50px 42px minmax(0, 1fr);
+    gap: 5px;
+    font-size: 10px;
+  }
+}
+
+@keyframes scanner-eod-border-chase {
+  to { --scanner-eod-angle: 360deg; }
+}
+
+@keyframes scanner-eod-fill-shine {
+  55%, 100% { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-eod-update.is-eod-progress,
+  .scanner-eod-update-fill::after {
+    animation: none;
+  }
+
+  .scanner-eod-update-fill {
+    transition: none;
+  }
+}

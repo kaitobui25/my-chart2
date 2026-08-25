@@ -4,22 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from aiohttp import web
 
+from breakout_volume import diagnose_breakout_volume
 from cafef_eod import (
     ACTIVE_MAX_AGE_DAYS,
     HISTORY_RETAIN_BARS,
     PROVIDER_ID as EOD_PROVIDER_ID,
-    _import_latest as import_latest_eod,
 )
 from db import ScannerDB
 from engine import ScanExecution, ScannerEngine
+from eod_backfill import repair_recent_year
+from eod_data_quality import check_top_volume_coverage
 from local_eod_provider import LocalEodProvider
-from models import ScanRequest
+from models import BreakoutVolumeScan, ScanFilters, ScanRequest
 from providers import build_providers
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -90,6 +93,8 @@ class ScannerRuntime:
         self.tasks: dict[int, asyncio.Task] = {}
         self.eod_update_lock = asyncio.Lock()
         self.eod_last_error: str | None = None
+        self.eod_update_progress_pct = 0
+        self.eod_update_stage: str | None = None
 
     async def start_scan(self, request: ScanRequest) -> int:
         run_id = await asyncio.to_thread(self.db.begin_scan, request.source, request.to_json())
@@ -107,6 +112,51 @@ class ScannerRuntime:
 
         self.tasks[run_id] = asyncio.create_task(run(), name=f'scanner-run-{run_id}')
         return run_id
+
+    async def breakout_check(self, symbol: str, config: BreakoutVolumeScan) -> dict[str, object]:
+        normalized = symbol.strip().upper()
+        candidates = await asyncio.to_thread(
+            self.db.stage1_candidates,
+            EOD_PROVIDER_ID,
+            ('HOSE',),
+            ScanFilters(),
+            True,
+        )
+        candidate = next(
+            (item for item in candidates if str(item.get('symbol') or '').upper() == normalized),
+            None,
+        )
+        if candidate is None:
+            raise LookupError(f'{normalized}: không tìm thấy mã HOSE trong dữ liệu local')
+        daily = await asyncio.to_thread(
+            self.db.read_candles,
+            int(candidate['instrument_id']),
+            '1d',
+            HISTORY_RETAIN_BARS,
+        )
+        if not daily:
+            raise LookupError(f'{normalized}: chưa có lịch sử OHLCV local')
+        result = diagnose_breakout_volume(
+            daily,
+            'Asia/Ho_Chi_Minh',
+            config,
+        )
+        return {
+            'symbol': normalized,
+            'name': str(candidate.get('name') or ''),
+            'exchange': str(candidate.get('exchange') or ''),
+            **result,
+        }
+
+    async def eod_data_check(self) -> dict[str, object]:
+        return await asyncio.to_thread(check_top_volume_coverage, self.db.path)
+
+    def eod_update_progress(self) -> dict[str, object]:
+        return {
+            'updating': self.eod_update_lock.locked(),
+            'progressPct': int(self.eod_update_progress_pct),
+            'stage': self.eod_update_stage,
+        }
 
     async def eod_status(self) -> dict[str, object]:
         latest, coverage = await asyncio.gather(
@@ -131,10 +181,22 @@ class ScannerRuntime:
             raise CafeFEodUpdateBusy('CafeF EOD update is already running')
         async with self.eod_update_lock:
             self.eod_last_error = None
+            self.eod_update_progress_pct = 0
+            self.eod_update_stage = 'Chuẩn bị cập nhật EOD'
+
+            def progress(percent: int, stage: str) -> None:
+                self.eod_update_progress_pct = max(0, min(100, int(percent)))
+                self.eod_update_stage = stage
+
             try:
-                return await asyncio.to_thread(import_latest_eod, self.db, 'eod')
+                return await asyncio.to_thread(
+                    repair_recent_year,
+                    self.db,
+                    progress=progress,
+                )
             except Exception as exc:  # noqa: BLE001
                 self.eod_last_error = str(exc)[:300]
+                self.eod_update_stage = 'Cập nhật EOD lỗi'
                 raise
 
     def _prune_jobs(self, keep: int = 40) -> None:
@@ -165,6 +227,13 @@ def build_runtime() -> ScannerRuntime:
     return ScannerRuntime(db, ScannerEngine(db, providers))
 
 
+def _breakout_number(payload: dict, key: str, default: float) -> float:
+    value = float(payload.get(key, default))
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f'{key} phải là số không âm')
+    return value
+
+
 def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
     runtime = runtime or build_runtime()
     app = web.Application(middlewares=[cors_middleware])
@@ -187,6 +256,18 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
     async def eod_status(_request: web.Request) -> web.Response:
         return web.json_response(await runtime.eod_status())
 
+    async def eod_update_progress(_request: web.Request) -> web.Response:
+        return web.json_response(runtime.eod_update_progress())
+
+    async def eod_check_data(_request: web.Request) -> web.Response:
+        try:
+            result = await runtime.eod_data_check()
+        except LookupError as exc:
+            return web.json_response({'message': str(exc)}, status=404)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({'message': str(exc)[:300]}, status=500)
+        return web.json_response(result)
+
     async def eod_import_latest(_request: web.Request) -> web.Response:
         try:
             result = await runtime.update_eod()
@@ -199,6 +280,33 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
             'result': result,
             'status': await runtime.eod_status(),
         })
+
+    async def breakout_check(request: web.Request) -> web.Response:
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError('request body must be a JSON object')
+            symbol = str(payload.get('symbol') or '').strip().upper()
+            if not symbol:
+                raise ValueError('symbol is required')
+            config = BreakoutVolumeScan(
+                enabled=True,
+                min_median_traded_value=_breakout_number(
+                    payload, 'minMedianTradedValue', 5_000_000_000.0
+                ),
+                min_median_volume=_breakout_number(payload, 'minMedianVolume', 500_000.0),
+                min_weekly_change_pct=_breakout_number(payload, 'minWeeklyChangePct', 4.0),
+                min_rvol=_breakout_number(payload, 'minRvol', 1.5),
+                strong_rvol=_breakout_number(payload, 'strongRvol', 2.5),
+            )
+            if config.strong_rvol < config.min_rvol:
+                raise ValueError('strongRvol phải lớn hơn hoặc bằng minRvol')
+            result = await runtime.breakout_check(symbol, config)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            return web.json_response({'message': str(exc)}, status=422)
+        except LookupError as exc:
+            return web.json_response({'message': str(exc)}, status=404)
+        return web.json_response(result)
 
     async def scan(request: web.Request) -> web.Response:
         try:
@@ -258,7 +366,10 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
     app.router.add_get('/health', health)
     app.router.add_get('/sources', sources)
     app.router.add_get('/eod/status', eod_status)
+    app.router.add_get('/eod/update-progress', eod_update_progress)
+    app.router.add_get('/eod/check-data', eod_check_data)
     app.router.add_post('/eod/import-latest', eod_import_latest)
+    app.router.add_post('/breakout/check', breakout_check)
     app.router.add_post('/scan', scan)
     app.router.add_get('/runs/{run_id}', run_status)
     app.router.add_post('/backup', backup)

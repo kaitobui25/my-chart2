@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from breakout_volume import aggregate_closed_weeks, evaluate_breakout_volume
+from breakout_volume import aggregate_closed_weeks, diagnose_breakout_volume, evaluate_breakout_volume
 from models import BreakoutVolumeScan, Candle
 
 TZ = ZoneInfo('Asia/Ho_Chi_Minh')
@@ -108,6 +108,46 @@ class BreakoutVolumeTests(unittest.TestCase):
         self.assertGreaterEqual(signal.rvol, 2.5)
         self.assertTrue(signal.strong)
         self.assertIsNone(signal.next_week_time)
+
+    def test_quick_diagnostic_explains_latest_closed_week(self):
+        closes = [
+            18_000, 18_300, 18_600, 18_900,
+            19_200, 19_400, 19_600, 19_800,
+            20_000, 20_200, 20_400,
+            21_500,
+        ]
+        volumes = [600_000] * 11 + [1_600_000]
+        diagnostic = diagnose_breakout_volume(
+            history_from_weeks(closes, volumes),
+            'Asia/Ho_Chi_Minh',
+            self.config,
+            now=self.now,
+        )
+        self.assertTrue(diagnostic['w0Closed'])
+        self.assertTrue(diagnostic['weeklyChangePass'])
+        self.assertTrue(diagnostic['breakoutPass'])
+        self.assertTrue(diagnostic['medianVolumePass'])
+        self.assertTrue(diagnostic['medianTradedValuePass'])
+        self.assertTrue(diagnostic['rvolPass'])
+        self.assertTrue(diagnostic['strong'])
+        self.assertTrue(diagnostic['overallPass'])
+        self.assertEqual(len(diagnostic['baselineCloses']), 8)
+        self.assertEqual(len(diagnostic['baselineVolumes']), 8)
+        self.assertEqual(len(diagnostic['baselineTradedValues']), 8)
+
+    def test_quick_diagnostic_keeps_failed_gates_visible(self):
+        closes = [20_000 + index * 100 for index in range(11)] + [22_000]
+        volumes = [200_000] * 11 + [1_000_000]
+        diagnostic = diagnose_breakout_volume(
+            history_from_weeks(closes, volumes),
+            'Asia/Ho_Chi_Minh',
+            self.config,
+            now=self.now,
+        )
+        self.assertFalse(diagnostic['medianVolumePass'])
+        self.assertFalse(diagnostic['medianTradedValuePass'])
+        self.assertFalse(diagnostic['overallPass'])
+        self.assertTrue(diagnostic['rvolPass'])
 
     def test_median_volume_gate_rejects_illiquid_symbol(self):
         closes = [20_000 + index * 100 for index in range(11)] + [22_000]

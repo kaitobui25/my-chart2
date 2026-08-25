@@ -58,19 +58,32 @@ class ScannerRuntimeEodTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status['activeMaxAgeDays'], 30)
         self.assertFalse(status['updating'])
 
-    async def test_update_eod_reuses_same_import_latest_service_as_cli(self):
+    async def test_update_eod_runs_one_year_repair_service_with_live_progress(self):
         expected = {
             'ok': True,
-            'mode': 'eod',
+            'mode': 'upto',
             'tradeDate': 1_786_035_600,
             'activeSymbols': 1,
-            'candles': 1,
+            'candles': 3,
+            'missingDaysBefore': 1,
+            'missingDaysAfter': 0,
         }
-        with patch('scanner_sidecar.import_latest_eod', return_value=expected) as importer:
+
+        def fake_repair(db, *, progress):
+            self.assertIs(db, self.db)
+            progress(65, 'Bù dữ liệu thiếu')
+            progress(100, 'Hoàn tất cập nhật EOD')
+            return expected
+
+        with patch('scanner_sidecar.repair_recent_year', side_effect=fake_repair) as repairer:
             result = await self.runtime.update_eod()
 
         self.assertEqual(result, expected)
-        importer.assert_called_once_with(self.db, 'eod')
+        repairer.assert_called_once()
+        live = self.runtime.eod_update_progress()
+        self.assertFalse(live['updating'])
+        self.assertEqual(live['progressPct'], 100)
+        self.assertEqual(live['stage'], 'Hoàn tất cập nhật EOD')
         self.assertIsNone(self.runtime.eod_last_error)
 
     async def test_update_eod_rejects_duplicate_update(self):
