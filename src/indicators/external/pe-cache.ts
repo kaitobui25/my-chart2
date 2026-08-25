@@ -1,8 +1,6 @@
 import type { PeQuarter } from './pe-model';
 
-const DB_NAME = 'l2chart.fundamentals.v1';
-const STORE_NAME = 'pe';
-const DB_VERSION = 1;
+const DEFAULT_BASE_URL = '/stockdata-api';
 
 export interface PeFundamentalsRecord {
   symbol: string;
@@ -22,6 +20,11 @@ export interface PeIncomingPayload {
   symbol: string;
   source: string;
   quarters: PeIncomingQuarter[];
+}
+
+export interface PeFundamentalsCacheOptions {
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
 }
 
 function normalizeSymbol(symbol: string): string {
@@ -103,50 +106,35 @@ export function mergePeFundamentals(
   };
 }
 
-function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'symbol' });
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('Unable to open P/E IndexedDB cache'));
-  });
-}
-
 export class PeFundamentalsCache {
-  readonly available = typeof indexedDB !== 'undefined';
-  private databasePromise: Promise<IDBDatabase> | null = null;
+  readonly available = true;
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
 
-  private database(): Promise<IDBDatabase> {
-    if (!this.available) return Promise.reject(new Error('IndexedDB is unavailable'));
-    this.databasePromise ??= openDatabase();
-    return this.databasePromise;
+  constructor(options: PeFundamentalsCacheOptions = {}) {
+    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   async get(symbol: string): Promise<PeFundamentalsRecord | null> {
-    if (!this.available) return null;
-    const db = await this.database();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const request = tx.objectStore(STORE_NAME).get(normalizeSymbol(symbol));
-      request.onsuccess = () => resolve(normalizeRecord(request.result));
-      request.onerror = () => reject(request.error ?? new Error('Unable to read P/E cache'));
-    });
+    const normalized = normalizeSymbol(symbol);
+    if (!normalized) return null;
+    const response = await this.fetchImpl(
+      `${this.baseUrl}/pe/quarterly?symbol=${encodeURIComponent(normalized)}`,
+    );
+    if (!response.ok) throw new Error(`Unable to read SQLite P/E cache: HTTP ${response.status}`);
+    const record = normalizeRecord(await response.json());
+    return record && record.quarters.length > 0 ? record : null;
   }
 
   async put(record: PeFundamentalsRecord): Promise<void> {
-    if (!this.available) return;
     const normalized = normalizeRecord(record);
     if (!normalized) return;
-    const db = await this.database();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      tx.objectStore(STORE_NAME).put(normalized);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error ?? new Error('Unable to write P/E cache'));
-      tx.onabort = () => reject(tx.error ?? new Error('P/E cache write aborted'));
+    const response = await this.fetchImpl(`${this.baseUrl}/pe/quarterly`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(normalized),
     });
+    if (!response.ok) throw new Error(`Unable to write SQLite P/E cache: HTTP ${response.status}`);
   }
 }

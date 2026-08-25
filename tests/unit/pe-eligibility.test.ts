@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isPeEligibleVietnamEquitySymbol } from '../../src/indicators/builtin/pe-eligibility';
+import { isPeEligibleVietnamEquitySymbol } from '../../src/indicators/external/pe-eligibility';
 
 describe('P/E Vietnam equity eligibility', () => {
   it('accepts normal Vietnam equity tickers', () => {

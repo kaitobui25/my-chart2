@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PE_CACHE_MISS_DELAY_MS, peCacheMissDelay } from '../../src/indicators/builtin/pe';
+import { PE_CACHE_MISS_DELAY_MS, peCacheMissDelay } from '../../src/indicators/external/pe';
 
 describe('P/E cache-miss loading policy', () => {
   it('fetches immediately after a manual indicator enable', () => {
