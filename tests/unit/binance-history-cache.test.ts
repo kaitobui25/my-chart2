@@ -1,0 +1,143 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Candle } from '../../src/core/types';
+import { BinanceHistoryCache } from '../../examples/providers/binance-cache';
+import type { BrowserHistoryCacheApi } from '../../examples/providers/browser-history-cache';
+
+function candle(time: number): Candle {
+  return {
+    time,
+    open: time,
+    high: time + 1,
+    low: time - 1,
+    close: time + 0.5,
+    volume: 1,
+  };
+}
+
+function baseCache(overrides: Partial<BrowserHistoryCacheApi> = {}): BrowserHistoryCacheApi {
+  return {
+    available: true,
+    coverage: vi.fn(async () => []),
+    readLatest: vi.fn(async () => []),
+    readRange: vi.fn(async () => []),
+    write: vi.fn(async () => undefined),
+    markCoverage: vi.fn(async () => undefined),
+    clearSource: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+describe('BinanceHistoryCache transaction scheduling', () => {
+  it('can completely bypass browser persistence without touching IndexedDB', async () => {
+    const shared = baseCache();
+    const cache = new BinanceHistoryCache(shared, { enabled: false });
+
+    expect(cache.available).toBe(false);
+    await expect(cache.readLatest('spot', 'BTCUSDT', '1M', 120)).resolves.toEqual([]);
+    await expect(cache.readRange('spot', 'BTCUSDT', '1d', 100, 200, 50)).resolves.toEqual([]);
+    await cache.write('spot', 'BTCUSDT', '1w', [candle(1), candle(2)]);
+    await cache.clearMarket('spot');
+
+    expect(shared.readLatest).not.toHaveBeenCalled();
+    expect(shared.readRange).not.toHaveBeenCalled();
+    expect(shared.write).not.toHaveBeenCalled();
+    expect(shared.clearSource).not.toHaveBeenCalled();
+  });
+
+  it('aborts the underlying IndexedDB read when the cache deadline expires', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const shared = baseCache({
+      readLatest: vi.fn((_source, _symbol, _interval, _limit, signal) => {
+        seenSignal = signal;
+        return new Promise<Candle[]>((resolve) => {
+          signal?.addEventListener('abort', () => resolve([]), { once: true });
+        });
+      }),
+    });
+    const cache = new BinanceHistoryCache(shared, { readTimeoutMs: 10 });
+
+    await expect(cache.readLatest('spot', 'BTCUSDT', '1d', 500)).resolves.toEqual([]);
+    expect(seenSignal?.aborted).toBe(true);
+  });
+
+  it('cancels a stale background write as soon as a new foreground read begins', async () => {
+    let writeSignal: AbortSignal | undefined;
+    let resolveStarted: (() => void) | undefined;
+    const writeStarted = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const shared = baseCache({
+      write: vi.fn((_source, _symbol, _interval, _candles, signal) => {
+        writeSignal = signal;
+        resolveStarted?.();
+        return new Promise<void>((resolve) => {
+          signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }),
+    });
+    const cache = new BinanceHistoryCache(shared, {
+      readTimeoutMs: 50,
+      writeTimeoutMs: 5000,
+      writeChunkSize: 100,
+    });
+
+    const pendingWrite = cache.write('spot', 'BTCUSDT', '1w', [candle(1), candle(2)]);
+    await writeStarted;
+    expect(writeSignal?.aborted).toBe(false);
+
+    await cache.readLatest('spot', 'BTCUSDT', '1d', 500);
+    await pendingWrite;
+    expect(writeSignal?.aborted).toBe(true);
+  });
+
+  it('splits large refresh persistence into short transactions', async () => {
+    const write = vi.fn(async (
+      _source: string,
+      _symbol: string,
+      _interval: string,
+      _candles: Candle[],
+      _signal?: AbortSignal,
+    ) => undefined);
+    const shared = baseCache({ write });
+    const cache = new BinanceHistoryCache(shared, {
+      writeChunkSize: 3,
+      writeTimeoutMs: 100,
+    });
+
+    await cache.write('spot', 'BTCUSDT', '1w', [
+      candle(1), candle(2), candle(3), candle(4), candle(5), candle(6), candle(7),
+    ]);
+
+    expect(write).toHaveBeenCalledTimes(3);
+    expect(write.mock.calls.map((call) => call[3].length)).toEqual([3, 3, 1]);
+  });
+
+  it('abandons the remaining chunks when one cache transaction exceeds its deadline', async () => {
+    const write = vi.fn((
+      _source: string,
+      _symbol: string,
+      _interval: string,
+      _candles: Candle[],
+      signal?: AbortSignal,
+    ) => new Promise<void>((resolve) => {
+      signal?.addEventListener('abort', () => resolve(), { once: true });
+    }));
+    const shared = baseCache({ write });
+    const cache = new BinanceHistoryCache(shared, {
+      writeChunkSize: 2,
+      writeTimeoutMs: 10,
+    });
+
+    await cache.write('spot', 'BTCUSDT', '1w', [candle(1), candle(2), candle(3), candle(4)]);
+    await wait(0);
+
+    expect(write).toHaveBeenCalledTimes(1);
+    const firstCall = write.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    expect(firstCall?.[4]?.aborted).toBe(true);
+  });
+});

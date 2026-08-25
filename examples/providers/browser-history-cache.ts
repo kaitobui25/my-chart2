@@ -7,7 +7,13 @@ export type BrowserCacheCoverage = HistoryRange;
 export interface BrowserHistoryCacheApi {
   readonly available: boolean;
   coverage(source: BrowserHistorySource, symbol: string, interval: string): Promise<BrowserCacheCoverage[]>;
-  readLatest(source: BrowserHistorySource, symbol: string, interval: string, limit: number): Promise<Candle[]>;
+  readLatest(
+    source: BrowserHistorySource,
+    symbol: string,
+    interval: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<Candle[]>;
   readRange(
     source: BrowserHistorySource,
     symbol: string,
@@ -15,8 +21,15 @@ export interface BrowserHistoryCacheApi {
     from: number,
     to: number,
     limit?: number,
+    signal?: AbortSignal,
   ): Promise<Candle[]>;
-  write(source: BrowserHistorySource, symbol: string, interval: string, candles: Candle[]): Promise<void>;
+  write(
+    source: BrowserHistorySource,
+    symbol: string,
+    interval: string,
+    candles: Candle[],
+    signal?: AbortSignal,
+  ): Promise<void>;
   markCoverage(
     source: BrowserHistorySource,
     symbol: string,
@@ -43,6 +56,11 @@ interface StoredSeries {
   updatedAt: number;
 }
 
+interface StoredMeta {
+  key: string;
+  updatedAt: number;
+}
+
 interface LegacyBinanceCandle extends Candle {
   market: 'spot' | 'usdm';
   symbol: string;
@@ -64,12 +82,15 @@ export const BINANCE_USDM_HISTORY_SOURCE = 'binance:usdm';
 export const FIINQUANT_ADJUSTED_HISTORY_SOURCE = 'fiinquant:adjusted';
 
 const DATABASE_NAME = 'l2chart.market.history.v1';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const LEGACY_BINANCE_DATABASE_NAME = 'l2chart.binance.history.v1';
 const CANDLES_STORE = 'candles';
 const SERIES_STORE = 'series';
+const META_STORE = 'meta';
+const LEGACY_BINANCE_MIGRATION_KEY = 'legacy-binance-history-v1';
 const MIN_TIME = 0;
 const MAX_TIME = Number.MAX_SAFE_INTEGER;
+let legacyBinanceMigrationPromise: Promise<void> | null = null;
 
 function normalizedSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
@@ -148,6 +169,20 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function abortTransactionOnSignal(transaction: IDBTransaction, signal?: AbortSignal): () => void {
+  if (!signal) return () => undefined;
+  const abort = () => {
+    try {
+      transaction.abort();
+    } catch {
+      // Transaction may already be complete/inactive.
+    }
+  };
+  if (signal.aborted) abort();
+  else signal.addEventListener('abort', abort, { once: true });
+  return () => signal.removeEventListener('abort', abort);
+}
+
 function candleRange(
   source: BrowserHistorySource,
   symbol: string,
@@ -201,8 +236,9 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     symbol: string,
     interval: string,
     limit: number,
+    signal?: AbortSignal,
   ): Promise<Candle[]> {
-    return this.read(source, symbol, interval, MIN_TIME, MAX_TIME, limit, 'prev');
+    return this.read(source, symbol, interval, MIN_TIME, MAX_TIME, limit, 'prev', signal);
   }
 
   async readRange(
@@ -212,8 +248,9 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     from: number,
     to: number,
     limit?: number,
+    signal?: AbortSignal,
   ): Promise<Candle[]> {
-    return this.read(source, symbol, interval, Math.min(from, to), Math.max(from, to), limit, 'next');
+    return this.read(source, symbol, interval, Math.min(from, to), Math.max(from, to), limit, 'next', signal);
   }
 
   async write(
@@ -221,19 +258,24 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     symbol: string,
     interval: string,
     candles: Candle[],
+    signal?: AbortSignal,
   ): Promise<void> {
-    if (candles.length === 0) return;
+    if (candles.length === 0 || signal?.aborted) return;
     const database = await this.database();
-    if (!database) return;
+    if (!database || signal?.aborted) return;
     const upperSymbol = normalizedSymbol(symbol);
     const valid = candles.filter((candle) => Number.isFinite(candle.time));
     if (valid.length === 0) return;
 
+    let releaseAbort: () => void = () => undefined;
     try {
       const transaction = database.transaction([CANDLES_STORE, SERIES_STORE], 'readwrite');
+      releaseAbort = abortTransactionOnSignal(transaction, signal);
+      if (signal?.aborted) return;
       const done = transactionDone(transaction);
       const candleStore = transaction.objectStore(CANDLES_STORE);
       for (const candle of valid) {
+        if (signal?.aborted) return;
         candleStore.put({
           source,
           symbol: upperSymbol,
@@ -247,6 +289,7 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
         } satisfies StoredCandle);
       }
 
+      if (signal?.aborted) return;
       const firstTime = Math.min(...valid.map((candle) => candle.time));
       const lastTime = Math.max(...valid.map((candle) => candle.time));
       const key = seriesKey(source, upperSymbol, interval);
@@ -254,6 +297,7 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
       const previous = await requestResult(
         seriesStore.get(key) as IDBRequest<StoredSeries | undefined>,
       );
+      if (signal?.aborted) return;
       seriesStore.put({
         key,
         source,
@@ -269,7 +313,9 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
       } satisfies StoredSeries);
       await done;
     } catch {
-      // Cache failures must never make the market data feed unusable.
+      // Cache failures and expected cancellations must never make the feed unusable.
+    } finally {
+      releaseAbort();
     }
   }
 
@@ -331,12 +377,17 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     to: number,
     limit: number | undefined,
     direction: IDBCursorDirection,
+    signal?: AbortSignal,
   ): Promise<Candle[]> {
+    if (signal?.aborted) return [];
     const database = await this.database();
-    if (!database) return [];
+    if (!database || signal?.aborted) return [];
     const normalizedLimit = limit === undefined ? Number.POSITIVE_INFINITY : Math.max(1, Math.floor(limit));
+    let releaseAbort: () => void = () => undefined;
     try {
       const transaction = database.transaction(CANDLES_STORE, 'readonly');
+      releaseAbort = abortTransactionOnSignal(transaction, signal);
+      if (signal?.aborted) return [];
       const request = transaction.objectStore(CANDLES_STORE).openCursor(
         candleRange(source, symbol, interval, from, to),
         direction,
@@ -345,6 +396,10 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
         const out: Candle[] = [];
         request.onerror = () => reject(request.error ?? new Error('IndexedDB cursor failed'));
         request.onsuccess = () => {
+          if (signal?.aborted) {
+            resolve([]);
+            return;
+          }
           const cursor = request.result;
           if (!cursor || out.length >= normalizedLimit) {
             resolve(direction === 'prev' ? out.reverse() : out);
@@ -364,6 +419,8 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
       });
     } catch {
       return [];
+    } finally {
+      releaseAbort();
     }
   }
 
@@ -401,11 +458,17 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
         if (!database.objectStoreNames.contains(SERIES_STORE)) {
           database.createObjectStore(SERIES_STORE, { keyPath: 'key' });
         }
+        if (!database.objectStoreNames.contains(META_STORE)) {
+          database.createObjectStore(META_STORE, { keyPath: 'key' });
+        }
       };
       request.onsuccess = () => {
         const database = request.result;
         database.onversionchange = () => database.close();
-        void this.migrateLegacyBinance(database).finally(() => resolve(database));
+        if (!legacyBinanceMigrationPromise) {
+          legacyBinanceMigrationPromise = this.migrateLegacyBinance(database);
+        }
+        void legacyBinanceMigrationPromise.finally(() => resolve(database));
       };
       request.onerror = () => {
         this.disabled = true;
@@ -416,11 +479,61 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
     return this.databasePromise;
   }
 
-  private async migrateLegacyBinance(database: IDBDatabase): Promise<void> {
-    const legacy = await this.openLegacyBinanceDatabase();
-    if (!legacy) return;
+  private async hasLegacyBinanceMigrationMarker(database: IDBDatabase): Promise<boolean> {
     try {
-      if (!legacy.objectStoreNames.contains(CANDLES_STORE) || !legacy.objectStoreNames.contains(SERIES_STORE)) return;
+      const transaction = database.transaction(META_STORE, 'readonly');
+      const marker = await requestResult(
+        transaction.objectStore(META_STORE).get(LEGACY_BINANCE_MIGRATION_KEY) as IDBRequest<StoredMeta | undefined>,
+      );
+      return Boolean(marker);
+    } catch {
+      return false;
+    }
+  }
+
+  private async hasCurrentBinanceHistory(database: IDBDatabase): Promise<boolean> {
+    try {
+      const transaction = database.transaction(SERIES_STORE, 'readonly');
+      const series = await requestResult(
+        transaction.objectStore(SERIES_STORE).getAll() as IDBRequest<StoredSeries[]>,
+      );
+      return series.some((item) =>
+        item.source === BINANCE_SPOT_HISTORY_SOURCE || item.source === BINANCE_USDM_HISTORY_SOURCE);
+    } catch {
+      return false;
+    }
+  }
+
+  private async markLegacyBinanceMigrated(database: IDBDatabase): Promise<void> {
+    try {
+      const transaction = database.transaction(META_STORE, 'readwrite');
+      const done = transactionDone(transaction);
+      transaction.objectStore(META_STORE).put({
+        key: LEGACY_BINANCE_MIGRATION_KEY,
+        updatedAt: Date.now(),
+      } satisfies StoredMeta);
+      await done;
+    } catch {
+      // A missing marker only means migration can be retried on the next page load.
+    }
+  }
+
+  private async migrateLegacyBinance(database: IDBDatabase): Promise<void> {
+    if (await this.hasLegacyBinanceMigrationMarker(database)) return;
+    if (await this.hasCurrentBinanceHistory(database)) {
+      await this.markLegacyBinanceMigrated(database);
+      return;
+    }
+    const legacy = await this.openLegacyBinanceDatabase();
+    if (!legacy) {
+      await this.markLegacyBinanceMigrated(database);
+      return;
+    }
+    try {
+      if (!legacy.objectStoreNames.contains(CANDLES_STORE) || !legacy.objectStoreNames.contains(SERIES_STORE)) {
+        await this.markLegacyBinanceMigrated(database);
+        return;
+      }
       const legacyTransaction = legacy.transaction([CANDLES_STORE, SERIES_STORE], 'readonly');
       const legacyDone = transactionDone(legacyTransaction);
       const [candles, series] = await Promise.all([
@@ -429,7 +542,7 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
       ]);
       await legacyDone;
 
-      const transaction = database.transaction([CANDLES_STORE, SERIES_STORE], 'readwrite');
+      const transaction = database.transaction([CANDLES_STORE, SERIES_STORE, META_STORE], 'readwrite');
       const done = transactionDone(transaction);
       const candleStore = transaction.objectStore(CANDLES_STORE);
       for (const candle of candles) {
@@ -463,6 +576,10 @@ export class BrowserHistoryCache implements BrowserHistoryCacheApi {
           updatedAt: Math.max(previous?.updatedAt ?? 0, legacySeries.updatedAt ?? 0, Date.now()),
         } satisfies StoredSeries);
       }
+      transaction.objectStore(META_STORE).put({
+        key: LEGACY_BINANCE_MIGRATION_KEY,
+        updatedAt: Date.now(),
+      } satisfies StoredMeta);
       await done;
     } catch {
       // Migration is idempotent and best-effort. The old DB is intentionally retained for rollback.

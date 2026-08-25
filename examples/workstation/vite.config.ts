@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
 import { fiinQuantProxyToken, providerRuntimeIntegration } from './provider-runtime/vite-plugin';
 import { scannerIntegration } from './scanner/vite-plugin';
+import { stockFlowIntegration } from './stock-flow/vite-plugin';
 
 const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
 const ASSISTANT_TARGET = 'http://127.0.0.1:8788';
@@ -293,17 +294,18 @@ window.__L2CHART_ASSISTANT__ = Object.freeze({
 }
 
 function providerProxy(fiinQuantSidecarToken: string): Record<string, string | ProxyOptions> {
+  const localOnly = (request: IncomingMessage, response: ServerResponse | undefined) => {
+    if (isAllowedBrowserRequest(request)) return;
+    if (response) sendJson(response, 403, { message: 'Cross-site requests are not allowed' });
+    return false;
+  };
   return {
     '/fiinquant-api': {
       target: 'http://127.0.0.1:8720',
       changeOrigin: true,
       ws: true,
       rewrite: (path) => path.replace(/^\/fiinquant-api/, ''),
-      bypass(request, response) {
-        if (isAllowedBrowserRequest(request)) return;
-        if (response) sendJson(response, 403, { message: 'Cross-site requests are not allowed' });
-        return false;
-      },
+      bypass: localOnly,
       configure(proxy) {
         const addServerToken = (proxyRequest: { setHeader(name: string, value: string): void }, request: IncomingMessage) => {
           if (fiinQuantSidecarToken && isLoopbackClient(request) && isAllowedBrowserRequest(request)) {
@@ -313,6 +315,24 @@ function providerProxy(fiinQuantSidecarToken: string): Record<string, string | P
         proxy.on('proxyReq', addServerToken);
         proxy.on('proxyReqWs', addServerToken);
       },
+    },
+    '/binance-spot-api': {
+      target: 'https://data-api.binance.vision',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/binance-spot-api/, ''),
+      bypass: localOnly,
+    },
+    '/binance-spot-fallback-api': {
+      target: 'https://api.binance.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/binance-spot-fallback-api/, ''),
+      bypass: localOnly,
+    },
+    '/binance-usdm-api': {
+      target: 'https://fapi.binance.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/binance-usdm-api/, ''),
+      bypass: localOnly,
     },
     '/dnse-ws': {
       target: 'wss://ws-openapi.dnse.com.vn',
@@ -338,6 +358,7 @@ export default defineConfig(({ mode }) => {
       assistantApiProxy(),
       assistantIntegration(),
       scannerIntegration(),
+      stockFlowIntegration(),
     ],
     build: {
       outDir: '../../dist',

@@ -60,6 +60,7 @@ import {
 } from '../providers/dnse';
 import { FiinQuantDatafeed, type FiinQuantHealth } from '../providers/fiinquant';
 import { BinanceDatafeed } from '../providers/binance';
+import { BINANCE_LOCAL_INTERVALS, BinanceLocalDatafeed } from '../providers/binance-local';
 import { SampleDatafeed } from '../providers/sample';
 import {
   MarketHub,
@@ -78,6 +79,7 @@ import {
   DEFAULT_REPLAY_DAY_LABEL_COLORS,
 } from './replay/replay-day-labels';
 import { buildReplayMonthProgress } from './replay/replay-month-progress';
+import { CandleDataCoordinator, candleDatasetKey } from './data/candle-data-coordinator';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
 import { registerAllIndicators } from '../../src/indicators/all';
@@ -95,7 +97,7 @@ const indicatorCatalog = getIndicators();
 translateDom();
 observeTranslations();
 
-type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'binance-spot' | 'binance-usdm';
+type PriceProviderId = 'demo' | 'dnse' | 'fiinquant' | 'binance-local' | 'binance-spot' | 'binance-usdm';
 type ProviderCredentialMode = 'session' | 'server';
 
 interface DnseStoredSettings {
@@ -111,7 +113,12 @@ interface FiinQuantStoredSettings {
   credentialMode: ProviderCredentialMode;
 }
 
-const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1w', '1M'];
+const INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'];
+const BINANCE_LOCAL_INTERVAL_SET = new Set<string>(BINANCE_LOCAL_INTERVALS);
+
+function intervalAllowedForProvider(provider: PriceProviderId, interval: string): boolean {
+  return provider !== 'binance-local' || BINANCE_LOCAL_INTERVAL_SET.has(interval);
+}
 const HISTORY_PAGE_SIZE = 500;
 const HISTORY_PAGE_TRIGGER_BARS = 30;
 
@@ -265,6 +272,7 @@ interface AutoSaveWorkspaceSnapshot {
 }
 
 const marketHub = new MarketHub();
+const candleDataCoordinator = new CandleDataCoordinator();
 const paperEngine = new PaperTradingEngine(marketHub);
 let tradingWorkspace: TradingWorkspace | null = null;
 
@@ -516,7 +524,7 @@ const autoSaveSettings: AutoSaveSettings = {
 
 function readAutoSaveWorkspace(): AutoSaveWorkspaceSnapshot | null {
   const snapshot = readStoredJson<AutoSaveWorkspaceSnapshot | null>(AUTO_SAVE_WORKSPACE_KEY, null);
-  const validProviders = ['demo', 'dnse', 'fiinquant', 'vnstock', 'binance-spot', 'binance-usdm'];
+  const validProviders = ['demo', 'dnse', 'fiinquant', 'vnstock', 'binance-local', 'binance-spot', 'binance-usdm'];
   const validLayouts: LayoutId[] = ['1', '2v', '2h', '3', '4', '6'];
   if (
     snapshot?.version !== 1
@@ -1045,6 +1053,7 @@ function readActiveProvider(): PriceProviderId {
   return stored === 'demo'
     || stored === 'dnse'
     || stored === 'fiinquant'
+    || stored === 'binance-local'
     || stored === 'binance-spot'
     || stored === 'binance-usdm'
     ? stored
@@ -1143,6 +1152,7 @@ let dnseRealtimeState: DnseRealtimeState = 'idle';
 let dnseRealtimeDetail = '';
 let unsubscribeDnseRealtimeStatus: (() => void) | null = null;
 const demoFeed = new SampleDatafeed();
+const binanceLocalFeed = new BinanceLocalDatafeed();
 const binanceSpotFeed = new BinanceDatafeed({ market: 'spot' });
 const binanceUsdmFeed = new BinanceDatafeed({ market: 'usdm' });
 
@@ -1257,16 +1267,21 @@ function isBinanceProvider(provider: PriceProviderId): provider is 'binance-spot
   return provider === 'binance-spot' || provider === 'binance-usdm';
 }
 
+function isCryptoProvider(provider: PriceProviderId): boolean {
+  return provider === 'binance-local' || isBinanceProvider(provider);
+}
+
 function providerFamily(provider: PriceProviderId): 'vietnam' | 'binance' {
-  return isBinanceProvider(provider) ? 'binance' : 'vietnam';
+  return isCryptoProvider(provider) ? 'binance' : 'vietnam';
 }
 
 function providerWatchlistKey(provider: PriceProviderId): string {
+  if (provider === 'binance-local') return provider;
   return isBinanceProvider(provider) ? provider : 'vietnam';
 }
 
 function defaultSymbolsForProvider(provider: PriceProviderId): string[] {
-  return isBinanceProvider(provider) ? BINANCE_DEFAULT_SYMBOLS : DEFAULT_SYMBOLS;
+  return isCryptoProvider(provider) ? BINANCE_DEFAULT_SYMBOLS : DEFAULT_SYMBOLS;
 }
 
 function setActiveProvider(provider: PriceProviderId): void {
@@ -1277,6 +1292,11 @@ function setActiveProvider(provider: PriceProviderId): void {
   providerEnabled = true;
   localStorage.setItem(ACTIVE_PROVIDER_KEY, provider);
   localStorage.setItem(PROVIDER_ENABLED_KEY, 'true');
+
+  for (const tile of tiles) {
+    tile.syncIntervalOptions(provider);
+    if (!intervalAllowedForProvider(provider, tile.interval)) tile.setIntervalCode('30m', false);
+  }
 
   if (providerFamily(previousProvider) !== providerFamily(provider)) {
     const defaultSymbol = defaultSymbolsForProvider(provider)[0];
@@ -1322,6 +1342,9 @@ function currentFeed(): { feed: Datafeed | null; label: string; unavailable: str
     return dnseFeed
       ? { feed: dnseFeed, label: 'DNSE', unavailable: null }
       : { feed: null, label: 'DNSE', unavailable: 'đăng nhập DNSE' };
+  }
+  if (activeProvider === 'binance-local') {
+    return { feed: binanceLocalFeed, label: 'Binance Local Archive', unavailable: null };
   }
   if (activeProvider === 'binance-spot') {
     return { feed: binanceSpotFeed, label: 'Binance Spot', unavailable: null };
@@ -1677,6 +1700,7 @@ class Tile implements ReplayParticipant {
       : preferencesFor(symbol);
     this.symbol = symbol;
     this.interval = INTERVALS.includes(initialPreferences.interval) ? initialPreferences.interval : '1d';
+    if (!intervalAllowedForProvider(activeProvider, this.interval)) this.interval = '30m';
     this.mode = initialPreferences.mode;
     this.candleColors = initialPreferences.candleColors
       ? { ...defaultCandleColors(), ...initialPreferences.candleColors }
@@ -1725,6 +1749,7 @@ class Tile implements ReplayParticipant {
       const option = document.createElement('button');
       option.type = 'button';
       option.textContent = intervalLabel(iv);
+      option.hidden = !intervalAllowedForProvider(activeProvider, iv);
       option.classList.toggle('active', iv === this.interval);
       option.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -1866,7 +1891,7 @@ class Tile implements ReplayParticipant {
 
   /** Change the timeframe using an interval code such as `15m` or `1h`. */
   setIntervalCode(iv: string, reload = true): boolean {
-    if (!INTERVALS.includes(iv)) return false;
+    if (!INTERVALS.includes(iv) || !intervalAllowedForProvider(activeProvider, iv)) return false;
     if (iv === this.interval) return true;
     if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     this.interval = iv;
@@ -1877,6 +1902,12 @@ class Tile implements ReplayParticipant {
     this.persistPreferences();
     if (reload) void this.load();
     return true;
+  }
+
+  syncIntervalOptions(provider: PriceProviderId = activeProvider): void {
+    for (const [value, button] of this.intervalButtons) {
+      button.hidden = !intervalAllowedForProvider(provider, value);
+    }
   }
 
   getTemplateSnapshot(): TileTemplate {
@@ -1897,7 +1928,9 @@ class Tile implements ReplayParticipant {
   applyTemplate(template: TileTemplate): void {
     if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
     if (template.symbol) this.setSymbol(template.symbol, false);
-    this.interval = INTERVALS.includes(template.interval) ? template.interval : this.interval;
+    const requestedInterval = INTERVALS.includes(template.interval) ? template.interval : this.interval;
+    this.interval = intervalAllowedForProvider(activeProvider, requestedInterval) ? requestedInterval : '30m';
+    this.syncIntervalOptions();
     this.intervalValueEl.textContent = intervalLabel(this.interval);
     for (const [value, button] of this.intervalButtons) button.classList.toggle('active', value === this.interval);
     this.mode = template.mode;
@@ -2604,6 +2637,7 @@ class Tile implements ReplayParticipant {
   }
 
   enterReplay(): void {
+    candleDataCoordinator.noteDataActivity();
     this.loadToken += 1;
     this.loading = false;
     this.replayActive = true;
@@ -2684,6 +2718,7 @@ class Tile implements ReplayParticipant {
     if (this.realtimeGapLoading || this.historyRange || this.replayActive || this.history.length === 0) return;
 
     const providerId = activeProvider;
+    if (providerId === 'binance-local') return;
     const provider = currentFeed();
     if (!provider.feed) return;
     if (provider.feed.name === 'Vnstock') return;
@@ -2746,6 +2781,10 @@ class Tile implements ReplayParticipant {
   async load(): Promise<void> {
     if (this.replayActive) return;
     const token = ++this.loadToken;
+    const symbol = this.symbol;
+    const interval = this.interval;
+    const rangeRequest = this.historyRange ? { ...this.historyRange } : undefined;
+    candleDataCoordinator.noteDataActivity();
     let finishCurrentLoad!: () => void;
     this.currentLoadPromise = new Promise<void>((resolve) => {
       finishCurrentLoad = resolve;
@@ -2756,6 +2795,7 @@ class Tile implements ReplayParticipant {
     this.historyPageRetryAfter = 0;
     let hadRenderableData = this.history.length > 0;
     let renderedCachedHistory = false;
+    let cachedSource = activeProvider === 'binance-local' ? 'SQLite' : 'IndexedDB';
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
     this.renderMarketStatus();
@@ -2768,8 +2808,8 @@ class Tile implements ReplayParticipant {
 
     const providerId = activeProvider;
     const provider = currentFeed();
-    this.chart.setLegendTitle(`${this.symbol} · ${intervalLabel(this.interval)}`);
-    this.chart.setWatermark(this.symbol);
+    this.chart.setLegendTitle(`${symbol} · ${intervalLabel(interval)}`);
+    this.chart.setWatermark(symbol);
     if (!provider.feed) {
       this.history = [];
       this.chart.setData([]);
@@ -2781,14 +2821,21 @@ class Tile implements ReplayParticipant {
       return;
     }
 
-    this.setFeedStatus('loading', this.historyRange ? 'đang tải lịch sử...' : 'đang tải...');
-    this.setLoadState('loading', `${this.symbol} · ${this.interval}`);
+    this.setFeedStatus('loading', rangeRequest ? 'đang tải lịch sử...' : 'đang tải...');
+    this.setLoadState('loading', `${symbol} · ${interval}`);
     try {
-      const step = intervalApproxSeconds(this.interval);
-      const pageSize = historyPageSizeFor(this.interval);
-      const range = this.historyRange ? { ...this.historyRange } : undefined;
-      const requestedBars = range ? estimateIntervalBars(range.from, range.to, this.interval) + 2 : pageSize;
+      if (providerId === 'binance-local') {
+        this.setFeedStatus('loading', 'đang kiểm tra SQLite...');
+        await binanceLocalFeed.ensureSymbol(symbol);
+        if (token !== this.loadToken || providerId !== activeProvider) return;
+      }
+
+      const step = intervalApproxSeconds(interval);
+      const pageSize = historyPageSizeFor(interval);
+      const range = rangeRequest;
+      const requestedBars = range ? estimateIntervalBars(range.from, range.to, interval) + 2 : pageSize;
       const limit = range ? Math.min(20000, Math.max(50, requestedBars)) : pageSize;
+      const latestKey = range ? null : candleDatasetKey(providerId, symbol, interval);
       const renderHistory = (candles: Candle[], fitContent: boolean) => {
         this.chart.setIntervalSec(step);
         this.history = candles.map((candle) => ({ ...candle }));
@@ -2796,7 +2843,25 @@ class Tile implements ReplayParticipant {
         if (fitContent) this.chart.fitContent();
         this.publishCandle(this.history[this.history.length - 1], provider.label);
       };
-      const cached = await provider.feed.getCachedHistory?.(this.symbol, this.interval, limit, range) ?? [];
+
+      let cached: Candle[] = [];
+      if (latestKey) {
+        const memoryCandles = candleDataCoordinator.peek(latestKey, limit);
+        if (memoryCandles) {
+          cached = memoryCandles;
+          cachedSource = 'RAM';
+        } else {
+          try {
+            cached = await provider.feed.getCachedHistory?.(symbol, interval, limit) ?? [];
+          } catch (cacheError) {
+            console.warn(`Unable to read cached ${provider.label} history for ${symbol} ${interval}`, cacheError);
+          }
+          if (token !== this.loadToken) return;
+          if (cached.length > 0) candleDataCoordinator.remember(latestKey, cached, limit);
+        }
+      } else {
+        cached = await provider.feed.getCachedHistory?.(symbol, interval, limit, range) ?? [];
+      }
       if (token !== this.loadToken) return;
       const cachedCandles = range
         ? cached.filter((candle) => candle.time >= range.from && candle.time <= range.to)
@@ -2806,10 +2871,19 @@ class Tile implements ReplayParticipant {
         hadRenderableData = true;
         renderedCachedHistory = true;
         this.setLoadState(null);
-        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        this.setFeedStatus('sample', `${provider.label} · ${cachedSource}`);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (token !== this.loadToken) return;
       }
-      const loaded = await provider.feed.getHistory(this.symbol, this.interval, limit, range);
+
+      const loaded = latestKey
+        ? await candleDataCoordinator.loadLatest(
+          latestKey,
+          limit,
+          (requestedLimit) => provider.feed!.getHistory(symbol, interval, requestedLimit),
+          { refresh: true },
+        )
+        : await provider.feed.getHistory(symbol, interval, limit, range);
       if (token !== this.loadToken) return;
       const candles = range
         ? loaded.filter((candle) => candle.time >= range.from && candle.time <= range.to)
@@ -2817,7 +2891,7 @@ class Tile implements ReplayParticipant {
       if (candles.length === 0) {
         if (renderedCachedHistory) return;
         if (!hadRenderableData) this.history = [];
-        const message = `không có dữ liệu ${this.symbol}`;
+        const message = `không có dữ liệu ${symbol}`;
         this.setFeedStatus('error', message);
         this.setLoadState('error', message);
         return;
@@ -2825,6 +2899,11 @@ class Tile implements ReplayParticipant {
       reportProviderLoadSuccess(providerId);
       this.setLoadState(null);
       renderHistory(candles, !renderedCachedHistory);
+      if (providerId === 'binance-local') {
+        this.setFeedStatus('sample', `${provider.label} · SQLite`);
+        if (activeTile === this) syncRangeUi();
+        return;
+      }
       if (range) {
         this.setFeedStatus('sample', `${provider.label} · lịch sử`);
         if (activeTile === this) syncRangeUi();
@@ -2834,7 +2913,7 @@ class Tile implements ReplayParticipant {
       this.realtimeConnectionUnsubscribe = provider.feed.onRealtimeConnected?.(() => {
         if (token === this.loadToken) void this.recoverRealtimeGap();
       }) ?? null;
-      this.unsubscribe = provider.feed.subscribe(this.symbol, this.interval, (c) => {
+      this.unsubscribe = provider.feed.subscribe(symbol, interval, (c) => {
         if (token !== this.loadToken || this.replayActive) return;
         const last = this.history[this.history.length - 1];
         const offset = providerCalendarOffsetMinutes(activeProvider);
@@ -2845,7 +2924,7 @@ class Tile implements ReplayParticipant {
         this.publishCandle(candle, provider.label);
         this.setFeedStatus('live', `${provider.label} · ${new Date(candle.time * 1000).toLocaleTimeString()}`);
       });
-      this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([this.symbol], (quote) => {
+      this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([symbol], (quote) => {
         if (token !== this.loadToken || this.replayActive) return;
         this.publishDepth(quote, provider.label);
       }) ?? null;
@@ -2855,7 +2934,7 @@ class Tile implements ReplayParticipant {
       console.error(err);
       if (renderedCachedHistory) {
         this.setLoadState(null);
-        this.setFeedStatus('sample', `${provider.label} · IndexedDB`);
+        this.setFeedStatus('sample', `${provider.label} · ${cachedSource}`);
         return;
       }
       if (!hadRenderableData) {
@@ -2981,6 +3060,7 @@ class Tile implements ReplayParticipant {
   }
 
   destroy(): void {
+    this.loadToken += 1;
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
     if (this.countdownTimer !== null) window.clearInterval(this.countdownTimer);
@@ -3017,6 +3097,7 @@ function setActiveTile(tile: Tile): void {
   tradingWorkspace?.refreshActiveSymbol();
   tradingWorkspace?.refreshObjects();
   refreshDrawingHistoryButtons();
+  renderBinanceLocalControls();
 }
 
 function refreshDrawingHistoryButtons(): void {
@@ -3069,7 +3150,7 @@ function createTileForSlot(index: number, template?: TileTemplate): Tile {
   const savedSymbol = uiPreferences.symbols[index]?.trim().toUpperCase();
   const symbol = template?.symbol?.trim().toUpperCase()
     || savedSymbol
-    || DEFAULT_SYMBOLS[index % DEFAULT_SYMBOLS.length];
+    || defaultSymbolsForProvider(activeProvider)[index % defaultSymbolsForProvider(activeProvider).length];
   const tile = new Tile(symbol, template);
   tiles.push(tile);
   chartsEl.appendChild(tile.el);
@@ -3109,6 +3190,7 @@ function refreshLayoutVisibility(): void {
 }
 
 function setLayout(layout: LayoutId, templateSnapshots: TileTemplate[] = []): void {
+  candleDataCoordinator.noteDataActivity();
   if (replaySession && replaySession.snapshot().phase !== 'idle') replaySession.stop(true);
   activeLayout = layout;
   const count = LAYOUT_COUNTS[layout];
@@ -3311,7 +3393,7 @@ function intervalForPreset(button: HTMLButtonElement): string | undefined {
   if (button.dataset.rangePreset === 'ytd' || button.dataset.rangeYears) return '1d';
   const days = Number(button.dataset.rangeDays);
   if (days >= 90) return '1h';
-  if (days >= 30) return '15m';
+  if (days >= 30) return activeProvider === 'binance-local' ? '30m' : '15m';
   return undefined;
 }
 
@@ -3778,7 +3860,7 @@ for (const option of LAYOUT_OPTIONS) {
 
 const CHART_TYPE_ICONS: Record<PriceSeriesMode, string> = {
   candles: toolIcon('<path d="M5 3v14M3 7h4v6H3zM15 2v16M13 5h4v8h-4z"/>'),
-  'heikin-ashi': toolIcon('<path d="M5 2v16M3 8h4v5H3zM15 2v16M13 6h4v5h-4z"/>'),
+  'heikin-ashi': toolIcon('<path d="M4 11v6M2.5 13h3v3h-3zM10 7v8M8.5 9h3v4h-3zM16 3v8M14.5 5h3v4h-3z"/><path d="M2 15c3-1 4-5 8-5 3 0 4-4 8-6"/>'),
   bars: toolIcon('<path d="M5 3v14M2 7h3M5 12h3M14 2v16M11 6h3M14 13h4"/>'),
   line: toolIcon('<path d="m2 15 5-6 4 3 7-8"/>'),
   area: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m2 15 5-6 4 3 7-8v13H2z" fill="currentColor" opacity=".18"/><path d="m2 15 5-6 4 3 7-8" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -4070,6 +4152,18 @@ let dnseCredentialMode: ProviderCredentialMode = dnseSettings.credentialMode ?? 
 let fiinQuantCredentialMode: ProviderCredentialMode = fiinQuantSettings.credentialMode;
 let selectedProviderPanel: PriceProviderId = activeProvider;
 let pendingProvider: PriceProviderId | null = null;
+const binanceLocalUpdateButton = document.createElement('button');
+binanceLocalUpdateButton.type = 'button';
+binanceLocalUpdateButton.hidden = true;
+document.querySelector<HTMLElement>('#provider-box .provider-footer')?.prepend(binanceLocalUpdateButton);
+
+function renderBinanceLocalControls(): void {
+  const symbol = activeTile?.symbol ?? '';
+  const visible = providerEnabled && activeProvider === 'binance-local' && selectedProviderPanel === 'binance-local';
+  binanceLocalUpdateButton.hidden = !visible;
+  binanceLocalUpdateButton.disabled = !visible || !symbol;
+  binanceLocalUpdateButton.textContent = symbol ? `Update Data · ${symbol}` : 'Update Data';
+}
 
 function renderProviderCredentialModes(): void {
   providerOverlay.querySelectorAll<HTMLButtonElement>('[data-credential-provider]').forEach((button) => {
@@ -4149,6 +4243,11 @@ function renderDnseProviderStatus(): void {
   }
 }
 
+function renderBinanceLocalProviderStatus(): void {
+  providerStatus.dataset.tone = 'success';
+  providerStatus.textContent = 'Binance Local Archive · SQLite trong project · 30m+ · không realtime · không tự cập nhật.';
+}
+
 function renderBinanceProviderStatus(provider: 'binance-spot' | 'binance-usdm'): void {
   const feed = provider === 'binance-spot' ? binanceSpotFeed : binanceUsdmFeed;
   providerStatus.dataset.tone = 'success';
@@ -4181,10 +4280,11 @@ function renderProviderConnectionSummary(): void {
     demo: 'Demo',
     dnse: 'DNSE',
     fiinquant: 'FiinQuant',
+    'binance-local': 'Binance Local Archive',
     'binance-spot': 'Binance Spot',
     'binance-usdm': 'Binance Futures',
   };
-  for (const provider of ['demo', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {
+  for (const provider of ['demo', 'binance-local', 'binance-spot', 'binance-usdm', 'dnse', 'fiinquant'] as PriceProviderId[]) {
     const isOn = providerEnabled && provider === activeProvider;
     const row = document.createElement('div');
     row.className = 'provider-source-row';
@@ -4230,6 +4330,7 @@ function providerDisplayName(provider: PriceProviderId): string {
   if (provider === 'demo') return 'Demo';
   if (provider === 'dnse') return 'DNSE';
   if (provider === 'fiinquant') return 'FiinQuant';
+  if (provider === 'binance-local') return 'Binance Local Archive';
   return provider === 'binance-spot' ? 'Binance Spot' : 'Binance Futures';
 }
 
@@ -4261,12 +4362,15 @@ function renderProviderSourceState(): void {
       ? dnseStateLabel()
       : activeProvider === 'fiinquant'
         ? fiinState
-        : activeProvider === 'binance-spot'
+        : activeProvider === 'binance-local'
+          ? 'SQLite · 30m+'
+          : activeProvider === 'binance-spot'
           ? 'Spot · IndexedDB'
           : 'USD-M · IndexedDB';
   sourceBtn.classList.toggle(
     'active',
-    isBinanceProvider(activeProvider)
+    activeProvider === 'binance-local'
+      || isBinanceProvider(activeProvider)
       || (activeProvider === 'fiinquant' && fiinQuantConnectionState === 'connected')
       || (activeProvider === 'dnse' && dnseRealtimeState === 'connected'),
   );
@@ -4287,6 +4391,8 @@ function refreshProviderUi(): void {
     providerStatus.textContent = '';
   } else if (activeProvider === 'dnse') {
     renderDnseProviderStatus();
+  } else if (activeProvider === 'binance-local') {
+    renderBinanceLocalProviderStatus();
   } else if (isBinanceProvider(activeProvider)) {
     renderBinanceProviderStatus(activeProvider);
   } else {
@@ -4307,6 +4413,7 @@ function fillProviderFields(): void {
 function setProviderPanel(provider: PriceProviderId): void {
   selectedProviderPanel = provider;
   delete providerStatus.dataset.tone;
+  providerStatus.hidden = provider !== 'binance-local';
   providerOverlay.querySelectorAll<HTMLButtonElement>('[data-provider-tab]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.providerTab === provider);
   });
@@ -4317,12 +4424,15 @@ function setProviderPanel(provider: PriceProviderId): void {
     providerStatus.textContent = '';
   } else if (provider === 'dnse') {
     renderDnseProviderStatus();
+  } else if (provider === 'binance-local') {
+    renderBinanceLocalProviderStatus();
   } else if (isBinanceProvider(provider)) {
     renderBinanceProviderStatus(provider);
   } else {
     void reportFiinQuantHealth();
   }
   renderProviderConnectionSummary();
+  renderBinanceLocalControls();
 }
 
 function openProviderDialog(provider: PriceProviderId = activeProvider): void {
@@ -4366,6 +4476,10 @@ async function activateProviderFromSwitcher(provider: PriceProviderId): Promise<
   setProviderPanel(provider);
   if (provider === 'demo') {
     setActiveProvider('demo');
+    return;
+  }
+  if (provider === 'binance-local') {
+    setActiveProvider(provider);
     return;
   }
   if (isBinanceProvider(provider)) {
@@ -4644,6 +4758,7 @@ providerOverlay.querySelectorAll<HTMLButtonElement>('[data-provider-tab]').forEa
     const value = btn.dataset.providerTab;
     const provider: PriceProviderId = value === 'fiinquant'
       || value === 'dnse'
+      || value === 'binance-local'
       || value === 'binance-spot'
       || value === 'binance-usdm'
       ? value
@@ -4654,6 +4769,25 @@ providerOverlay.querySelectorAll<HTMLButtonElement>('[data-provider-tab]').forEa
 document.getElementById('demo-use')!.addEventListener('click', () => setActiveProvider('demo'));
 document.getElementById('binance-spot-use')!.addEventListener('click', () => setActiveProvider('binance-spot'));
 document.getElementById('binance-usdm-use')!.addEventListener('click', () => setActiveProvider('binance-usdm'));
+binanceLocalUpdateButton.addEventListener('click', () => {
+  if (!providerEnabled || activeProvider !== 'binance-local' || !activeTile) return;
+  const symbol = activeTile.symbol;
+  binanceLocalUpdateButton.disabled = true;
+  providerStatus.hidden = false;
+  delete providerStatus.dataset.tone;
+  providerStatus.textContent = `Đang cập nhật ${symbol} từ Binance Public Data Archive...`;
+  void binanceLocalFeed.refreshSymbol(symbol).then((status) => {
+    providerStatus.dataset.tone = 'success';
+    const last = status.lastTime ? new Date(status.lastTime * 1000).toLocaleString() : '--';
+    providerStatus.textContent = `${symbol} đã cập nhật local tới ${last}.`;
+    reloadAllTiles();
+  }).catch((error) => {
+    providerStatus.dataset.tone = 'error';
+    providerStatus.textContent = `Update thất bại, dữ liệu local cũ vẫn giữ nguyên: ${error instanceof Error ? error.message : String(error)}`;
+  }).finally(() => {
+    renderBinanceLocalControls();
+  });
+});
 providerOverlay.querySelectorAll<HTMLButtonElement>('[data-binance-cache-clear]').forEach((button) => {
   button.addEventListener('click', () => {
     const provider = button.dataset.binanceCacheClear === 'usdm' ? 'binance-usdm' : 'binance-spot';
@@ -5028,6 +5162,7 @@ function parseCommand(raw: string): Command {
       '4': '4h',
       '5': '5m',
       '15': '15m',
+      '30': '30m',
       '60': '1h',
     };
     const iv = minuteMap[digits[1]];

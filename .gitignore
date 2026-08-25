@@ -26,3 +26,6 @@ examples/sidecars/fiinquant/.venv/
 
 # Scanner cache is local and rebuildable.
 examples/sidecars/scanner/data/
+
+# Binance archive history is local and rebuildable.
+data/binance-archive/

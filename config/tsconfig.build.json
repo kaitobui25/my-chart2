@@ -5,12 +5,12 @@
     "declarationMap": true,
     "emitDeclarationOnly": true,
     "noEmit": false,
-    "outDir": "lib-dist/types",
-    "rootDir": "src"
+    "outDir": "../lib-dist/types",
+    "rootDir": "../src"
   },
   "include": [
-    "src/library.ts",
-    "src/index.ts",
-    "src/style.d.ts"
+    "../src/library.ts",
+    "../src/index.ts",
+    "../src/style.d.ts"
   ]
 }

@@ -1,6 +1,7 @@
 import { registerIndicator, type IndicatorDef } from './registry';
 import bollinger from './builtin/bollinger';
 import ema from './builtin/ema';
+import institutionalFlow from './builtin/institutional-flow';
 import macd from './builtin/macd';
 import pe from './builtin/pe';
 import rsi from './builtin/rsi';
@@ -20,6 +21,7 @@ const builtins: IndicatorDef[] = [
   visibleRangeExtrema,
   volume,
   pe,
+  institutionalFlow,
   rsi,
   macd,
   ...taSuite,

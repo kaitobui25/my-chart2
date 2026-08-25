@@ -14,12 +14,12 @@
     "noEmit": true
   },
   "include": [
-    "src",
-    "examples/workstation",
-    "examples/providers",
-    "tests",
-    "playwright.config.ts",
-    "vitest.config.ts"
+    "../src",
+    "../examples/workstation",
+    "../examples/providers",
+    "../tests",
+    "./playwright.config.ts",
+    "./vitest.config.ts"
   ],
-  "exclude": ["examples/workstation/vite.config.ts"]
+  "exclude": ["../examples/workstation/vite.config.ts"]
 }

@@ -1,7 +1,7 @@
 # Current Replay
 
-**Generated:** 2026-08-16  
-**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
+**Generated:** 2026-08-20  
+**Documented main:** `1ddc163c8f29129011920f48ce16bc67343c8352`  
 
 Replay is a workstation subsystem built around one shared raw market-time clock. It is not implemented as independent timers inside each chart tile.
 

@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js')
 const assistantServerPath = path.join(ROOT, 'examples', 'sidecars', 'assistant', 'server.mjs')
+const binanceLocalSidecarPath = path.join(ROOT, 'examples', 'sidecars', 'binance-local', 'binance_local_sidecar.py')
 const workstationConfigPath = path.join(ROOT, 'scripts', 'vite-dev.config.mjs')
 const ASSISTANT_HEALTH_URL = 'http://127.0.0.1:8788/health'
+const BINANCE_LOCAL_HEALTH_URL = 'http://127.0.0.1:8750/health'
 const DEFAULT_WORKSTATION_PORT = 53173
 const PROVIDER_RUNTIME_VERSION = 1
 const DEV_TRACE_VERSION = 1
@@ -81,6 +83,70 @@ async function ensureAssistantSidecar() {
   spawnManaged(process.execPath, [assistantServerPath])
   health = await waitForJsonHealth(ASSISTANT_HEALTH_URL)
   if (!health?.ok) throw new Error(`Assistant sidecar did not become ready at ${ASSISTANT_HEALTH_URL}`)
+}
+
+function localPythonCandidates() {
+  const candidates = []
+  if (process.env.BINANCE_LOCAL_PYTHON) candidates.push(process.env.BINANCE_LOCAL_PYTHON)
+  if (process.env.VIRTUAL_ENV) {
+    candidates.push(process.platform === 'win32'
+      ? path.join(process.env.VIRTUAL_ENV, 'Scripts', 'python.exe')
+      : path.join(process.env.VIRTUAL_ENV, 'bin', 'python'))
+  }
+  if (process.platform === 'win32') candidates.push('python', 'py')
+  else candidates.push('python3', 'python')
+  return [...new Set(candidates)]
+}
+
+function startBinanceLocalSidecar() {
+  if (!existsSync(binanceLocalSidecarPath)) {
+    throw new Error(`Missing Binance Local Archive sidecar: ${binanceLocalSidecarPath}`)
+  }
+  const candidates = localPythonCandidates()
+  const launch = index => {
+    const python = candidates[index]
+    if (!python) {
+      console.error('[binance-local] Python was not found. Install Python 3 and run npm run dev again.')
+      shutdown(1)
+      return
+    }
+    const args = python === 'py' ? ['-3', binanceLocalSidecarPath] : [binanceLocalSidecarPath]
+    const child = spawn(python, args, {
+      cwd: ROOT,
+      stdio: 'inherit',
+      windowsHide: false,
+      env: { ...process.env, BINANCE_LOCAL_PORT: '8750' },
+    })
+    children.push(child)
+    let started = false
+    child.once('spawn', () => { started = true })
+    child.once('error', error => {
+      const position = children.indexOf(child)
+      if (position >= 0) children.splice(position, 1)
+      if (!closing && !started && error?.code === 'ENOENT') launch(index + 1)
+      else if (!closing) {
+        console.error(`[binance-local] ${error.message}`)
+        shutdown(1)
+      }
+    })
+    child.once('exit', code => {
+      if (!closing && code !== 0) shutdown(code ?? 1)
+    })
+  }
+  launch(0)
+}
+
+async function ensureBinanceLocalSidecar() {
+  let health = await readJson(BINANCE_LOCAL_HEALTH_URL)
+  if (health?.ok) {
+    console.log(`[binance-local] Reusing sidecar at ${BINANCE_LOCAL_HEALTH_URL}`)
+    return
+  }
+
+  console.log('[binance-local] Starting independent local SQLite archive service...')
+  startBinanceLocalSidecar()
+  health = await waitForJsonHealth(BINANCE_LOCAL_HEALTH_URL, 80)
+  if (!health?.ok) throw new Error(`Binance Local Archive sidecar did not become ready at ${BINANCE_LOCAL_HEALTH_URL}`)
 }
 
 async function workstationRuntimeIsCompatible(port) {
@@ -167,7 +233,8 @@ async function startOrReuseWorkstation() {
 
 try {
   await ensureAssistantSidecar()
-  console.log('[providers] FiinQuant and Vnstock are lazy. They start only when the chart activates them.')
+  await ensureBinanceLocalSidecar()
+  console.log('[providers] Binance Local Archive is independent. Existing Binance Spot/USD-M providers are unchanged. FiinQuant and Vnstock remain lazy.')
   await startOrReuseWorkstation()
 } catch (error) {
   console.error(`[launcher] ${error instanceof Error ? error.message : String(error)}`)

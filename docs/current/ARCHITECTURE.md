@@ -1,7 +1,7 @@
 # Current Architecture
 
-**Generated:** 2026-08-16  
-**Documented main:** `c0c322d259d7300ea1107283813e2aed808dc855`  
+**Generated:** 2026-08-20  
+**Documented main:** `1ddc163c8f29129011920f48ce16bc67343c8352`  
 
 This page describes implementation boundaries at the documented commit. It does not describe future plans.
 
@@ -17,7 +17,7 @@ Main responsibilities:
 - `src/interval.ts` — interval codes and calendar-aware interval boundaries.
 - `src/calendar-candles.ts` and `src/candle-aggregation.ts` — pure OHLC aggregation/projection helpers.
 - `src/datafeed.ts` — provider-neutral market-data contract.
-- `src/indicators/` — indicator registry and calculations. `src/indicators/runtime-context.ts` tracks the active chart symbol through the public `setWatermark()` API so async indicators (such as P/E) can fetch data for the correct instrument without `L2Chart` knowing about providers.
+- `src/indicators/` — indicator registry and calculations. `src/indicators/runtime-context.ts` tracks the active chart symbol (via the public `setWatermark()` API) and the active provider (via a runtime setter the workstation feeds) so async indicators (such as P/E and institutional flow) can fetch data for the correct instrument without `L2Chart` knowing about providers. It also publishes direct-manipulation parameter patches (for example a moved zero line) back to the workstation so they can be persisted with the rest of the indicator params.
 
 `src/index.ts` exports the provider-neutral package surface. Provider SDK authentication, sidecars, scanner code and workstation behavior are intentionally outside this boundary.
 
@@ -27,7 +27,7 @@ The browser workstation is under `examples/workstation/` and composes the chart 
 
 `examples/workstation/main.ts` owns the central UI/application composition: chart tiles, provider selection, chart preferences/templates, watchlists, replay wiring, drawing persistence and MarketHub/paper-trading integration.
 
-The Vite application runs on `127.0.0.1:53173` in development. `examples/workstation/vite.config.ts` installs the provider runtime, DNSE proxy, assistant proxy/integration and scanner integration plugins.
+The Vite application runs on `127.0.0.1:53173` in development. `examples/workstation/vite.config.ts` installs the provider runtime, DNSE proxy, assistant proxy/integration, scanner integration and stock-flow integration plugins.
 
 ## 3. Market-data boundary
 
@@ -109,6 +109,10 @@ Vnstock sidecar
 The Vnstock sidecar also exposes `GET /fundamentals/pe`, which reads quarterly trailing-EPS/P/E rows through the Vnstock `Fundamental` API and feeds the P/E indicator's quarterly markers.
 
 Daily realtime candles are normalized to the same trading-day key as history before cache merge.
+
+### Institutional flow (Vnstock + 1M path)
+
+The institutional-flow indicator is gated to the Vnstock provider on a monthly (1M) interval for listed 3-letter Vietnamese equity tickers. Its monthly net foreign/proprietary values come from an external stockdata web service proxied through the workstation `/stock-flow-api` route (`GET /api/chart-flow`, default `http://127.0.0.1:8765`, overridable via `STOCKDATA_WEB_URL`), not from the Vnstock sidecar. The browser-side repository keeps a 5-minute cache; the series renders in a fixed region above the main pane so flow values never enter PriceScale.
 
 ## 6. Binance path
 
