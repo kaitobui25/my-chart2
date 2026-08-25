@@ -2,7 +2,7 @@ import './eod-update-progress.css';
 
 const UPDATE_ENDPOINT = '/scanner-api/eod/import-latest';
 const PROGRESS_ENDPOINT = '/scanner-api/eod/update-progress';
-const UPDATE_TIMEOUT_MS = 86_000;
+const UPDATE_TIMEOUT_MS = 180_000;
 const PROGRESS_TIMEOUT_MS = 3_000;
 const PROGRESS_POLL_MS = 250;
 
@@ -334,25 +334,31 @@ async function trackProgress(
   startedAt: number,
   entries: EodLogEntry[],
 ): Promise<void> {
-  let settled = false;
-  let responseValue: Response | null = null;
-  let requestError: unknown = null;
+  const state: {
+    settled: boolean;
+    response: Response | null;
+    error: unknown;
+  } = {
+    settled: false,
+    response: null,
+    error: null,
+  };
   let lastStage: string | null = null;
   let failedProgressReads = 0;
   let progressOfflineLogged = false;
 
   void request.then(
     (response) => {
-      responseValue = response;
-      settled = true;
+      state.response = response;
+      state.settled = true;
     },
     (error: unknown) => {
-      requestError = error;
-      settled = true;
+      state.error = error;
+      state.settled = true;
     },
   );
 
-  while (!settled && token === trackingToken) {
+  while (!state.settled && token === trackingToken) {
     const progress = await readProgress();
     if (progress) {
       failedProgressReads = 0;
@@ -380,7 +386,8 @@ async function trackProgress(
     }
   }
 
-  if (responseValue?.ok) {
+  const responseValue = state.response;
+  if (responseValue !== null && responseValue.ok) {
     pushLog(entries, 'Hoàn tất cập nhật EOD', 100, 'success');
     renderProgress(100, finalProgress?.stage ?? 'Hoàn tất cập nhật EOD');
     window.setTimeout(() => {
@@ -390,9 +397,9 @@ async function trackProgress(
     return;
   }
 
-  const message = requestError
-    ? requestErrorMessage(requestError)
-    : responseValue
+  const message = state.error
+    ? requestErrorMessage(state.error)
+    : responseValue !== null
       ? await responseError(responseValue)
       : 'Cập nhật EOD kết thúc nhưng không nhận được phản hồi.';
   pushLog(entries, message, finalProgress?.progressPct ?? null, 'error');
