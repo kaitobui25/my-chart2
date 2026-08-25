@@ -1,25 +1,26 @@
-import {
-  PeFundamentalsCache,
-  mergePeFundamentals,
-  type PeFundamentalsRecord,
-  type PeIncomingPayload,
-  type PeIncomingQuarter,
-} from './pe-cache';
+import type { PeQuarter } from './pe-model';
 
-const DEFAULT_BASE_URL = '/vnstock-api';
-const REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_BASE_URL = '/pe-quarterly-api';
+const DEFAULT_CACHE_TTL_MS = 5 * 60_000;
 
-export interface PeCacheApi {
-  get(symbol: string): Promise<PeFundamentalsRecord | null>;
-  put(record: PeFundamentalsRecord): Promise<void>;
+export interface PeQuarterlyRecord {
+  symbol: string;
+  source: string;
+  fetchedAt: number;
+  quarters: PeQuarter[];
 }
 
-export interface PeRepositoryOptions {
-  baseUrl?: string;
-  cache?: PeCacheApi;
-  fetchImpl?: typeof fetch;
-  now?: () => number;
-  timeoutMs?: number;
+interface CacheEntry {
+  expiresAt: number;
+  value: PeQuarterlyRecord;
+}
+
+interface PeQuarterlyPayload {
+  symbol?: unknown;
+  source?: unknown;
+  fetchedAt?: unknown;
+  quarters?: unknown;
+  error?: unknown;
 }
 
 function normalizeSymbol(symbol: string): string {
@@ -27,94 +28,85 @@ function normalizeSymbol(symbol: string): string {
 }
 
 function finiteNumber(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
-function parsePayload(value: unknown, requestedSymbol: string): PeIncomingPayload {
-  if (!value || typeof value !== 'object') throw new Error('Invalid Vnstock P/E response');
-  const raw = value as Record<string, unknown>;
-  const symbol = normalizeSymbol(String(raw.symbol ?? requestedSymbol));
-  if (!symbol || symbol !== requestedSymbol) throw new Error('Vnstock P/E response symbol mismatch');
-  if (!Array.isArray(raw.quarters)) throw new Error('Vnstock P/E response has no quarter data');
-
-  const quarters: PeIncomingQuarter[] = [];
-  for (const item of raw.quarters) {
-    if (!item || typeof item !== 'object') continue;
-    const row = item as Record<string, unknown>;
-    const period = String(row.period ?? '').trim().toUpperCase();
-    const periodEnd = finiteNumber(row.periodEnd ?? row.period_end);
-    const trailingEps = finiteNumber(row.trailingEps ?? row.trailing_eps);
-    const peRatio = finiteNumber(row.peRatio ?? row.pe_ratio);
-    if (!/^\d{4}-Q[1-4]$/.test(period) || periodEnd === null || trailingEps === null) continue;
-    quarters.push({ period, periodEnd, trailingEps, peRatio });
+function normalizeRecord(value: unknown, requestedSymbol: string): PeQuarterlyRecord {
+  if (!value || typeof value !== 'object') throw new Error('Invalid quarterly P/E response');
+  const input = value as PeQuarterlyPayload;
+  const symbol = normalizeSymbol(String(input.symbol ?? ''));
+  if (!symbol || symbol !== requestedSymbol || !Array.isArray(input.quarters)) {
+    throw new Error('Invalid quarterly P/E response');
   }
+
+  const quarters: PeQuarter[] = [];
+  for (const raw of input.quarters) {
+    if (!raw || typeof raw !== 'object') continue;
+    const item = raw as Record<string, unknown>;
+    const period = String(item.period ?? '').trim().toUpperCase();
+    const periodEnd = finiteNumber(item.periodEnd);
+    const trailingEps = finiteNumber(item.trailingEps);
+    const peRatio = item.peRatio === null || item.peRatio === undefined ? null : finiteNumber(item.peRatio);
+    const firstObservedAt = finiteNumber(item.firstObservedAt);
+    if (!/^\d{4}-Q[1-4]$/.test(period) || periodEnd === null || trailingEps === null || firstObservedAt === null) {
+      continue;
+    }
+    quarters.push({ period, periodEnd, trailingEps, peRatio, firstObservedAt });
+  }
+  quarters.sort((left, right) => left.periodEnd - right.periodEnd);
 
   return {
     symbol,
-    source: String(raw.source ?? 'vnstock-unified'),
+    source: String(input.source ?? 'vnstock-unified'),
+    fetchedAt: finiteNumber(input.fetchedAt) ?? 0,
     quarters,
   };
 }
 
-export class PeFundamentalsRepository {
-  private readonly baseUrl: string;
-  private readonly cache: PeCacheApi;
-  private readonly fetchImpl: typeof fetch;
-  private readonly now: () => number;
-  private readonly timeoutMs: number;
-  private readonly inFlight = new Map<string, Promise<PeFundamentalsRecord>>();
+export class PeQuarterlyRepository {
+  private readonly cache = new Map<string, CacheEntry>();
+  private readonly inFlight = new Map<string, Promise<PeQuarterlyRecord>>();
 
-  constructor(options: PeRepositoryOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-    this.cache = options.cache ?? new PeFundamentalsCache();
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-    this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
-    this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
-  }
+  constructor(
+    private readonly baseUrl = DEFAULT_BASE_URL,
+    private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis),
+    private readonly cacheTtlMs = DEFAULT_CACHE_TTL_MS,
+  ) {}
 
-  getCached(symbol: string): Promise<PeFundamentalsRecord | null> {
-    return this.cache.get(normalizeSymbol(symbol));
-  }
-
-  fetchAndCache(symbol: string): Promise<PeFundamentalsRecord> {
+  get(symbol: string): Promise<PeQuarterlyRecord> {
     const normalized = normalizeSymbol(symbol);
-    if (!normalized) return Promise.reject(new Error('Missing ticker for P/E request'));
+    const cached = this.cache.get(normalized);
+    if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+
     const existing = this.inFlight.get(normalized);
     if (existing) return existing;
 
-    const request = this.fetchFresh(normalized).finally(() => {
+    const request = this.fetchRecord(normalized).finally(() => {
       if (this.inFlight.get(normalized) === request) this.inFlight.delete(normalized);
     });
     this.inFlight.set(normalized, request);
     return request;
   }
 
-  private async fetchFresh(symbol: string): Promise<PeFundamentalsRecord> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      const response = await this.fetchImpl(
-        `${this.baseUrl}/fundamentals/pe?symbol=${encodeURIComponent(symbol)}`,
-        { signal: controller.signal },
-      );
-      const payload = await response.json().catch(() => null) as unknown;
-      if (!response.ok) {
-        const message = payload && typeof payload === 'object'
-          ? String((payload as Record<string, unknown>).message ?? `HTTP ${response.status}`)
-          : `HTTP ${response.status}`;
-        throw new Error(message);
-      }
-      const incoming = parsePayload(payload, symbol);
-      const observedAt = this.now();
-      const cached = await this.cache.get(symbol).catch(() => null);
-      const merged = mergePeFundamentals(cached, incoming, observedAt);
-      await this.cache.put(merged).catch(() => undefined);
-      return merged;
-    } finally {
-      clearTimeout(timeout);
+  clear(): void {
+    this.cache.clear();
+  }
+
+  private async fetchRecord(symbol: string): Promise<PeQuarterlyRecord> {
+    const response = await this.fetchImpl(
+      `${this.baseUrl}?symbol=${encodeURIComponent(symbol)}`,
+      { signal: AbortSignal.timeout(8_000) },
+    );
+    const payload = await response.json().catch(() => ({})) as PeQuarterlyPayload;
+    if (!response.ok) {
+      const detail = typeof payload.error === 'string' ? payload.error : `HTTP ${response.status}`;
+      throw new Error(`Quarterly P/E unavailable: ${detail}`);
     }
+    const record = normalizeRecord(payload, symbol);
+    this.cache.set(symbol, { expiresAt: Date.now() + this.cacheTtlMs, value: record });
+    return record;
   }
 }
+
+export const peQuarterlyRepository = new PeQuarterlyRepository();
