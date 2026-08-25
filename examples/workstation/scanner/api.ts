@@ -8,7 +8,7 @@ import type {
 } from './types';
 
 const BASE = '/scanner-api';
-const EOD_UPDATE_TIMEOUT_MS = 86_000;
+const EOD_UPDATE_TIMEOUT_MS = 180_000;
 type ScannerResultMode = ScannerResult['mode'];
 const expectedModeByRun = new Map<number, ScannerResultMode>();
 
