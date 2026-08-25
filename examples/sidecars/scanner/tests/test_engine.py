@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -11,7 +13,16 @@ sys.path.insert(0, str(ROOT))
 from db import ScannerDB
 from engine import ScannerEngine
 from local_eod_provider import LocalEodProvider
-from models import Candle, HeikinScan, Instrument, MarketSnapshot, ProviderCapabilities, ScanFilters, ScanRequest
+from models import (
+    BreakoutVolumeScan,
+    Candle,
+    HeikinScan,
+    Instrument,
+    MarketSnapshot,
+    ProviderCapabilities,
+    ScanFilters,
+    ScanRequest,
+)
 from providers import ScannerProvider
 
 
@@ -148,6 +159,84 @@ class EngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit['stage1_count'], 1)
         self.assertEqual(audit['history_refresh_count'], 0)
         self.assertEqual(audit['stage2_count'], 1)
+        self.assertEqual(audit['result_count'], 1)
+
+    async def test_breakout_volume_scanner_runs_local_hose_and_skips_ha_rules(self):
+        provider = CountingLocalEodProvider()
+        engine = ScannerEngine(self.db, {'vn_eod': provider})
+        tz = ZoneInfo('Asia/Ho_Chi_Minh')
+        start = datetime(2026, 4, 6, tzinfo=tz)
+        closes = [
+            18_000, 18_300, 18_600, 18_900,
+            19_200, 19_400, 19_600, 19_800,
+            20_000, 20_200, 20_400, 21_500,
+        ]
+        weekly_volumes = [600_000] * 11 + [1_600_000]
+        candles: list[Candle] = []
+        for week, (close, weekly_volume) in enumerate(zip(closes, weekly_volumes)):
+            monday = start + timedelta(days=week * 7)
+            daily_volume = weekly_volume / 5
+            for day in range(5):
+                timestamp = int((monday + timedelta(days=day)).timestamp())
+                candles.append(Candle(
+                    timestamp,
+                    close * 0.99,
+                    close * 1.01,
+                    close * 0.98,
+                    close,
+                    daily_volume,
+                    True,
+                ))
+        latest = candles[-1]
+        self.db.import_eod_dataset(
+            'vn_eod',
+            [
+                Instrument('vn_eod', 'BREAK', 'Breakout', 'HOSE', 'STOCK'),
+                Instrument('vn_eod', 'OTHER', 'Other', 'HNX', 'STOCK'),
+            ],
+            {'BREAK': candles, 'OTHER': candles},
+            [
+                MarketSnapshot('BREAK', latest.close, latest.volume, None, latest.time),
+                MarketSnapshot('OTHER', latest.close, latest.volume, None, latest.time),
+            ],
+        )
+        import_id = self.db.begin_eod_import('vn_eod', 'test', 'upto', True, None, None)
+        self.db.finish_eod_import(
+            import_id,
+            status='complete',
+            trade_date=latest.time,
+            symbol_count=2,
+            inserted_candle_count=len(candles) * 2,
+        )
+
+        request = ScanRequest(
+            source='vn_eod',
+            universes=('HNX',),
+            filters=ScanFilters(price_min=999_999_999, volume_min=999_999_999),
+            heikin_ashi=HeikinScan(
+                timeframe='1M',
+                green=True,
+                no_lower_wick=True,
+                close_change_pct_min=999,
+                candle='current',
+            ),
+            breakout_volume=BreakoutVolumeScan(enabled=True),
+        )
+        run_id = self.db.begin_scan('vn_eod', request.to_json())
+        state = await engine.execute(run_id, request)
+
+        self.assertEqual(state.status, 'complete')
+        self.assertEqual(provider.instrument_calls, 0)
+        self.assertEqual(provider.snapshot_calls, 0)
+        self.assertEqual(provider.history_calls, 0)
+        self.assertEqual(len(state.results), 1)
+        self.assertEqual(state.results[0]['symbol'], 'BREAK')
+        self.assertEqual(state.results[0]['mode'], 'breakout_volume')
+        self.assertEqual(state.results[0]['candleKind'], 'closed')
+        self.assertEqual(state.results[0]['signalState'], 'NEW')
+        self.assertGreaterEqual(state.results[0]['rvol'], 2.5)
+        audit = self.db.get_scan(run_id)
+        self.assertEqual(audit['stage1_count'], 1)
         self.assertEqual(audit['result_count'], 1)
 
     async def test_preloaded_vn_eod_empty_database_fails_clearly(self):

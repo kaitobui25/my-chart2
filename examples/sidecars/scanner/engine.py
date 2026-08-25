@@ -6,9 +6,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+from breakout_volume import evaluate_breakout_volume
 from db import ScannerDB
 from heikin_ashi import HA_ALGO_VERSION, compute_latest_metrics
-from models import ScanRequest, ScanResult
+from models import ScanFilters, ScanRequest, ScanResult
 from providers import ScannerProvider
 
 INSTRUMENT_TTL_SECONDS = 6 * 3600
@@ -24,6 +25,7 @@ class ScanExecution:
     results: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    progress_pct: int = 0
 
 
 class RequestPlanner:
@@ -61,8 +63,13 @@ class ScannerEngine:
 
         async with self.planner.provider_lock(request.source):
             try:
+                state.progress_pct = 5
+                await self._notify(state, progress)
+
                 if provider.capabilities.refresh_mode == 'network':
                     await self._refresh_instruments(provider, request)
+                    state.progress_pct = 10
+                    await self._notify(state, progress)
 
                 active_symbols = await asyncio.to_thread(
                     self.db.list_active_symbols, request.source
@@ -77,18 +84,24 @@ class ScannerEngine:
                     run_id,
                     universe_count=len(active_symbols),
                 )
+                state.progress_pct = 15
                 await self._notify(state, progress)
 
                 if provider.capabilities.refresh_mode == 'network':
                     await self._refresh_snapshots(
                         provider, request.source, active_symbols, state
                     )
+                    state.progress_pct = 25
+                    await self._notify(state, progress)
 
+                breakout_enabled = request.breakout_volume.enabled
+                candidate_universes = ('HOSE',) if breakout_enabled else request.universes
+                candidate_filters = ScanFilters() if breakout_enabled else request.filters
                 candidates = await asyncio.to_thread(
                     self.db.stage1_candidates,
                     request.source,
-                    request.universes,
-                    request.filters,
+                    candidate_universes,
+                    candidate_filters,
                     provider.capabilities.universes_are_exchanges,
                 )
                 await asyncio.to_thread(
@@ -96,9 +109,12 @@ class ScannerEngine:
                     run_id,
                     stage1_count=len(candidates),
                 )
+                state.progress_pct = 30
                 await self._notify(state, progress)
 
                 if provider.capabilities.refresh_mode == 'network':
+                    state.progress_pct = 35
+                    await self._notify(state, progress)
                     refresh_count = await self._refresh_candidate_history(
                         provider, candidates, state
                     )
@@ -109,13 +125,37 @@ class ScannerEngine:
                     run_id,
                     history_refresh_count=refresh_count,
                 )
+                state.progress_pct = 45
+                await self._notify(state, progress)
 
-                evaluated_ids = await self._refresh_ha(provider, request, candidates)
+                if breakout_enabled:
+                    results, evaluated_count = await self._run_breakout_volume(
+                        provider,
+                        request,
+                        candidates,
+                        state,
+                    )
+                    await asyncio.to_thread(
+                        self.db.update_scan,
+                        run_id,
+                        stage2_count=evaluated_count,
+                    )
+                    state.progress_pct = 95
+                    await self._notify(state, progress)
+                    return await self._complete(state, results, progress)
+
+                evaluated_ids = await self._refresh_ha(
+                    provider,
+                    request,
+                    candidates,
+                    state,
+                )
                 await asyncio.to_thread(
                     self.db.update_scan,
                     run_id,
                     stage2_count=len(evaluated_ids),
                 )
+                state.progress_pct = 95
                 await self._notify(state, progress)
 
                 final_rows = await asyncio.to_thread(
@@ -153,7 +193,7 @@ class ScannerEngine:
                             > provider.capabilities.snapshot_ttl_seconds * 2
                         )
                         warnings = ['snapshot stale'] if stale else []
-                    results.append(ScanResult(
+                    payload = ScanResult(
                         instrument_id=int(row['instrument_id']),
                         symbol=str(row['symbol']),
                         name=str(row['name'] or ''),
@@ -182,21 +222,109 @@ class ScannerEngine:
                         computed_at=int(row['computed_at']),
                         stale=stale,
                         warnings=warnings,
-                    ).to_json())
-                state.results = results
-                state.status = 'complete'
-                await asyncio.to_thread(
-                    self.db.update_scan,
-                    run_id,
-                    result_count=len(results),
-                    finished_at=int(time.time()),
-                    status='complete',
-                    error=None,
-                )
-                await self._notify(state, progress)
-                return state
+                    ).to_json()
+                    payload['mode'] = 'heikin_ashi'
+                    results.append(payload)
+                return await self._complete(state, results, progress)
             except Exception as exc:  # noqa: BLE001
                 return await self._fail(state, str(exc)[:500], progress)
+
+    async def _run_breakout_volume(
+        self,
+        provider: ScannerProvider,
+        request: ScanRequest,
+        candidates: list[dict],
+        state: ScanExecution,
+    ) -> tuple[list[dict], int]:
+        now = int(time.time())
+        import_state = await asyncio.to_thread(
+            self.db.latest_successful_import, request.source
+        )
+        if import_state is None:
+            state.warnings.append(
+                f'{provider.capabilities.label}: local data has no successful import audit metadata'
+            )
+        reference_time = int((import_state or {}).get('trade_date') or 0)
+        stale = (
+            reference_time == 0
+            or now - reference_time > provider.capabilities.snapshot_ttl_seconds
+        )
+        warnings = ['EOD data stale'] if stale else []
+
+        results: list[dict] = []
+        evaluated = 0
+        total = max(1, len(candidates))
+        for index, candidate in enumerate(candidates, start=1):
+            instrument_id = int(candidate['instrument_id'])
+            daily = await asyncio.to_thread(
+                self.db.read_candles,
+                instrument_id,
+                '1d',
+                HISTORY_RETAIN_BARS,
+            )
+            if daily:
+                signal = evaluate_breakout_volume(
+                    daily,
+                    provider.capabilities.timezone,
+                    request.breakout_volume,
+                    now=now,
+                )
+                evaluated += 1
+                if signal is not None:
+                    source_last_time = max(item.time for item in daily)
+                    results.append({
+                        'mode': 'breakout_volume',
+                        'instrumentId': instrument_id,
+                        'symbol': str(candidate['symbol']),
+                        'name': str(candidate.get('name') or ''),
+                        'exchange': str(candidate.get('exchange') or ''),
+                        'price': signal.close,
+                        'volume': signal.volume,
+                        'marketCap': None,
+                        'timeframe': '1w',
+                        'candleKind': 'closed',
+                        'candleTime': signal.signal_time,
+                        'weeklyChangePct': signal.weekly_change_pct,
+                        'rvol': signal.rvol,
+                        'breakoutLevel': signal.breakout_level,
+                        'tradedValue': signal.traded_value,
+                        'medianTradedValue': signal.median_traded_value,
+                        'medianVolume': signal.median_volume,
+                        'strong': signal.strong,
+                        'signalState': signal.signal_state,
+                        'nextWeekTime': signal.next_week_time,
+                        'nextWeekVolume': signal.next_week_volume,
+                        'nextWeekRvol': signal.next_week_rvol,
+                        'nextWeekClose': signal.next_week_close,
+                        'nextWeekHoldsBreakout': signal.next_week_holds_breakout,
+                        'sourceLastTime': source_last_time,
+                        'computedAt': now,
+                        'stale': stale,
+                        'warnings': list(warnings),
+                    })
+            state.progress_pct = min(95, 45 + round(index / total * 50))
+        results.sort(key=lambda row: (-float(row['rvol']), str(row['symbol'])))
+        return results, evaluated
+
+    async def _complete(
+        self,
+        state: ScanExecution,
+        results: list[dict],
+        progress: Callable[[ScanExecution], Awaitable[None]] | None,
+    ) -> ScanExecution:
+        state.results = results
+        state.status = 'complete'
+        state.progress_pct = 100
+        await asyncio.to_thread(
+            self.db.update_scan,
+            state.run_id,
+            result_count=len(results),
+            finished_at=int(time.time()),
+            status='complete',
+            error=None,
+        )
+        await self._notify(state, progress)
+        return state
 
     async def _refresh_instruments(
         self,
@@ -356,10 +484,12 @@ class ScannerEngine:
         provider: ScannerProvider,
         request: ScanRequest,
         candidates: list[dict],
+        state: ScanExecution,
     ) -> list[int]:
         evaluated: list[int] = []
         minimum_daily = 20 if request.heikin_ashi.timeframe == '1w' else 60
-        for candidate in candidates:
+        total = max(1, len(candidates))
+        for index, candidate in enumerate(candidates, start=1):
             instrument_id = int(candidate['instrument_id'])
             daily = await asyncio.to_thread(
                 self.db.read_candles,
@@ -367,25 +497,23 @@ class ScannerEngine:
                 '1d',
                 HISTORY_RETAIN_BARS,
             )
-            if len(daily) < minimum_daily:
-                continue
-
-            metrics = compute_latest_metrics(
-                daily,
-                request.heikin_ashi.timeframe,
-                provider.capabilities.timezone,
-                continuous_market=provider.capabilities.continuous_market,
-            )
-            selected = metrics.get(request.heikin_ashi.candle)
-            if selected is None:
-                continue
-            await asyncio.to_thread(
-                self.db.upsert_ha_metrics,
-                instrument_id,
-                metrics.values(),
-                HA_ALGO_VERSION,
-            )
-            evaluated.append(instrument_id)
+            if len(daily) >= minimum_daily:
+                metrics = compute_latest_metrics(
+                    daily,
+                    request.heikin_ashi.timeframe,
+                    provider.capabilities.timezone,
+                    continuous_market=provider.capabilities.continuous_market,
+                )
+                selected = metrics.get(request.heikin_ashi.candle)
+                if selected is not None:
+                    await asyncio.to_thread(
+                        self.db.upsert_ha_metrics,
+                        instrument_id,
+                        metrics.values(),
+                        HA_ALGO_VERSION,
+                    )
+                    evaluated.append(instrument_id)
+            state.progress_pct = min(95, 45 + round(index / total * 50))
         return evaluated
 
     async def _fail(

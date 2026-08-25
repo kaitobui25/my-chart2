@@ -28,4 +28,5 @@ examples/sidecars/fiinquant/.venv/
 examples/sidecars/scanner/data/
 
 # Binance archive history is local and rebuildable.
-data/binance-archive/
+dev-server.log
+data/

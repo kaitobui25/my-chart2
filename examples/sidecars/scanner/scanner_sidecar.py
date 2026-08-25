@@ -226,6 +226,11 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
         payload = {
             **audit,
             'runId': run_id,
+            'progressPct': (
+                int(job.progress_pct)
+                if job is not None
+                else 100 if audit.get('status') == 'complete' else 0
+            ),
             'warnings': list(job.warnings) if job else [],
             'results': list(job.results) if job and job.status == 'complete' else [],
         }

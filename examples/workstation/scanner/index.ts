@@ -7,7 +7,9 @@ import {
   waitForScannerRun,
 } from './api';
 import type {
+  BreakoutScannerResult,
   CafeFEodStatus,
+  HeikinScannerResult,
   ScannerCandleKind,
   ScannerRequest,
   ScannerResult,
@@ -20,6 +22,14 @@ import type {
 const STORAGE_KEY = 'l2chart.scanner.filters.v2';
 const EOD_SOURCE: ScannerSourceId = 'vn_eod';
 const EOD_STALE_DAYS = 5;
+
+const BREAKOUT_DEFAULTS = {
+  minMedianTradedValueBn: '5',
+  minMedianVolume: '500000',
+  minWeeklyChangePct: '4',
+  minRvol: '1.5',
+  strongRvol: '2.5',
+} as const;
 
 type StoredState = {
   source?: ScannerSourceId;
@@ -35,6 +45,12 @@ type StoredState = {
   noLowerWick?: boolean;
   closeChangePctMin?: string;
   candle?: ScannerCandleKind;
+  breakoutEnabled?: boolean;
+  breakoutMinMedianTradedValueBn?: string;
+  breakoutMinMedianVolume?: string;
+  breakoutMinWeeklyChangePct?: string;
+  breakoutMinRvol?: string;
+  breakoutStrongRvol?: string;
 };
 
 const DEFAULT_STATE: Required<Pick<StoredState, 'timeframe' | 'green' | 'noLowerWick' | 'closeChangePctMin' | 'candle'>> = {
@@ -64,6 +80,12 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function requiredNumber(id: string, label: string): number {
+  const value = numberOrNull(input(id).value);
+  if (value === null || value < 0) throw new Error(`${label} phải là số không âm.`);
+  return value;
+}
+
 function compact(value: number | null): string {
   if (value === null) return '—';
   return new Intl.NumberFormat('en-US', {
@@ -81,6 +103,14 @@ function price(value: number | null): string {
 function percent(value: number | null): string {
   if (value === null) return '—';
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function multiple(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(2)}x`;
+}
+
+function billionVnd(value: number | null): string {
+  return value === null ? '—' : `${(value / 1_000_000_000).toFixed(2)} tỷ`;
 }
 
 function dateOnly(value: number): string {
@@ -129,6 +159,7 @@ class ScannerPanel {
   private readonly progress: HTMLDivElement;
   private readonly results: HTMLDivElement;
   private readonly resultCount: HTMLSpanElement;
+  private readonly resultHint: HTMLElement;
   private readonly sourceHint: HTMLSpanElement;
   private readonly marketCapGroup: HTMLDivElement;
   private readonly scanButton: HTMLButtonElement;
@@ -175,13 +206,13 @@ class ScannerPanel {
 
         <div class="scanner-layout">
           <aside class="scanner-sidebar">
-            <section class="scanner-filter-section">
-              <div class="scanner-section-head"><span>01</span><strong>Thị trường</strong></div>
+            <details class="scanner-filter-section" name="scanner-filter">
+              <summary class="scanner-section-head"><span>01</span><strong>Thị trường</strong></summary>
               <div id="scanner-universe" class="scanner-universes"></div>
-            </section>
+            </details>
 
-            <section class="scanner-filter-section">
-              <div class="scanner-section-head"><span>02</span><strong>Giá & thanh khoản</strong></div>
+            <details class="scanner-filter-section" name="scanner-filter">
+              <summary class="scanner-section-head"><span>02</span><strong>Giá & thanh khoản</strong></summary>
               <div class="scanner-pair-grid">
                 <label class="scanner-field"><span>Giá từ</span><input id="scanner-price-min" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
                 <label class="scanner-field"><span>Giá đến</span><input id="scanner-price-max" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
@@ -194,10 +225,10 @@ class ScannerPanel {
                   <label class="scanner-field"><span>Market cap đến</span><input id="scanner-mc-max" type="number" min="0" step="any" placeholder="Bất kỳ"></label>
                 </div>
               </div>
-            </section>
+            </details>
 
-            <section class="scanner-filter-section">
-              <div class="scanner-section-head"><span>03</span><strong>Heikin Ashi</strong></div>
+            <details class="scanner-filter-section" name="scanner-filter">
+              <summary class="scanner-section-head"><span>03</span><strong>Heikin Ashi</strong></summary>
               <div class="scanner-control-stack">
                 <div>
                   <span class="scanner-control-label">Timeframe</span>
@@ -217,7 +248,22 @@ class ScannerPanel {
                 <label class="scanner-switch"><span><strong>Nến xanh</strong><small>HA close &gt; HA open</small></span><input id="scanner-green" type="checkbox"><i></i></label>
                 <label class="scanner-switch"><span><strong>Không râu dưới</strong><small>Ưu tiên lực mua sạch</small></span><input id="scanner-no-lower" type="checkbox"><i></i></label>
               </div>
-            </section>
+            </details>
+
+            <details class="scanner-filter-section" name="scanner-filter">
+              <summary class="scanner-section-head"><span>04</span><strong>Breakout + Volume</strong></summary>
+              <div class="scanner-control-stack">
+                <label class="scanner-switch"><span><strong>Bật Scanner 04</strong><small>HOSE · chỉ tuần đã đóng · median 8W</small></span><input id="scanner-breakout-enabled" type="checkbox"><i></i></label>
+                <div class="scanner-pair-grid">
+                  <label class="scanner-field"><span>Median GTGD 8W từ</span><div class="scanner-unit-input"><input id="scanner-breakout-value" type="number" min="0" step="any" value="5"><b>tỷ</b></div></label>
+                  <label class="scanner-field"><span>Median KL 8W từ</span><input id="scanner-breakout-volume" type="number" min="0" step="1" value="500000"></label>
+                  <label class="scanner-field"><span>Tăng tuần từ</span><div class="scanner-unit-input"><input id="scanner-breakout-change" type="number" min="0" step="any" value="4"><b>%</b></div></label>
+                  <label class="scanner-field"><span>RVOL từ</span><div class="scanner-unit-input"><input id="scanner-breakout-rvol" type="number" min="0" step="any" value="1.5"><b>x</b></div></label>
+                </div>
+                <label class="scanner-field scanner-field-wide"><span>RVOL mạnh từ</span><div class="scanner-unit-input"><input id="scanner-breakout-strong" type="number" min="0" step="any" value="2.5"><b>x</b></div></label>
+                <span class="scanner-control-label">W0 luôn là tuần đã đóng. W+1 chỉ xuất hiện sau khi tuần kế tiếp đóng.</span>
+              </div>
+            </details>
 
             <div class="scanner-sidebar-actions">
               <button id="scanner-reset" class="scanner-secondary-button" type="button">Đặt lại</button>
@@ -228,7 +274,7 @@ class ScannerPanel {
           <main class="scanner-main">
             <div class="scanner-results-head">
               <div><span class="scanner-eyebrow">KẾT QUẢ</span><h3><span id="scanner-result-count">0</span> mã phù hợp</h3></div>
-              <small>Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.</small>
+              <small id="scanner-results-hint">Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.</small>
             </div>
             <div id="scanner-progress" class="scanner-progress"><span class="scanner-progress-idle">Sẵn sàng quét.</span></div>
             <div id="scanner-results" class="scanner-table-wrap">
@@ -244,6 +290,7 @@ class ScannerPanel {
     this.progress = document.getElementById('scanner-progress') as HTMLDivElement;
     this.results = document.getElementById('scanner-results') as HTMLDivElement;
     this.resultCount = document.getElementById('scanner-result-count') as HTMLSpanElement;
+    this.resultHint = document.getElementById('scanner-results-hint') as HTMLElement;
     this.sourceHint = document.getElementById('scanner-source-hint') as HTMLSpanElement;
     this.marketCapGroup = document.getElementById('scanner-market-cap-group') as HTMLDivElement;
     this.scanButton = button('scanner-run');
@@ -266,6 +313,14 @@ class ScannerPanel {
       this.renderSourceControls();
       this.persistState();
     });
+    input('scanner-breakout-enabled').addEventListener('change', () => {
+      if (input('scanner-breakout-enabled').checked) {
+        const eod = this.sources.find((item) => item.id === EOD_SOURCE && item.available);
+        if (eod) this.source.value = EOD_SOURCE;
+      }
+      this.renderSourceControls();
+      this.persistState();
+    });
     this.scanButton.addEventListener('click', () => void this.scan());
     this.resetButton.addEventListener('click', () => this.resetFilters());
     this.eodUpdateButton.addEventListener('click', () => void this.updateEod());
@@ -285,6 +340,10 @@ class ScannerPanel {
     this.overlay.hidden = true;
   }
 
+  private breakoutEnabled(): boolean {
+    return input('scanner-breakout-enabled').checked;
+  }
+
   private applyStoredState(): void {
     input('scanner-price-min').value = this.stored.priceMin ?? '';
     input('scanner-price-max').value = this.stored.priceMax ?? '';
@@ -297,6 +356,12 @@ class ScannerPanel {
     input('scanner-no-lower').checked = this.stored.noLowerWick ?? DEFAULT_STATE.noLowerWick;
     this.setRadio('scanner-ha-timeframe', this.stored.timeframe ?? DEFAULT_STATE.timeframe);
     this.setRadio('scanner-candle-kind', this.stored.candle ?? DEFAULT_STATE.candle);
+    input('scanner-breakout-enabled').checked = this.stored.breakoutEnabled ?? false;
+    input('scanner-breakout-value').value = this.stored.breakoutMinMedianTradedValueBn ?? BREAKOUT_DEFAULTS.minMedianTradedValueBn;
+    input('scanner-breakout-volume').value = this.stored.breakoutMinMedianVolume ?? BREAKOUT_DEFAULTS.minMedianVolume;
+    input('scanner-breakout-change').value = this.stored.breakoutMinWeeklyChangePct ?? BREAKOUT_DEFAULTS.minWeeklyChangePct;
+    input('scanner-breakout-rvol').value = this.stored.breakoutMinRvol ?? BREAKOUT_DEFAULTS.minRvol;
+    input('scanner-breakout-strong').value = this.stored.breakoutStrongRvol ?? BREAKOUT_DEFAULTS.strongRvol;
   }
 
   private setRadio(name: string, value: string): void {
@@ -319,7 +384,9 @@ class ScannerPanel {
         option.disabled = !item.available;
         this.source.appendChild(option);
       }
-      const preferred = this.stored.source ?? this.bridgeProvider();
+      const preferred = this.breakoutEnabled()
+        ? EOD_SOURCE
+        : this.stored.source ?? this.bridgeProvider();
       const available = this.sources.find((item) => item.id === preferred && item.available)
         ?? this.sources.find((item) => item.available);
       if (available) this.source.value = available.id;
@@ -342,7 +409,16 @@ class ScannerPanel {
   }
 
   private renderSourceControls(): void {
-    const source = this.currentSource();
+    let source = this.currentSource();
+    const breakout = this.breakoutEnabled();
+    if (breakout && source?.id !== EOD_SOURCE) {
+      const eod = this.sources.find((item) => item.id === EOD_SOURCE && item.available);
+      if (eod) {
+        this.source.value = EOD_SOURCE;
+        source = eod;
+      }
+    }
+    this.source.disabled = breakout;
     this.universe.replaceChildren();
     if (!source) return;
 
@@ -355,22 +431,25 @@ class ScannerPanel {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = universe;
-      checkbox.checked = saved.has(universe) || saved.size === 0;
+      checkbox.checked = breakout ? universe === 'HOSE' : saved.has(universe) || saved.size === 0;
+      checkbox.disabled = breakout;
       const span = document.createElement('span');
       span.textContent = universe;
       label.append(checkbox, span);
       this.universe.appendChild(label);
     }
 
-    this.marketCapGroup.hidden = !source.market_cap;
+    this.marketCapGroup.hidden = !source.market_cap || breakout;
     for (const id of ['scanner-mc-min', 'scanner-mc-max']) {
       const element = input(id);
-      element.disabled = !source.market_cap;
+      element.disabled = !source.market_cap || breakout;
       if (!source.market_cap) element.value = '';
     }
 
     const local = source.refresh_mode === 'preloaded';
-    this.sourceHint.textContent = local ? 'SQLite local · không gọi mạng khi scan' : 'Cache + provider refresh';
+    this.sourceHint.textContent = breakout
+      ? 'Scanner 04 · HOSE · closed week · CafeF local'
+      : local ? 'SQLite local · không gọi mạng khi scan' : 'Cache + provider refresh';
     this.eodCard.hidden = source.id !== EOD_SOURCE;
     if (source.id === EOD_SOURCE) void this.refreshEodStatus();
     this.renderResults([]);
@@ -380,30 +459,49 @@ class ScannerPanel {
   private request(): ScannerRequest {
     const source = this.currentSource();
     if (!source) throw new Error('No scanner source selected.');
-    const universes = [...this.universe.querySelectorAll<HTMLInputElement>('input:checked')].map((item) => item.value);
+    const breakout = this.breakoutEnabled();
+    const selectedUniverses = [...this.universe.querySelectorAll<HTMLInputElement>('input:checked')].map((item) => item.value);
+    const universes = breakout ? ['HOSE'] : selectedUniverses;
     if (!universes.length) throw new Error('Chọn ít nhất một thị trường.');
+    if (breakout && source.id !== EOD_SOURCE) throw new Error('Scanner 04 chỉ dùng VN EOD (CafeF).');
+
     const timeframe = this.selectedRadio('scanner-ha-timeframe');
     if (timeframe !== '1w' && timeframe !== '1M') throw new Error('Chọn Week hoặc Month.');
     const candle = this.selectedRadio('scanner-candle-kind');
     if (candle !== 'current' && candle !== 'closed') throw new Error('Chọn nến hiện tại hoặc đã đóng.');
 
+    const minMedianTradedValueBn = requiredNumber('scanner-breakout-value', 'Median GTGD 8W');
+    const minMedianVolume = requiredNumber('scanner-breakout-volume', 'Median KL 8W');
+    const minWeeklyChangePct = requiredNumber('scanner-breakout-change', 'Tăng tuần');
+    const minRvol = requiredNumber('scanner-breakout-rvol', 'RVOL tối thiểu');
+    const strongRvol = requiredNumber('scanner-breakout-strong', 'RVOL mạnh');
+    if (strongRvol < minRvol) throw new Error('RVOL mạnh phải lớn hơn hoặc bằng RVOL tối thiểu.');
+
     const request: ScannerRequest = {
       source: source.id,
       universes,
       filters: {
-        priceMin: numberOrNull(input('scanner-price-min').value),
-        priceMax: numberOrNull(input('scanner-price-max').value),
-        volumeMin: numberOrNull(input('scanner-volume-min').value),
-        volumeMax: numberOrNull(input('scanner-volume-max').value),
-        marketCapMin: source.market_cap ? numberOrNull(input('scanner-mc-min').value) : null,
-        marketCapMax: source.market_cap ? numberOrNull(input('scanner-mc-max').value) : null,
+        priceMin: breakout ? null : numberOrNull(input('scanner-price-min').value),
+        priceMax: breakout ? null : numberOrNull(input('scanner-price-max').value),
+        volumeMin: breakout ? null : numberOrNull(input('scanner-volume-min').value),
+        volumeMax: breakout ? null : numberOrNull(input('scanner-volume-max').value),
+        marketCapMin: !breakout && source.market_cap ? numberOrNull(input('scanner-mc-min').value) : null,
+        marketCapMax: !breakout && source.market_cap ? numberOrNull(input('scanner-mc-max').value) : null,
       },
       heikinAshi: {
-        timeframe,
-        green: input('scanner-green').checked,
-        noLowerWick: input('scanner-no-lower').checked,
-        closeChangePctMin: numberOrNull(input('scanner-ha-change').value),
-        candle,
+        timeframe: breakout ? '1w' : timeframe,
+        green: breakout ? false : input('scanner-green').checked,
+        noLowerWick: breakout ? false : input('scanner-no-lower').checked,
+        closeChangePctMin: breakout ? null : numberOrNull(input('scanner-ha-change').value),
+        candle: breakout ? 'closed' : candle,
+      },
+      breakoutVolume: {
+        enabled: breakout,
+        minMedianTradedValue: minMedianTradedValueBn * 1_000_000_000,
+        minMedianVolume,
+        minWeeklyChangePct,
+        minRvol,
+        strongRvol,
       },
     };
 
@@ -430,6 +528,12 @@ class ScannerPanel {
       noLowerWick: input('scanner-no-lower').checked,
       closeChangePctMin: input('scanner-ha-change').value,
       candle,
+      breakoutEnabled: this.breakoutEnabled(),
+      breakoutMinMedianTradedValueBn: input('scanner-breakout-value').value,
+      breakoutMinMedianVolume: input('scanner-breakout-volume').value,
+      breakoutMinWeeklyChangePct: input('scanner-breakout-change').value,
+      breakoutMinRvol: input('scanner-breakout-rvol').value,
+      breakoutStrongRvol: input('scanner-breakout-strong').value,
     };
     this.stored = nextState;
     saveStored(nextState);
@@ -447,8 +551,19 @@ class ScannerPanel {
     input('scanner-no-lower').checked = DEFAULT_STATE.noLowerWick;
     this.setRadio('scanner-ha-timeframe', DEFAULT_STATE.timeframe);
     this.setRadio('scanner-candle-kind', DEFAULT_STATE.candle);
-    for (const checkbox of this.universe.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.checked = true;
+    input('scanner-breakout-enabled').checked = false;
+    input('scanner-breakout-value').value = BREAKOUT_DEFAULTS.minMedianTradedValueBn;
+    input('scanner-breakout-volume').value = BREAKOUT_DEFAULTS.minMedianVolume;
+    input('scanner-breakout-change').value = BREAKOUT_DEFAULTS.minWeeklyChangePct;
+    input('scanner-breakout-rvol').value = BREAKOUT_DEFAULTS.minRvol;
+    input('scanner-breakout-strong').value = BREAKOUT_DEFAULTS.strongRvol;
+    this.source.disabled = false;
+    for (const checkbox of this.universe.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+      checkbox.disabled = false;
+      checkbox.checked = true;
+    }
     this.persistState();
+    this.renderSourceControls();
     this.renderResults([]);
     this.renderIdleProgress();
   }
@@ -549,22 +664,25 @@ class ScannerPanel {
     this.eodSummary.textContent = `${mode} gần nhất hoàn tất ${finished} · ${status.snapshotSymbols.toLocaleString('en-US')} snapshot local.`;
   }
 
-  private renderIdleProgress(message = 'Sẵn sàng quét. Stage 1 lọc rác trước, sau đó mới tính Heikin Ashi.'): void {
+  private renderIdleProgress(message?: string): void {
     this.progress.replaceChildren();
     const idle = document.createElement('span');
     idle.className = 'scanner-progress-idle';
-    idle.textContent = message;
+    idle.textContent = message ?? (this.breakoutEnabled()
+      ? 'Sẵn sàng quét Scanner 04. Chỉ dùng tuần đã đóng; median thanh khoản chạy trước breakout.'
+      : 'Sẵn sàng quét. Stage 1 lọc rác trước, sau đó mới tính Heikin Ashi.');
     this.progress.appendChild(idle);
   }
 
   private renderProgress(run: ScannerRun): void {
     this.progress.replaceChildren();
     const local = this.currentSource()?.refresh_mode === 'preloaded';
+    const breakout = this.breakoutEnabled();
     const stats: Array<[string, number, boolean]> = [
       ['Universe', run.universe_count ?? 0, (run.universe_count ?? 0) > 0],
-      ['Stage 1', run.stage1_count ?? 0, (run.stage1_count ?? 0) > 0],
+      [breakout ? 'HOSE' : 'Stage 1', run.stage1_count ?? 0, (run.stage1_count ?? 0) > 0],
       [local ? 'Local history' : 'History', run.history_refresh_count ?? 0, local || (run.history_refresh_count ?? 0) > 0],
-      ['HA', run.stage2_count ?? 0, (run.stage2_count ?? 0) > 0],
+      [breakout ? 'Weekly' : 'HA', run.stage2_count ?? 0, (run.stage2_count ?? 0) > 0],
       ['Matched', run.result_count ?? 0, run.status === 'complete'],
     ];
     for (const [label, value, active] of stats) {
@@ -599,6 +717,9 @@ class ScannerPanel {
     this.resultCount.textContent = rows.length.toLocaleString('en-US');
     this.results.replaceChildren();
     if (!rows.length) {
+      this.resultHint.textContent = this.breakoutEnabled()
+        ? 'Scanner 04 · chỉ closed week · sort theo RVOL W0 giảm dần.'
+        : 'Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.';
       const empty = document.createElement('div');
       empty.className = 'scanner-empty';
       const strong = document.createElement('strong');
@@ -610,6 +731,74 @@ class ScannerPanel {
       return;
     }
 
+    if (rows[0].mode === 'breakout_volume') {
+      this.renderBreakoutResults(rows.filter((row): row is BreakoutScannerResult => row.mode === 'breakout_volume'));
+      return;
+    }
+    this.renderHeikinResults(rows.filter((row): row is HeikinScannerResult => row.mode === 'heikin_ashi'));
+  }
+
+  private renderBreakoutResults(rows: BreakoutScannerResult[]): void {
+    this.resultHint.textContent = 'Scanner 04 · closed week only · sort RVOL W0 ↓ · click một dòng để mở chart.';
+    const table = document.createElement('table');
+    table.className = 'scanner-table';
+    const columns = [
+      'Mã', 'W0 close', '% tuần', 'RVOL W0', 'Breakout', 'GTGD W0',
+      'Median GTGD 8W', 'Median KL 8W', 'Signal', 'W+1 RVOL', 'W+1 close',
+      'Theo dõi', 'W0', 'Data',
+    ];
+    const thead = table.createTHead();
+    const head = thead.insertRow();
+    for (const column of columns) {
+      const th = document.createElement('th');
+      th.textContent = column;
+      head.appendChild(th);
+    }
+
+    const tbody = table.createTBody();
+    for (const result of rows) {
+      const row = tbody.insertRow();
+      row.dataset.symbol = result.symbol;
+      this.symbolCell(row, result);
+      this.textCell(row, price(result.price));
+      this.textCell(row, percent(result.weeklyChangePct), 'scanner-positive');
+      this.textCell(row, multiple(result.rvol), result.strong ? 'scanner-positive' : '');
+      this.textCell(row, price(result.breakoutLevel));
+      this.textCell(row, billionVnd(result.tradedValue));
+      this.textCell(row, billionVnd(result.medianTradedValue));
+      this.textCell(row, compact(result.medianVolume));
+
+      const signalCell = row.insertCell();
+      signalCell.className = 'scanner-signal-cell';
+      const stateBadge = document.createElement('span');
+      stateBadge.className = `scanner-mini-badge ${result.signalState === 'NEW' ? 'is-positive' : 'is-neutral'}`;
+      stateBadge.textContent = result.signalState === 'NEW' ? 'NEW' : 'FOLLOW-UP';
+      signalCell.appendChild(stateBadge);
+      if (result.strong) {
+        const strongBadge = document.createElement('span');
+        strongBadge.className = 'scanner-mini-badge is-positive';
+        strongBadge.textContent = 'STRONG';
+        signalCell.appendChild(strongBadge);
+      }
+
+      this.textCell(row, multiple(result.nextWeekRvol));
+      this.textCell(row, price(result.nextWeekClose));
+      if (result.nextWeekHoldsBreakout === null) {
+        this.textCell(row, 'Chờ W+1', 'scanner-null');
+      } else if (result.nextWeekHoldsBreakout) {
+        this.textCell(row, 'HOLD', 'scanner-positive');
+      } else {
+        this.textCell(row, 'FAILED', 'scanner-negative');
+      }
+      this.textCell(row, dateOnly(result.candleTime));
+      this.textCell(row, result.stale ? 'Cũ' : 'Mới', result.stale ? 'scanner-stale' : 'scanner-fresh');
+    }
+    this.attachRowNavigation(tbody);
+    this.results.appendChild(table);
+  }
+
+  private renderHeikinResults(rows: HeikinScannerResult[]): void {
+    this.resultHint.textContent = 'Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.';
     const source = this.currentSource();
     const table = document.createElement('table');
     table.className = 'scanner-table';
@@ -628,15 +817,7 @@ class ScannerPanel {
     for (const result of rows) {
       const row = tbody.insertRow();
       row.dataset.symbol = result.symbol;
-
-      const symbolCell = row.insertCell();
-      symbolCell.className = 'scanner-symbol-cell';
-      const symbol = document.createElement('strong');
-      symbol.textContent = result.symbol;
-      const meta = document.createElement('small');
-      meta.textContent = result.exchange || (result.name && result.name !== result.symbol ? result.name : '—');
-      symbolCell.append(symbol, meta);
-
+      this.symbolCell(row, result);
       this.textCell(row, price(result.price));
       this.textCell(row, compact(result.volume));
       if (source?.market_cap) this.textCell(row, compact(result.marketCap), result.marketCap === null ? 'scanner-null' : '');
@@ -659,7 +840,21 @@ class ScannerPanel {
       this.textCell(row, dateOnly(result.candleTime));
       this.textCell(row, result.stale ? 'Cũ' : 'Mới', result.stale ? 'scanner-stale' : 'scanner-fresh');
     }
+    this.attachRowNavigation(tbody);
+    this.results.appendChild(table);
+  }
 
+  private symbolCell(row: HTMLTableRowElement, result: ScannerResult): void {
+    const symbolCell = row.insertCell();
+    symbolCell.className = 'scanner-symbol-cell';
+    const symbol = document.createElement('strong');
+    symbol.textContent = result.symbol;
+    const meta = document.createElement('small');
+    meta.textContent = result.exchange || (result.name && result.name !== result.symbol ? result.name : '—');
+    symbolCell.append(symbol, meta);
+  }
+
+  private attachRowNavigation(tbody: HTMLTableSectionElement): void {
     tbody.addEventListener('click', (event) => {
       const row = (event.target as HTMLElement).closest<HTMLTableRowElement>('tr[data-symbol]');
       const symbol = row?.dataset.symbol;
@@ -667,7 +862,6 @@ class ScannerPanel {
       window.__L2CHART_SCANNER_BRIDGE__?.openSymbol(symbol);
       this.hide();
     });
-    this.results.appendChild(table);
   }
 
   private textCell(row: HTMLTableRowElement, value: string, className = ''): HTMLTableCellElement {

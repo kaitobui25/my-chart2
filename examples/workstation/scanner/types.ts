@@ -39,9 +39,17 @@ export interface ScannerRequest {
     closeChangePctMin: number | null;
     candle: ScannerCandleKind;
   };
+  breakoutVolume?: {
+    enabled: boolean;
+    minMedianTradedValue: number;
+    minMedianVolume: number;
+    minWeeklyChangePct: number;
+    minRvol: number;
+    strongRvol: number;
+  };
 }
 
-export interface ScannerResult {
+interface ScannerResultBase {
   instrumentId: number;
   symbol: string;
   name: string;
@@ -52,6 +60,14 @@ export interface ScannerResult {
   timeframe: ScannerTimeframe;
   candleKind: ScannerCandleKind;
   candleTime: number;
+  sourceLastTime: number;
+  computedAt: number;
+  stale: boolean;
+  warnings: string[];
+}
+
+export interface HeikinScannerResult extends ScannerResultBase {
+  mode: 'heikin_ashi';
   haOpen: number;
   haHigh: number;
   haLow: number;
@@ -60,16 +76,36 @@ export interface ScannerResult {
   noLowerWick: boolean;
   haCloseChangePct: number | null;
   haBodyPct: number | null;
-  sourceLastTime: number;
-  computedAt: number;
-  stale: boolean;
-  warnings: string[];
 }
+
+export interface BreakoutScannerResult extends ScannerResultBase {
+  mode: 'breakout_volume';
+  timeframe: '1w';
+  candleKind: 'closed';
+  price: number;
+  volume: number;
+  weeklyChangePct: number;
+  rvol: number;
+  breakoutLevel: number;
+  tradedValue: number;
+  medianTradedValue: number;
+  medianVolume: number;
+  strong: boolean;
+  signalState: 'NEW' | 'FOLLOW_UP';
+  nextWeekTime: number | null;
+  nextWeekVolume: number | null;
+  nextWeekRvol: number | null;
+  nextWeekClose: number | null;
+  nextWeekHoldsBreakout: boolean | null;
+}
+
+export type ScannerResult = HeikinScannerResult | BreakoutScannerResult;
 
 export interface ScannerRun {
   runId: number;
   provider: ScannerSourceId;
   status: 'running' | 'complete' | 'error';
+  progressPct: number;
   started_at: number;
   finished_at?: number | null;
   universe_count: number;

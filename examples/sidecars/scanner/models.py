@@ -91,11 +91,22 @@ class HeikinScan:
 
 
 @dataclass(frozen=True)
+class BreakoutVolumeScan:
+    enabled: bool = False
+    min_median_traded_value: float = 5_000_000_000.0
+    min_median_volume: float = 500_000.0
+    min_weekly_change_pct: float = 4.0
+    min_rvol: float = 1.5
+    strong_rvol: float = 2.5
+
+
+@dataclass(frozen=True)
 class ScanRequest:
     source: ProviderId
     universes: tuple[str, ...]
     filters: ScanFilters
     heikin_ashi: HeikinScan
+    breakout_volume: BreakoutVolumeScan = BreakoutVolumeScan()
 
     @staticmethod
     def from_json(payload: Any) -> 'ScanRequest':
@@ -152,7 +163,40 @@ class ScanRequest:
             close_change_pct_min=close_change_pct_min,
             candle=candle_kind,  # type: ignore[arg-type]
         )
-        return ScanRequest(source=source, universes=universes, filters=filters, heikin_ashi=heikin_ashi)  # type: ignore[arg-type]
+
+        breakout_payload = payload.get('breakoutVolume') or {}
+        if not isinstance(breakout_payload, dict):
+            raise ValueError('breakoutVolume must be an object')
+
+        def breakout_number(key: str, default: float) -> float:
+            value = breakout_payload.get(key, default)
+            number = float(value)
+            if not (number == number and abs(number) != float('inf')):
+                raise ValueError(f'breakoutVolume.{key} must be finite')
+            if number < 0:
+                raise ValueError(f'breakoutVolume.{key} must be non-negative')
+            return number
+
+        breakout_volume = BreakoutVolumeScan(
+            enabled=bool(breakout_payload.get('enabled', False)),
+            min_median_traded_value=breakout_number('minMedianTradedValue', 5_000_000_000.0),
+            min_median_volume=breakout_number('minMedianVolume', 500_000.0),
+            min_weekly_change_pct=breakout_number('minWeeklyChangePct', 4.0),
+            min_rvol=breakout_number('minRvol', 1.5),
+            strong_rvol=breakout_number('strongRvol', 2.5),
+        )
+        if breakout_volume.strong_rvol < breakout_volume.min_rvol:
+            raise ValueError('breakoutVolume.strongRvol must be >= minRvol')
+        if breakout_volume.enabled and source != 'vn_eod':
+            raise ValueError('Scanner 04 Breakout + Volume requires source vn_eod')
+
+        return ScanRequest(
+            source=source,  # type: ignore[arg-type]
+            universes=universes,
+            filters=filters,
+            heikin_ashi=heikin_ashi,
+            breakout_volume=breakout_volume,
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -172,6 +216,14 @@ class ScanRequest:
                 'noLowerWick': self.heikin_ashi.no_lower_wick,
                 'closeChangePctMin': self.heikin_ashi.close_change_pct_min,
                 'candle': self.heikin_ashi.candle,
+            },
+            'breakoutVolume': {
+                'enabled': self.breakout_volume.enabled,
+                'minMedianTradedValue': self.breakout_volume.min_median_traded_value,
+                'minMedianVolume': self.breakout_volume.min_median_volume,
+                'minWeeklyChangePct': self.breakout_volume.min_weekly_change_pct,
+                'minRvol': self.breakout_volume.min_rvol,
+                'strongRvol': self.breakout_volume.strong_rvol,
             },
         }
 

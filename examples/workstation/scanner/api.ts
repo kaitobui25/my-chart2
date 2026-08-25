@@ -2,11 +2,14 @@ import type {
   CafeFEodStatus,
   CafeFEodUpdateResponse,
   ScannerRequest,
+  ScannerResult,
   ScannerRun,
   ScannerSource,
 } from './types';
 
 const BASE = '/scanner-api';
+type ScannerResultMode = ScannerResult['mode'];
+const expectedModeByRun = new Map<number, ScannerResultMode>();
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
@@ -15,6 +18,41 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new Error(detail);
   }
   return payload as T;
+}
+
+function normalizeScannerResult(row: ScannerResult): ScannerResult {
+  const legacy = row as unknown as Record<string, unknown>;
+  if (legacy.mode === 'heikin_ashi' || legacy.mode === 'breakout_volume') return row;
+  if ('rvol' in legacy && 'breakoutLevel' in legacy) {
+    return { ...legacy, mode: 'breakout_volume' } as unknown as ScannerResult;
+  }
+  return { ...legacy, mode: 'heikin_ashi' } as unknown as ScannerResult;
+}
+
+function normalizeScannerRun(run: ScannerRun): ScannerRun {
+  return {
+    ...run,
+    results: (run.results ?? []).map(normalizeScannerResult),
+  };
+}
+
+function heikinScannerEnabled(): boolean {
+  if (typeof document === 'undefined') return true;
+  const element = document.getElementById('scanner-heikin-enabled');
+  return !(element instanceof HTMLInputElement) || element.checked;
+}
+
+function assertExpectedMode(runId: number, run: ScannerRun): void {
+  const expected = expectedModeByRun.get(runId);
+  if (!expected || run.status !== 'complete' || !run.results.length) return;
+  const mismatch = run.results.some((row) => row.mode !== expected);
+  expectedModeByRun.delete(runId);
+  if (!mismatch) return;
+  throw new Error(
+    expected === 'breakout_volume'
+      ? 'Scanner sidecar đang chạy code cũ và trả kết quả Heikin thay vì Scanner 04. Restart workstation/sidecar rồi quét lại.'
+      : 'Scanner sidecar trả sai loại kết quả. Restart workstation/sidecar rồi quét lại.',
+  );
 }
 
 export async function getScannerSources(): Promise<ScannerSource[]> {
@@ -42,6 +80,9 @@ export async function updateCafeFEod(): Promise<CafeFEodUpdateResponse> {
 }
 
 export async function startScannerRun(request: ScannerRequest): Promise<number> {
+  if (!request.breakoutVolume?.enabled && !heikinScannerEnabled()) {
+    throw new Error('Bật Scanner 03 hoặc Scanner 04 trước khi quét.');
+  }
   const response = await fetch(`${BASE}/scan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -49,12 +90,20 @@ export async function startScannerRun(request: ScannerRequest): Promise<number> 
     signal: AbortSignal.timeout(10000),
   });
   const payload = await readJson<{ runId: number }>(response);
+  expectedModeByRun.set(
+    payload.runId,
+    request.breakoutVolume?.enabled ? 'breakout_volume' : 'heikin_ashi',
+  );
   return payload.runId;
 }
 
 export async function getScannerRun(runId: number): Promise<ScannerRun> {
   const response = await fetch(`${BASE}/runs/${runId}`, { signal: AbortSignal.timeout(5000) });
-  return readJson<ScannerRun>(response);
+  const raw = await readJson<ScannerRun>(response);
+  const run = normalizeScannerRun(raw);
+  if (run.status === 'error') expectedModeByRun.delete(runId);
+  assertExpectedMode(runId, run);
+  return run;
 }
 
 export async function waitForScannerRun(
@@ -65,9 +114,11 @@ export async function waitForScannerRun(
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const run = await getScannerRun(runId);
+    window.dispatchEvent(new CustomEvent<ScannerRun>('l2chart:scanner-run-progress', { detail: run }));
     onProgress(run);
     if (run.status === 'complete' || run.status === 'error') return run;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+  expectedModeByRun.delete(runId);
   throw new Error('Scanner timed out before the run completed.');
 }

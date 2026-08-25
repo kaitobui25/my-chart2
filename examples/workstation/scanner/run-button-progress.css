@@ -1,0 +1,94 @@
+@property --scanner-run-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.scanner-run-button {
+  --scanner-run-progress: 0%;
+  --scanner-run-angle: 0deg;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.scanner-run-button > span,
+.scanner-run-button > b {
+  position: relative;
+  z-index: 2;
+}
+
+.scanner-run-fill {
+  position: absolute;
+  z-index: 1;
+  top: 1px;
+  bottom: 1px;
+  left: 1px;
+  width: var(--scanner-run-progress);
+  max-width: calc(100% - 2px);
+  overflow: hidden;
+  border-radius: 8px 3px 3px 8px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--scanner-accent) 24%, transparent),
+    color-mix(in srgb, var(--scanner-accent) 48%, transparent)
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: width .34s cubic-bezier(.22, .8, .32, 1), opacity .15s ease;
+}
+
+.scanner-run-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 22%), transparent);
+  transform: translateX(-140%);
+  animation: scanner-run-fill-shine 1.25s ease-in-out infinite;
+}
+
+.scanner-run-button.is-running {
+  border-color: transparent;
+  opacity: 1 !important;
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--scanner-accent) 19%, var(--scanner-panel-3)),
+      color-mix(in srgb, var(--scanner-accent) 19%, var(--scanner-panel-3))
+    ) padding-box,
+    conic-gradient(
+      from var(--scanner-run-angle),
+      transparent 0deg 252deg,
+      color-mix(in srgb, var(--scanner-accent) 70%, transparent) 278deg,
+      white 305deg,
+      color-mix(in srgb, var(--scanner-accent) 86%, white 14%) 326deg,
+      transparent 360deg
+    ) border-box;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--scanner-accent) 16%, transparent),
+    0 0 18px color-mix(in srgb, var(--scanner-accent) 18%, transparent);
+  animation: scanner-run-border-chase 1.15s linear infinite;
+}
+
+.scanner-run-button.is-running .scanner-run-fill {
+  opacity: 1;
+}
+
+@keyframes scanner-run-border-chase {
+  to { --scanner-run-angle: 360deg; }
+}
+
+@keyframes scanner-run-fill-shine {
+  55%, 100% { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-run-button.is-running,
+  .scanner-run-fill::after {
+    animation: none;
+  }
+
+  .scanner-run-fill {
+    transition: none;
+  }
+}
