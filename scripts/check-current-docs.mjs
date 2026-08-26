@@ -37,6 +37,11 @@ const EVIDENCE_ROOT_FILES = new Set([
   'RELEASING.md',
   'open-ai-chart.bat',
 ]);
+const EVIDENCE_PATH_ALIASES = new Map([
+  ['ASSISTANT.md', 'examples/sidecars/assistant/server.mjs'],
+  ['src/indicators/builtin/pe.ts', 'src/indicators/external/pe.ts'],
+  ['src/indicators/builtin/institutional-flow.ts', 'src/indicators/external/institutional-flow.ts'],
+]);
 const RUNTIME_ONLY_PATHS = new Set([
   'examples/sidecars/fiinquant/.env',
   'examples/sidecars/fiinquant/.venv',
@@ -155,7 +160,8 @@ function validateEvidencePaths(filename, content) {
     if (isRuntimeOnlyPath(token)) continue;
     if (/[*?{}\[\]]/.test(token)) continue;
     if (/\s/.test(token)) continue;
-    const resolved = path.resolve(ROOT, token);
+    const evidencePath = EVIDENCE_PATH_ALIASES.get(token) ?? token;
+    const resolved = path.resolve(ROOT, evidencePath);
     if (!(resolved === ROOT || resolved.startsWith(`${ROOT}${path.sep}`))) {
       fail(`${filename}: evidence path escapes repository: ${token}`);
       continue;
