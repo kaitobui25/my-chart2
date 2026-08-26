@@ -33,6 +33,7 @@ export interface ScannerRequest {
     marketCapMax: number | null;
   };
   heikinAshi: {
+    enabled: boolean;
     timeframe: ScannerTimeframe;
     green: boolean;
     noLowerWick: boolean;
