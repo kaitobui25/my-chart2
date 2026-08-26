@@ -20,6 +20,7 @@ from cafef_eod import (
 from db import ScannerDB
 from engine import ScanExecution, ScannerEngine
 from eod_backfill import repair_recent_year
+from eod_config import load_eod_update_config
 from eod_data_quality import check_top_volume_coverage
 from local_eod_provider import LocalEodProvider
 from models import BreakoutVolumeScan, ScanFilters, ScanRequest
@@ -163,6 +164,7 @@ class ScannerRuntime:
             asyncio.to_thread(self.db.latest_successful_import, EOD_PROVIDER_ID),
             asyncio.to_thread(self.db.snapshot_coverage, EOD_PROVIDER_ID),
         )
+        update_config = load_eod_update_config()
         latest_trade_date = None if latest is None else latest.get('trade_date')
         return {
             'provider': EOD_PROVIDER_ID,
@@ -172,6 +174,8 @@ class ScannerRuntime:
             'snapshotSymbols': int(coverage.get('snapshot_count') or 0),
             'retentionBars': HISTORY_RETAIN_BARS,
             'activeMaxAgeDays': ACTIVE_MAX_AGE_DAYS,
+            'updateLookbackDays': update_config.lookback_days,
+            'updateTimeoutSeconds': update_config.timeout_seconds,
             'latestImport': latest,
             'lastError': self.eod_last_error,
         }
@@ -299,6 +303,8 @@ def build_app(runtime: ScannerRuntime | None = None) -> web.Application:
                 min_rvol=_breakout_number(payload, 'minRvol', 1.5),
                 strong_rvol=_breakout_number(payload, 'strongRvol', 2.5),
             )
+            if config.strong_rvol < config.min_rvol:
+                raise ValueError('strongRvol phải lớn hơn hoặc bằng minRvol')
             if config.strong_rvol < config.min_rvol:
                 raise ValueError('strongRvol phải lớn hơn hoặc bằng minRvol')
             result = await runtime.breakout_check(symbol, config)
