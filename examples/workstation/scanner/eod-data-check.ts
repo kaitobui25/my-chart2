@@ -28,7 +28,7 @@ type EodDataCheckResult = {
 };
 
 function integer(value: number): string {
-  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
 }
 
 function date(value: number): string {
