@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sqlite3
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from cafef_eod import (
@@ -13,6 +14,7 @@ from cafef_eod import (
     HISTORY_RETAIN_BARS,
     PROVIDER_ID,
     SOURCE_NAME,
+    VN_TZ,
     ParsedArchive,
     _dataset,
     discover_latest_url,
@@ -21,8 +23,9 @@ from cafef_eod import (
     reclassify_active_universe,
 )
 from cafef_stream import parse_archive_streaming
+from eod_config import load_eod_update_config
 
-LOOKBACK_DAYS = 365
+LOOKBACK_DAYS = 90
 ProgressCallback = Callable[[int, str], None]
 
 
@@ -45,6 +48,17 @@ def _local_keys(db_path: Path, cutoff: int) -> set[tuple[str, int]]:
         return {(str(symbol), int(candle_time)) for symbol, candle_time in rows}
     finally:
         conn.close()
+
+
+def _archive_trade_time(archive_url: str) -> int | None:
+    match = re.search(r'Upto(\d{8})\.zip', archive_url, re.IGNORECASE)
+    if match is None:
+        return None
+    try:
+        parsed = datetime.strptime(match.group(1), '%d%m%Y').replace(tzinfo=VN_TZ)
+    except ValueError:
+        return None
+    return int(parsed.timestamp())
 
 
 def _import_parsed_archive(
@@ -108,15 +122,17 @@ def _import_parsed_archive(
 def repair_recent_year(
     db,
     *,
-    lookback_days: int = LOOKBACK_DAYS,
+    lookback_days: int | None = None,
     progress: ProgressCallback | None = None,
 ) -> dict[str, object]:
-    """Use the latest CafeF Upto archive to repair missing local daily candles.
+    """Use the latest CafeF Upto archive to repair missing recent daily candles.
 
-    The integrity comparison is limited to the most recent `lookback_days`, while
-    the existing CafeF importer keeps the normal per-symbol retention policy.
-    The ZIP is streamed row-by-row and parsed only once.
+    The default comparison window comes from root `eod-update.yaml` (90 days / about
+    three months). Rows older than that window are skipped during streaming parse,
+    so the updater does not fully decode and retain the old multi-year dataset.
     """
+    if lookback_days is None:
+        lookback_days = load_eod_update_config().lookback_days
     if lookback_days <= 0:
         raise ValueError('lookback_days must be positive')
 
@@ -131,7 +147,16 @@ def repair_recent_year(
     archive_bytes = fetch_bytes(archive_url)
     archive_mb = len(archive_bytes) / (1024 * 1024)
 
-    _report(progress, 35, f'Tải xong ZIP {archive_mb:.1f} MB · bắt đầu parse streaming')
+    archive_trade_time = _archive_trade_time(archive_url)
+    parse_cutoff = None
+    if archive_trade_time is not None:
+        parse_cutoff = archive_trade_time - int(timedelta(days=lookback_days).total_seconds())
+
+    _report(
+        progress,
+        35,
+        f'Tải xong ZIP {archive_mb:.1f} MB · bắt đầu parse streaming {lookback_days} ngày gần nhất',
+    )
 
     def parse_progress(
         processed_bytes: int,
@@ -153,16 +178,14 @@ def repair_recent_year(
             f'file {file_label} · {row_count:,} dòng',
         )
 
-    parsed = parse_archive_streaming(archive_bytes, progress=parse_progress)
+    parsed = parse_archive_streaming(
+        archive_bytes,
+        progress=parse_progress,
+        min_time=parse_cutoff,
+    )
     if not parsed.records:
         raise LookupError('CafeF Upto archive không có dữ liệu để backfill')
 
-    _report(
-        progress,
-        50,
-        f'Parse xong 1 lần · {parsed.member_count:,} file · {parsed.row_count:,} dòng · '
-        f'{len(parsed.records):,} record hợp lệ · đang so SQLite local 1 năm',
-    )
     latest_time = max(int(record.time) for record in parsed.records)
     cutoff = latest_time - int(timedelta(days=lookback_days).total_seconds())
     expected_keys = {
@@ -171,6 +194,15 @@ def repair_recent_year(
         if int(record.time) >= cutoff
     }
     expected_dates = sorted({candle_time for _, candle_time in expected_keys})
+
+    months = max(1, round(lookback_days / 30))
+    _report(
+        progress,
+        50,
+        f'Parse xong 1 lần · {parsed.member_count:,} file · {parsed.row_count:,} dòng · '
+        f'{len(parsed.records):,} record trong cửa sổ · đang so SQLite local '
+        f'{lookback_days} ngày (~{months} tháng)',
+    )
 
     local_before = _local_keys(Path(db.path), cutoff)
     missing_before = expected_keys - local_before
