@@ -7,11 +7,11 @@ from statistics import median
 from zoneinfo import ZoneInfo
 
 from models import BreakoutVolumeScan, Candle
+from price_units import KVND
 
 # CafeF VN EOD OHLC values stored in scanner SQLite are in thousand VND (kVND).
 # Example: close=7.61 means 7,610 VND/share. Never multiply raw kVND price
 # directly by share volume when a VND traded value is required.
-KVND_TO_VND = 1_000.0
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,7 @@ def _week_start(timestamp: int, timezone_name: str) -> datetime:
 
 
 def _traded_value_vnd(close_kvnd: float, volume: float) -> float:
-    return float(close_kvnd) * KVND_TO_VND * float(volume)
+    return float(close_kvnd) * KVND * float(volume)
 
 
 def aggregate_closed_weeks(
