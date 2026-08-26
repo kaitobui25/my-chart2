@@ -40,6 +40,7 @@ type StoredState = {
   volumeMax?: string;
   marketCapMin?: string;
   marketCapMax?: string;
+  heikinEnabled?: boolean;
   timeframe?: ScannerTimeframe;
   green?: boolean;
   noLowerWick?: boolean;
@@ -53,7 +54,8 @@ type StoredState = {
   breakoutStrongRvol?: string;
 };
 
-const DEFAULT_STATE: Required<Pick<StoredState, 'timeframe' | 'green' | 'noLowerWick' | 'closeChangePctMin' | 'candle'>> = {
+const DEFAULT_STATE: Required<Pick<StoredState, 'heikinEnabled' | 'timeframe' | 'green' | 'noLowerWick' | 'closeChangePctMin' | 'candle'>> = {
+  heikinEnabled: true,
   timeframe: '1M',
   green: true,
   noLowerWick: true,
@@ -230,6 +232,7 @@ class ScannerPanel {
             <details class="scanner-filter-section" name="scanner-filter">
               <summary class="scanner-section-head"><span>03</span><strong>Heikin Ashi</strong></summary>
               <div class="scanner-control-stack">
+                <label class="scanner-switch"><span><strong>Bật Scanner 03</strong><small>Heikin Ashi · Week / Month</small></span><input id="scanner-heikin-enabled" type="checkbox"><i></i></label>
                 <div>
                   <span class="scanner-control-label">Timeframe</span>
                   <div class="scanner-segmented">
@@ -304,6 +307,7 @@ class ScannerPanel {
     this.eodUpdateButton = button('scanner-eod-update');
 
     this.applyStoredState();
+    this.renderHeikinControls();
 
     this.overlay.querySelector('.scanner-close')?.addEventListener('click', () => this.hide());
     this.overlay.addEventListener('pointerdown', (event) => {
@@ -312,6 +316,12 @@ class ScannerPanel {
     this.source.addEventListener('change', () => {
       this.renderSourceControls();
       this.persistState();
+    });
+    input('scanner-heikin-enabled').addEventListener('change', () => {
+      this.renderHeikinControls();
+      this.persistState();
+      this.renderResults([]);
+      this.renderIdleProgress();
     });
     input('scanner-breakout-enabled').addEventListener('change', () => {
       if (input('scanner-breakout-enabled').checked) {
@@ -340,8 +350,25 @@ class ScannerPanel {
     this.overlay.hidden = true;
   }
 
+  private heikinEnabled(): boolean {
+    return input('scanner-heikin-enabled').checked;
+  }
+
   private breakoutEnabled(): boolean {
     return input('scanner-breakout-enabled').checked;
+  }
+
+  private renderHeikinControls(): void {
+    const toggle = input('scanner-heikin-enabled');
+    const stack = toggle.closest<HTMLElement>('.scanner-control-stack');
+    if (!stack) return;
+    for (const control of stack.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input, select, button')) {
+      if (control !== toggle) control.disabled = !toggle.checked;
+    }
+    for (const child of Array.from(stack.children)) {
+      if (!(child instanceof HTMLElement) || child.contains(toggle)) continue;
+      child.style.opacity = toggle.checked ? '' : '0.45';
+    }
   }
 
   private applyStoredState(): void {
@@ -351,6 +378,7 @@ class ScannerPanel {
     input('scanner-volume-max').value = this.stored.volumeMax ?? '';
     input('scanner-mc-min').value = this.stored.marketCapMin ?? '';
     input('scanner-mc-max').value = this.stored.marketCapMax ?? '';
+    input('scanner-heikin-enabled').checked = this.stored.heikinEnabled ?? DEFAULT_STATE.heikinEnabled;
     input('scanner-ha-change').value = this.stored.closeChangePctMin ?? DEFAULT_STATE.closeChangePctMin;
     input('scanner-green').checked = this.stored.green ?? DEFAULT_STATE.green;
     input('scanner-no-lower').checked = this.stored.noLowerWick ?? DEFAULT_STATE.noLowerWick;
@@ -410,6 +438,7 @@ class ScannerPanel {
 
   private renderSourceControls(): void {
     let source = this.currentSource();
+    const heikin = this.heikinEnabled();
     const breakout = this.breakoutEnabled();
     if (breakout && source?.id !== EOD_SOURCE) {
       const eod = this.sources.find((item) => item.id === EOD_SOURCE && item.available);
@@ -447,9 +476,11 @@ class ScannerPanel {
     }
 
     const local = source.refresh_mode === 'preloaded';
-    this.sourceHint.textContent = breakout
-      ? 'Scanner 04 · HOSE · closed week · CafeF local'
-      : local ? 'SQLite local · không gọi mạng khi scan' : 'Cache + provider refresh';
+    this.sourceHint.textContent = breakout && heikin
+      ? 'Scanner 03 + 04 · giao nhau · HOSE · CafeF local'
+      : breakout
+        ? 'Scanner 04 · HOSE · closed week · CafeF local'
+        : local ? 'SQLite local · không gọi mạng khi scan' : 'Cache + provider refresh';
     this.eodCard.hidden = source.id !== EOD_SOURCE;
     if (source.id === EOD_SOURCE) void this.refreshEodStatus();
     this.renderResults([]);
@@ -459,7 +490,10 @@ class ScannerPanel {
   private request(): ScannerRequest {
     const source = this.currentSource();
     if (!source) throw new Error('No scanner source selected.');
+    const heikin = this.heikinEnabled();
     const breakout = this.breakoutEnabled();
+    if (!heikin && !breakout) throw new Error('Bật Scanner 03 hoặc Scanner 04 trước khi quét.');
+
     const selectedUniverses = [...this.universe.querySelectorAll<HTMLInputElement>('input:checked')].map((item) => item.value);
     const universes = breakout ? ['HOSE'] : selectedUniverses;
     if (!universes.length) throw new Error('Chọn ít nhất một thị trường.');
@@ -489,11 +523,12 @@ class ScannerPanel {
         marketCapMax: !breakout && source.market_cap ? numberOrNull(input('scanner-mc-max').value) : null,
       },
       heikinAshi: {
-        timeframe: breakout ? '1w' : timeframe,
-        green: breakout ? false : input('scanner-green').checked,
-        noLowerWick: breakout ? false : input('scanner-no-lower').checked,
-        closeChangePctMin: breakout ? null : numberOrNull(input('scanner-ha-change').value),
-        candle: breakout ? 'closed' : candle,
+        enabled: heikin,
+        timeframe,
+        green: input('scanner-green').checked,
+        noLowerWick: input('scanner-no-lower').checked,
+        closeChangePctMin: numberOrNull(input('scanner-ha-change').value),
+        candle,
       },
       breakoutVolume: {
         enabled: breakout,
@@ -523,6 +558,7 @@ class ScannerPanel {
       volumeMax: input('scanner-volume-max').value,
       marketCapMin: input('scanner-mc-min').value,
       marketCapMax: input('scanner-mc-max').value,
+      heikinEnabled: this.heikinEnabled(),
       timeframe,
       green: input('scanner-green').checked,
       noLowerWick: input('scanner-no-lower').checked,
@@ -546,6 +582,7 @@ class ScannerPanel {
     input('scanner-volume-max').value = '';
     input('scanner-mc-min').value = '';
     input('scanner-mc-max').value = '';
+    input('scanner-heikin-enabled').checked = DEFAULT_STATE.heikinEnabled;
     input('scanner-ha-change').value = DEFAULT_STATE.closeChangePctMin;
     input('scanner-green').checked = DEFAULT_STATE.green;
     input('scanner-no-lower').checked = DEFAULT_STATE.noLowerWick;
@@ -562,6 +599,7 @@ class ScannerPanel {
       checkbox.disabled = false;
       checkbox.checked = true;
     }
+    this.renderHeikinControls();
     this.persistState();
     this.renderSourceControls();
     this.renderResults([]);
@@ -668,21 +706,29 @@ class ScannerPanel {
     this.progress.replaceChildren();
     const idle = document.createElement('span');
     idle.className = 'scanner-progress-idle';
-    idle.textContent = message ?? (this.breakoutEnabled()
-      ? 'Sẵn sàng quét Scanner 04. Chỉ dùng tuần đã đóng; median thanh khoản chạy trước breakout.'
-      : 'Sẵn sàng quét. Stage 1 lọc rác trước, sau đó mới tính Heikin Ashi.');
+    const heikin = this.heikinEnabled();
+    const breakout = this.breakoutEnabled();
+    idle.textContent = message ?? (heikin && breakout
+      ? 'Sẵn sàng quét Scanner 04 rồi lọc giao với điều kiện Heikin Ashi của Scanner 03.'
+      : breakout
+        ? 'Sẵn sàng quét Scanner 04. Chỉ dùng tuần đã đóng; median thanh khoản chạy trước breakout.'
+        : heikin
+          ? 'Sẵn sàng quét Scanner 03. Stage 1 lọc rác trước, sau đó mới tính Heikin Ashi.'
+          : 'Bật Scanner 03 hoặc Scanner 04 trước khi quét.');
     this.progress.appendChild(idle);
   }
 
   private renderProgress(run: ScannerRun): void {
     this.progress.replaceChildren();
     const local = this.currentSource()?.refresh_mode === 'preloaded';
+    const heikin = this.heikinEnabled();
     const breakout = this.breakoutEnabled();
+    const stage2Label = breakout && heikin ? '04 ∩ HA' : breakout ? 'Weekly' : 'HA';
     const stats: Array<[string, number, boolean]> = [
       ['Universe', run.universe_count ?? 0, (run.universe_count ?? 0) > 0],
       [breakout ? 'HOSE' : 'Stage 1', run.stage1_count ?? 0, (run.stage1_count ?? 0) > 0],
       [local ? 'Local history' : 'History', run.history_refresh_count ?? 0, local || (run.history_refresh_count ?? 0) > 0],
-      [breakout ? 'Weekly' : 'HA', run.stage2_count ?? 0, (run.stage2_count ?? 0) > 0],
+      [stage2Label, run.stage2_count ?? 0, (run.stage2_count ?? 0) > 0],
       ['Matched', run.result_count ?? 0, run.status === 'complete'],
     ];
     for (const [label, value, active] of stats) {
@@ -718,7 +764,9 @@ class ScannerPanel {
     this.results.replaceChildren();
     if (!rows.length) {
       this.resultHint.textContent = this.breakoutEnabled()
-        ? 'Scanner 04 · chỉ closed week · sort theo RVOL W0 giảm dần.'
+        ? this.heikinEnabled()
+          ? 'Scanner 03 + 04 · chỉ giữ mã thỏa cả hai bộ lọc.'
+          : 'Scanner 04 · chỉ closed week · sort theo RVOL W0 giảm dần.'
         : 'Đã xếp theo HA close Δ giảm dần · click một dòng để mở chart.';
       const empty = document.createElement('div');
       empty.className = 'scanner-empty';
@@ -739,7 +787,9 @@ class ScannerPanel {
   }
 
   private renderBreakoutResults(rows: BreakoutScannerResult[]): void {
-    this.resultHint.textContent = 'Scanner 04 · closed week only · sort RVOL W0 ↓ · click một dòng để mở chart.';
+    this.resultHint.textContent = this.heikinEnabled()
+      ? 'Scanner 03 + 04 · giao hai bộ lọc · sort RVOL W0 ↓ · click một dòng để mở chart.'
+      : 'Scanner 04 · closed week only · sort RVOL W0 ↓ · click một dòng để mở chart.';
     const table = document.createElement('table');
     table.className = 'scanner-table';
     const columns = [

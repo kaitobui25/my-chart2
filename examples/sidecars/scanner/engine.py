@@ -97,6 +97,15 @@ class ScannerEngine:
                 progress,
             )
 
+        heikin_enabled = request.heikin_enabled
+        breakout_enabled = request.breakout_volume.enabled
+        if not heikin_enabled and not breakout_enabled:
+            return await self._fail(
+                state,
+                'Bật Scanner 03 hoặc Scanner 04 trước khi quét.',
+                progress,
+            )
+
         async with self.planner.provider_lock(request.source):
             try:
                 state.progress_pct = 5
@@ -130,7 +139,6 @@ class ScannerEngine:
                     state.progress_pct = 25
                     await self._notify(state, progress)
 
-                breakout_enabled = request.breakout_volume.enabled
                 candidate_universes = ('HOSE',) if breakout_enabled else request.universes
                 candidate_filters = ScanFilters() if breakout_enabled else request.filters
                 db_filters = (
@@ -172,16 +180,27 @@ class ScannerEngine:
                 await self._notify(state, progress)
 
                 if breakout_enabled:
+                    breakout_end = 75 if heikin_enabled else 95
                     results, evaluated_count = await self._run_breakout_volume(
                         provider,
                         request,
                         candidates,
                         state,
+                        progress_end=breakout_end,
                     )
+                    stage2_count = evaluated_count
+                    if heikin_enabled:
+                        results, stage2_count = await self._intersect_breakout_with_heikin(
+                            provider,
+                            request,
+                            candidates,
+                            results,
+                            state,
+                        )
                     await asyncio.to_thread(
                         self.db.update_scan,
                         run_id,
-                        stage2_count=evaluated_count,
+                        stage2_count=stage2_count,
                     )
                     state.progress_pct = 95
                     await self._notify(state, progress)
@@ -275,12 +294,58 @@ class ScannerEngine:
             except Exception as exc:  # noqa: BLE001
                 return await self._fail(state, str(exc)[:500], progress)
 
+    async def _intersect_breakout_with_heikin(
+        self,
+        provider: ScannerProvider,
+        request: ScanRequest,
+        candidates: list[dict],
+        breakout_results: list[dict],
+        state: ScanExecution,
+    ) -> tuple[list[dict], int]:
+        """Keep only Scanner 04 rows that also satisfy Scanner 03."""
+        breakout_ids = {
+            int(row['instrumentId'])
+            for row in breakout_results
+            if row.get('instrumentId') is not None
+        }
+        if not breakout_ids:
+            return [], 0
+
+        heikin_candidates = [
+            candidate
+            for candidate in candidates
+            if int(candidate['instrument_id']) in breakout_ids
+        ]
+        evaluated_ids = await self._refresh_ha(
+            provider,
+            request,
+            heikin_candidates,
+            state,
+            progress_start=75,
+            progress_end=95,
+        )
+        matched_rows = await asyncio.to_thread(
+            self.db.query_final,
+            request.source,
+            ScanFilters(),
+            request.heikin_ashi,
+            evaluated_ids,
+        )
+        matched_ids = {int(row['instrument_id']) for row in matched_rows}
+        return (
+            [row for row in breakout_results if int(row['instrumentId']) in matched_ids],
+            len(evaluated_ids),
+        )
+
     async def _run_breakout_volume(
         self,
         provider: ScannerProvider,
         request: ScanRequest,
         candidates: list[dict],
         state: ScanExecution,
+        *,
+        progress_start: int = 45,
+        progress_end: int = 95,
     ) -> tuple[list[dict], int]:
         now = int(time.time())
         import_state = await asyncio.to_thread(
@@ -352,7 +417,10 @@ class ScannerEngine:
                         'stale': stale,
                         'warnings': list(warnings),
                     })
-            state.progress_pct = min(95, 45 + round(index / total * 50))
+            state.progress_pct = min(
+                progress_end,
+                progress_start + round(index / total * (progress_end - progress_start)),
+            )
         results.sort(key=lambda row: (-float(row['rvol']), str(row['symbol'])))
         return results, evaluated
 
@@ -535,6 +603,9 @@ class ScannerEngine:
         request: ScanRequest,
         candidates: list[dict],
         state: ScanExecution,
+        *,
+        progress_start: int = 45,
+        progress_end: int = 95,
     ) -> list[int]:
         evaluated: list[int] = []
         minimum_daily = 20 if request.heikin_ashi.timeframe == '1w' else 60
@@ -563,7 +634,10 @@ class ScannerEngine:
                         HA_ALGO_VERSION,
                     )
                     evaluated.append(instrument_id)
-            state.progress_pct = min(95, 45 + round(index / total * 50))
+            state.progress_pct = min(
+                progress_end,
+                progress_start + round(index / total * (progress_end - progress_start)),
+            )
         return evaluated
 
     async def _fail(
