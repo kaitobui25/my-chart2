@@ -45,6 +45,7 @@ class EodBackfillTests(unittest.TestCase):
         )
         full_payload = make_zip(
             HEADER
+            + 'AAA,20260401,8,9,7,8,800\n'
             + 'AAA,20260824,10,11,9,10,1000\n'
             + 'AAA,20260825,10,12,9,11,1100\n'
             + 'AAA,20260826,11,12,10,11,1200\n'
@@ -56,11 +57,15 @@ class EodBackfillTests(unittest.TestCase):
 
         with (
             patch('eod_backfill.fetch_text', return_value='<html></html>'),
-            patch('eod_backfill.discover_latest_url', return_value='https://cafef.test/Upto.zip'),
+            patch(
+                'eod_backfill.discover_latest_url',
+                return_value='https://cafef.test/CafeF.SolieuGD.Upto26082026.zip',
+            ),
             patch('eod_backfill.fetch_bytes', return_value=full_payload),
         ):
             result = repair_recent_year(self.db)
 
+        self.assertEqual(result['backfillLookbackDays'], 90)
         self.assertEqual(result['missingDaysBefore'], 1)
         self.assertEqual(result['missingCandlesBefore'], 2)
         self.assertEqual(result['missingDaysAfter'], 0)
