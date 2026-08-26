@@ -72,25 +72,25 @@ function price(value: number): string {
 }
 
 function integer(value: number): string {
-  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
 }
 
 function percent(value: number): string {
-  return `${value >= 0 ? '+' : ''}${new Intl.NumberFormat('vi-VN', {
+  return `${value >= 0 ? '+' : ''}${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)}%`;
 }
 
 function multiple(value: number): string {
-  return `${new Intl.NumberFormat('vi-VN', {
+  return `${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value)}x`;
 }
 
 function billion(value: number): string {
-  return `${new Intl.NumberFormat('vi-VN', {
+  return `${new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(value / 1_000_000_000)} tỷ`;
@@ -226,7 +226,7 @@ function showResult(data: BreakoutQuickCheck): void {
     'Giá tăng tuần',
     data.weeklyChangePct === null ? '—' : percent(data.weeklyChangePct),
     status(
-      data.weeklyChangePass ? `PASS ≥${new Intl.NumberFormat('vi-VN').format(t.minWeeklyChangePct)}%` : 'FAILED',
+      data.weeklyChangePass ? `PASS ≥${new Intl.NumberFormat('en-US').format(t.minWeeklyChangePct)}%` : 'FAILED',
       data.weeklyChangePass ? 'pass' : 'fail',
       weeklyFormula,
     ),
