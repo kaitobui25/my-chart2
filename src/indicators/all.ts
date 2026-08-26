@@ -3,6 +3,7 @@ import bollinger from './builtin/bollinger';
 import ema from './builtin/ema';
 import dividend from './external/dividend';
 import institutionalFlow from './external/institutional-flow';
+import lntt from './external/lntt';
 import macd from './builtin/macd';
 import pe from './external/pe';
 import rsi from './builtin/rsi';
@@ -24,6 +25,7 @@ const bundled: IndicatorDef[] = [
   pe,
   institutionalFlow,
   dividend,
+  lntt,
   rsi,
   macd,
   ...taSuite,
