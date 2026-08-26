@@ -30,16 +30,19 @@ Heikin Ashi accepts exactly one timeframe per scan: `1w` or `1M`.
 
 CafeF VN EOD OHLC values are stored in SQLite in **thousand VND (`kVND`)** and the database is intentionally kept in that native unit.
 
+- shared conversion constant: `KVND = 1,000`.
 - `close = 7.61` means **7,610 VND/share**, not 7.61 VND.
 - `close = 8.89` means **8,890 VND/share**.
 - volume is stored in **shares**.
-- any traded value expressed in real VND must use `price_kvnd * 1_000 * volume`.
+- any CafeF price used as real VND must use `price_vnd = price_kvnd * KVND`.
+- any traded value expressed in real VND must use `price_kvnd * KVND * volume`.
 - code that handles CafeF prices should prefer variable names ending in `_kvnd`; VND money values should end in `_vnd`.
 
 Example:
 
 ```text
-7.61 kVND/share * 1,000 * 86,500 shares = 658,265,000 VND
+KVND = 1,000
+7.61 kVND/share * KVND * 86,500 shares = 658,265,000 VND
 ```
 
 Do not migrate or multiply the stored SQLite OHLC columns just to change units. Convert at calculation/display boundaries instead.
