@@ -36,15 +36,6 @@ function vietnamMidnight(year: number, month: number, day: number): number {
   return Math.floor(Date.UTC(year, month, day) / 1000) - VIETNAM_OFFSET_SECONDS;
 }
 
-function quarterBounds(year: number, quarter: number): { start: number; end: number; startMonth: number } {
-  const startMonth = (quarter - 1) * 3;
-  return {
-    start: vietnamMidnight(year, startMonth, 1),
-    end: vietnamMidnight(year, startMonth + 3, 1),
-    startMonth,
-  };
-}
-
 function lowerBoundTime(candles: readonly Candle[], target: number): number {
   let low = 0;
   let high = candles.length;
@@ -56,40 +47,66 @@ function lowerBoundTime(candles: readonly Candle[], target: number): number {
   return low;
 }
 
-function weekBucketEnd(time: number): number {
-  const local = vietnamDateParts(time);
-  const daysToSunday = (7 - local.weekday) % 7;
-  return vietnamMidnight(local.year, local.month, local.day + daysToSunday + 1) - 1;
+function lnttDisplayWindow(year: number, quarter: number): {
+  monthStart: number;
+  monthEnd: number;
+  weekStart: number;
+  weekEnd: number;
+  tuesdayStart: number;
+  tuesdayEnd: number;
+} {
+  const monthStart = vietnamMidnight(year, quarter * 3, 1);
+  const monthEnd = vietnamMidnight(year, quarter * 3 + 1, 1);
+  const lastDay = vietnamDateParts(monthEnd - DAY_SECONDS);
+  const daysSinceMonday = (lastDay.weekday + 6) % 7;
+  const weekStart = vietnamMidnight(lastDay.year, lastDay.month, lastDay.day - daysSinceMonday);
+  const weekEnd = weekStart + 7 * DAY_SECONDS;
+  const tuesdayStart = weekStart + DAY_SECONDS;
+  return {
+    monthStart,
+    monthEnd,
+    weekStart,
+    weekEnd,
+    tuesdayStart,
+    tuesdayEnd: tuesdayStart + DAY_SECONDS,
+  };
 }
 
-/** Map a quarter to the first chart bucket that represents that quarter. */
-export function firstCandleIndexForQuarter(
+/**
+ * Place quarterly LNTT after the reporting quarter:
+ * Month -> next month; Week -> last week of that month; Day -> Tuesday of that
+ * week; intraday -> last candle of that Tuesday.
+ */
+export function lnttDisplayCandleIndex(
   candles: readonly Candle[],
   year: number,
   quarter: number,
   intervalSec: number,
 ): number {
   if (candles.length === 0 || quarter < 1 || quarter > 4) return -1;
-  const { start, end, startMonth } = quarterBounds(year, quarter);
-  const index = lowerBoundTime(candles, start);
+  const window = lnttDisplayWindow(year, quarter);
 
   if (intervalSec >= MONTH_INTERVAL_MIN_SECONDS) {
+    const index = lowerBoundTime(candles, window.monthStart);
     const candle = candles[index];
-    if (!candle || candle.time >= end) return -1;
-    const local = vietnamDateParts(candle.time);
-    return local.year === year && local.month === startMonth ? index : -1;
+    return candle && candle.time < window.monthEnd ? index : -1;
   }
 
   if (intervalSec >= WEEK_INTERVAL_MIN_SECONDS) {
-    const previousIndex = index - 1;
-    const previous = candles[previousIndex];
-    if (previous && previous.time < end && weekBucketEnd(previous.time) >= start) {
-      return previousIndex;
-    }
+    const index = lowerBoundTime(candles, window.weekStart);
+    const candle = candles[index];
+    return candle && candle.time < window.weekEnd ? index : -1;
   }
 
+  if (intervalSec >= DAY_SECONDS) {
+    const index = lowerBoundTime(candles, window.tuesdayStart);
+    const candle = candles[index];
+    return candle && candle.time < window.tuesdayEnd ? index : -1;
+  }
+
+  const index = lowerBoundTime(candles, window.tuesdayEnd) - 1;
   const candle = candles[index];
-  return candle && candle.time < end ? index : -1;
+  return candle && candle.time >= window.tuesdayStart ? index : -1;
 }
 
 export function lnttYoyPercent(current: number, previous: number | null): number | null {
@@ -121,7 +138,7 @@ export function computeLnttPoints(
     const value = mode === 'percent' ? yoyPercent : item.profitBeforeTaxVnd / 1_000_000_000;
     if (value === null || !Number.isFinite(value)) continue;
 
-    const index = firstCandleIndexForQuarter(candles, item.year, item.quarter, intervalSec);
+    const index = lnttDisplayCandleIndex(candles, item.year, item.quarter, intervalSec);
     if (index < 0) continue;
     points.push({
       index,
