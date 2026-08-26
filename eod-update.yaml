@@ -1,0 +1,6 @@
+eod_update:
+  # So ngay gan nhat can doi chieu/backfill. 90 ngay ~= 3 thang.
+  lookback_days: 90
+
+  # Timeout tong cho request cap nhat EOD o frontend.
+  timeout_seconds: 300

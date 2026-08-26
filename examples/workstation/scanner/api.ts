@@ -6,9 +6,9 @@ import type {
   ScannerRun,
   ScannerSource,
 } from './types';
+import { EOD_UPDATE_CONFIG } from './eod-config';
 
 const BASE = '/scanner-api';
-const EOD_UPDATE_TIMEOUT_MS = 180_000;
 type ScannerResultMode = ScannerResult['mode'];
 const expectedModeByRun = new Map<number, ScannerResultMode>();
 
@@ -75,7 +75,7 @@ export async function updateCafeFEod(): Promise<CafeFEodUpdateResponse> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: '{}',
-    signal: AbortSignal.timeout(EOD_UPDATE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(EOD_UPDATE_CONFIG.timeoutMs),
   });
   return readJson<CafeFEodUpdateResponse>(response);
 }
