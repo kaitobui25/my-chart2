@@ -1,8 +1,9 @@
 import './eod-update-progress.css';
+import { EOD_UPDATE_CONFIG } from './eod-config';
 
 const UPDATE_ENDPOINT = '/scanner-api/eod/import-latest';
 const PROGRESS_ENDPOINT = '/scanner-api/eod/update-progress';
-const UPDATE_TIMEOUT_MS = 180_000;
+const UPDATE_TIMEOUT_MS = EOD_UPDATE_CONFIG.timeoutMs;
 const PROGRESS_TIMEOUT_MS = 3_000;
 const PROGRESS_POLL_MS = 250;
 
@@ -86,7 +87,8 @@ function resetProgress(): void {
   button.style.setProperty('--scanner-eod-progress', '0%');
   const label = buttonLabel(button);
   if (label) label.textContent = 'Cập nhật EOD';
-  button.title = 'Tự kiểm tra và bù dữ liệu EOD thiếu trong 1 năm gần nhất';
+  const months = Math.max(1, Math.round(EOD_UPDATE_CONFIG.lookbackDays / 30));
+  button.title = `Tự kiểm tra và bù dữ liệu EOD thiếu trong ${EOD_UPDATE_CONFIG.lookbackDays} ngày (~${months} tháng) gần nhất`;
 }
 
 function pushLog(
