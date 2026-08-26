@@ -15,7 +15,7 @@ async function transformedWorkstation(): Promise<string> {
 }
 
 describe('Binance multi-chart tile defaults', () => {
-  it('does not seed an added Binance tile from stale Vietnam slot symbols', async () => {
+  it('does not seed an added crypto tile from stale Vietnam slot symbols', async () => {
     const code = await transformedWorkstation();
     const start = code.indexOf('function createTileForSlot(index: number, template?: TileTemplate): Tile {');
     const end = code.indexOf('function applyTemplateSnapshots(', start);
@@ -23,7 +23,7 @@ describe('Binance multi-chart tile defaults', () => {
 
     expect(start).toBeGreaterThan(-1);
     expect(block).toContain('const providerDefaults = defaultSymbolsForProvider(activeProvider);');
-    expect(block).toContain('const savedSymbol = isBinanceProvider(activeProvider) && index > 0');
+    expect(block).toContain('const savedSymbol = isCryptoProvider(activeProvider) && index > 0');
     expect(block).toContain('    ? undefined');
     expect(block).toContain('const symbol = template?.symbol?.trim().toUpperCase()');
     expect(block).toContain('    || providerDefaults[index % providerDefaults.length];');
