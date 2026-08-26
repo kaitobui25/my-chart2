@@ -1,7 +1,7 @@
 import './breakout-quick-check.css';
 
 const CHECK_ENDPOINT = '/scanner-api/breakout/check';
-const KVND_TO_VND = 1_000;
+const KVND = 1_000;
 
 type QuickCheckThresholds = {
   minMedianTradedValue: number;
@@ -68,7 +68,7 @@ function currentThresholds(): QuickCheckThresholds {
 }
 
 function priceVndFromKvnd(valueKvnd: number): string {
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(valueKvnd * KVND_TO_VND);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(valueKvnd * KVND);
 }
 
 function integer(value: number): string {
