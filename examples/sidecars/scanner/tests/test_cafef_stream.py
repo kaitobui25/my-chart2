@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from cafef_eod import parse_archive
+from cafef_eod import _parse_date, parse_archive
 from cafef_stream import parse_archive_streaming
 
 
@@ -43,6 +43,25 @@ class CafeFStreamingParserTests(unittest.TestCase):
         self.assertEqual(actual.member_count, expected.member_count)
         self.assertEqual(actual.row_count, expected.row_count)
         self.assertEqual(actual.records, expected.records)
+
+    def test_streaming_parser_can_skip_rows_before_cutoff(self):
+        payload = make_zip({
+            'CafeF.HOSE.txt': (
+                '<Ticker>,<DTYYYYMMDD>,<Open>,<High>,<Low>,<Close>,<Volume>\n'
+                'AAA,20260401,8,9,7,8,800\n'
+                'AAA,20260824,10,11,9,10,1000\n'
+                'AAA,20260825,10,12,9,11,1100\n'
+            ),
+        })
+
+        parsed = parse_archive_streaming(payload, min_time=_parse_date('2026-06-01'))
+
+        self.assertEqual(parsed.row_count, 3)
+        self.assertEqual(len(parsed.records), 2)
+        self.assertEqual([record.time for record in parsed.records], [
+            _parse_date('2026-08-24'),
+            _parse_date('2026-08-25'),
+        ])
 
     def test_streaming_progress_finishes_at_full_uncompressed_size(self):
         rows = ''.join(
