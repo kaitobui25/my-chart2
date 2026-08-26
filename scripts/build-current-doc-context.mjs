@@ -32,6 +32,37 @@ function git(args) {
   return execFileSync('git', args, { encoding: 'utf8' }).trim();
 }
 
+function gitOrNull(args) {
+  try {
+    return git(args);
+  } catch {
+    return null;
+  }
+}
+
+function commitExists(sha) {
+  return gitOrNull(['cat-file', '-e', `${sha}^{commit}`]) !== null;
+}
+
+function recoverBaseline(requestedBaseline, target) {
+  if (commitExists(requestedBaseline)) return requestedBaseline;
+
+  const originMain = gitOrNull(['rev-parse', '--verify', 'origin/main^{commit}']);
+  if (originMain) {
+    const mergeBase = gitOrNull(['merge-base', originMain, target]);
+    if (mergeBase && mergeBase !== target) {
+      console.error(`docs context: missing baseline ${requestedBaseline}; using merge-base ${mergeBase}`);
+      return mergeBase;
+    }
+  }
+
+  const roots = gitOrNull(['rev-list', '--max-parents=0', target]);
+  const root = roots?.split('\n').map((value) => value.trim()).filter(Boolean)[0];
+  if (!root) throw new Error(`unable to recover missing documentation baseline: ${requestedBaseline}`);
+  console.error(`docs context: missing baseline ${requestedBaseline}; using repository root ${root}`);
+  return root;
+}
+
 function routeChangedPath(file, routedDocs) {
   const add = (...docs) => docs.forEach((doc) => routedDocs.add(doc));
 
@@ -60,7 +91,8 @@ function routeChangedPath(file, routedDocs) {
   if (file === 'README.md') add('docs/current/README.md');
 }
 
-const changedPaths = git(['diff', '--name-only', `${baselineSha}..${targetSha}`])
+const effectiveBaselineSha = recoverBaseline(baselineSha, targetSha);
+const changedPaths = git(['diff', '--name-only', `${effectiveBaselineSha}..${targetSha}`])
   .split('\n')
   .map((value) => value.trim())
   .filter(Boolean);
@@ -135,7 +167,9 @@ const sourceVerificationDocs =
       : [];
 
 const output = {
-  baseline_sha: baselineSha,
+  baseline_sha: effectiveBaselineSha,
+  requested_baseline_sha: baselineSha,
+  baseline_recovered: effectiveBaselineSha !== baselineSha,
   target_sha: targetSha,
   synchronization_mode: mode,
   max_implementation_source_files: maxSourceFiles,
