@@ -88,6 +88,7 @@ class HeikinScan:
     no_lower_wick: bool = True
     close_change_pct_min: float | None = None
     candle: CandleKind = 'current'
+    enabled: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +108,18 @@ class ScanRequest:
     filters: ScanFilters
     heikin_ashi: HeikinScan
     breakout_volume: BreakoutVolumeScan = BreakoutVolumeScan()
+
+    @property
+    def heikin_enabled(self) -> bool:
+        """Resolve legacy requests that predate the Scanner 03 toggle.
+
+        Before the explicit `enabled` flag existed, normal requests meant Scanner 03
+        and breakout requests meant Scanner 04 only. Preserve that contract while
+        allowing new clients to explicitly enable both modes for intersection scans.
+        """
+        if self.heikin_ashi.enabled is None:
+            return not self.breakout_volume.enabled
+        return self.heikin_ashi.enabled
 
     @staticmethod
     def from_json(payload: Any) -> 'ScanRequest':
@@ -162,6 +175,7 @@ class ScanRequest:
             no_lower_wick=bool(ha_payload.get('noLowerWick', True)),
             close_change_pct_min=close_change_pct_min,
             candle=candle_kind,  # type: ignore[arg-type]
+            enabled=None if 'enabled' not in ha_payload else bool(ha_payload.get('enabled')),
         )
 
         breakout_payload = payload.get('breakoutVolume') or {}
@@ -190,13 +204,16 @@ class ScanRequest:
         if breakout_volume.enabled and source != 'vn_eod':
             raise ValueError('Scanner 04 Breakout + Volume requires source vn_eod')
 
-        return ScanRequest(
+        request = ScanRequest(
             source=source,  # type: ignore[arg-type]
             universes=universes,
             filters=filters,
             heikin_ashi=heikin_ashi,
             breakout_volume=breakout_volume,
         )
+        if not request.heikin_enabled and not request.breakout_volume.enabled:
+            raise ValueError('Bật Scanner 03 hoặc Scanner 04 trước khi quét.')
+        return request
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -211,6 +228,7 @@ class ScanRequest:
                 'marketCapMax': self.filters.market_cap_max,
             },
             'heikinAshi': {
+                'enabled': self.heikin_enabled,
                 'timeframe': self.heikin_ashi.timeframe,
                 'green': self.heikin_ashi.green,
                 'noLowerWick': self.heikin_ashi.no_lower_wick,
