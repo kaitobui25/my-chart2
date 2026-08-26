@@ -28,21 +28,23 @@ class WeeklyBar:
 
 @dataclass(frozen=True)
 class BreakoutVolumeResult:
+    # Public result field names stay stable; price fields below are kVND,
+    # while traded-value fields are real VND.
     signal_state: str
     signal_time: int
-    close_kvnd: float
+    close: float
     volume: float
     weekly_change_pct: float
     rvol: float
-    breakout_level_kvnd: float
-    traded_value_vnd: float
-    median_traded_value_vnd: float
+    breakout_level: float
+    traded_value: float
+    median_traded_value: float
     median_volume: float
     strong: bool
     next_week_time: int | None = None
     next_week_volume: float | None = None
     next_week_rvol: float | None = None
-    next_week_close_kvnd: float | None = None
+    next_week_close: float | None = None
     next_week_holds_breakout: bool | None = None
 
 
@@ -288,19 +290,19 @@ def _signal_at(
     return BreakoutVolumeResult(
         signal_state='FOLLOW_UP' if next_week is not None else 'NEW',
         signal_time=current.time,
-        close_kvnd=float(current.close_kvnd),
+        close=float(current.close_kvnd),
         volume=float(current.volume),
         weekly_change_pct=weekly_change_pct,
         rvol=rvol,
-        breakout_level_kvnd=float(breakout_level_kvnd),
-        traded_value_vnd=float(current.traded_value_vnd),
-        median_traded_value_vnd=median_traded_value_vnd,
+        breakout_level=float(breakout_level_kvnd),
+        traded_value=float(current.traded_value_vnd),
+        median_traded_value=median_traded_value_vnd,
         median_volume=median_volume,
         strong=rvol >= config.strong_rvol,
         next_week_time=None if next_week is None else next_week.time,
         next_week_volume=next_week_volume,
         next_week_rvol=next_week_rvol,
-        next_week_close_kvnd=next_week_close_kvnd,
+        next_week_close=next_week_close_kvnd,
         next_week_holds_breakout=next_week_holds,
     )
 
