@@ -10,12 +10,48 @@ from breakout_volume import evaluate_breakout_volume
 from db import ScannerDB
 from heikin_ashi import HA_ALGO_VERSION, compute_latest_metrics
 from models import ScanFilters, ScanRequest, ScanResult
+from price_units import KVND, kvnd_to_vnd
 from providers import ScannerProvider
 
 INSTRUMENT_TTL_SECONDS = 6 * 3600
 HISTORY_BOOTSTRAP_BARS = 800
 HISTORY_RETAIN_BARS = 1000
 HISTORY_INCREMENT_OVERLAP_SECONDS = 4 * 86400
+
+
+def _cafef_db_filters(filters: ScanFilters) -> ScanFilters:
+    """Keep CafeF price filtering out of raw kVND SQL comparisons."""
+    return ScanFilters(
+        price_min=None,
+        price_max=None,
+        volume_min=filters.volume_min,
+        volume_max=filters.volume_max,
+        market_cap_min=filters.market_cap_min,
+        market_cap_max=filters.market_cap_max,
+    )
+
+
+def _cafef_candidates_in_vnd(candidates: list[dict], filters: ScanFilters) -> list[dict]:
+    """Convert CafeF snapshot price_kvnd to VND before applying price filters."""
+    normalized: list[dict] = []
+    for candidate in candidates:
+        raw_price = candidate.get('price')
+        if raw_price is None:
+            if filters.price_min is not None or filters.price_max is not None:
+                continue
+            normalized.append(candidate)
+            continue
+        price_kvnd = float(raw_price)
+        price_vnd = price_kvnd * KVND
+        if filters.price_min is not None and price_vnd < filters.price_min:
+            continue
+        if filters.price_max is not None and price_vnd > filters.price_max:
+            continue
+        next_candidate = dict(candidate)
+        next_candidate['price_kvnd'] = price_kvnd
+        next_candidate['price'] = price_vnd
+        normalized.append(next_candidate)
+    return normalized
 
 
 @dataclass
@@ -97,13 +133,20 @@ class ScannerEngine:
                 breakout_enabled = request.breakout_volume.enabled
                 candidate_universes = ('HOSE',) if breakout_enabled else request.universes
                 candidate_filters = ScanFilters() if breakout_enabled else request.filters
+                db_filters = (
+                    _cafef_db_filters(candidate_filters)
+                    if request.source == 'vn_eod'
+                    else candidate_filters
+                )
                 candidates = await asyncio.to_thread(
                     self.db.stage1_candidates,
                     request.source,
                     candidate_universes,
-                    candidate_filters,
+                    db_filters,
                     provider.capabilities.universes_are_exchanges,
                 )
+                if request.source == 'vn_eod':
+                    candidates = _cafef_candidates_in_vnd(candidates, candidate_filters)
                 await asyncio.to_thread(
                     self.db.update_scan,
                     run_id,
@@ -193,12 +236,15 @@ class ScannerEngine:
                             > provider.capabilities.snapshot_ttl_seconds * 2
                         )
                         warnings = ['snapshot stale'] if stale else []
+                    price = None if row['price'] is None else float(row['price'])
+                    if request.source == 'vn_eod' and price is not None:
+                        price = price * KVND
                     payload = ScanResult(
                         instrument_id=int(row['instrument_id']),
                         symbol=str(row['symbol']),
                         name=str(row['name'] or ''),
                         exchange=str(row['exchange'] or ''),
-                        price=None if row['price'] is None else float(row['price']),
+                        price=price,
                         volume=None if row['volume'] is None else float(row['volume']),
                         market_cap=None if row['market_cap'] is None else float(row['market_cap']),
                         timeframe=request.heikin_ashi.timeframe,
@@ -278,7 +324,7 @@ class ScannerEngine:
                         'symbol': str(candidate['symbol']),
                         'name': str(candidate.get('name') or ''),
                         'exchange': str(candidate.get('exchange') or ''),
-                        'price': signal.close,
+                        'price': signal.close * KVND,
                         'volume': signal.volume,
                         'marketCap': None,
                         'timeframe': '1w',
@@ -286,7 +332,7 @@ class ScannerEngine:
                         'candleTime': signal.signal_time,
                         'weeklyChangePct': signal.weekly_change_pct,
                         'rvol': signal.rvol,
-                        'breakoutLevel': signal.breakout_level,
+                        'breakoutLevel': signal.breakout_level * KVND,
                         'tradedValue': signal.traded_value,
                         'medianTradedValue': signal.median_traded_value,
                         'medianVolume': signal.median_volume,
@@ -295,7 +341,11 @@ class ScannerEngine:
                         'nextWeekTime': signal.next_week_time,
                         'nextWeekVolume': signal.next_week_volume,
                         'nextWeekRvol': signal.next_week_rvol,
-                        'nextWeekClose': signal.next_week_close,
+                        'nextWeekClose': (
+                            None
+                            if signal.next_week_close is None
+                            else signal.next_week_close * KVND
+                        ),
                         'nextWeekHoldsBreakout': signal.next_week_holds_breakout,
                         'sourceLastTime': source_last_time,
                         'computedAt': now,
