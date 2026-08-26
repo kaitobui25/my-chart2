@@ -1,6 +1,7 @@
 import './breakout-quick-check.css';
 
 const CHECK_ENDPOINT = '/scanner-api/breakout/check';
+const KVND_TO_VND = 1_000;
 
 type QuickCheckThresholds = {
   minMedianTradedValue: number;
@@ -15,6 +16,8 @@ type BreakoutQuickCheck = {
   name: string;
   exchange: string;
   evaluatedAt: number;
+  priceUnit?: 'kVND';
+  tradedValueUnit?: 'VND';
   w0Start: number;
   w0End: number;
   w0Closed: boolean;
@@ -64,11 +67,8 @@ function currentThresholds(): QuickCheckThresholds {
   return thresholds;
 }
 
-function price(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  }).format(value);
+function priceVndFromKvnd(valueKvnd: number): string {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(valueKvnd * KVND_TO_VND);
 }
 
 function integer(value: number): string {
@@ -180,7 +180,7 @@ function showResult(data: BreakoutQuickCheck): void {
   if (!title || !subtitle || !body) return;
 
   title.textContent = `${data.symbol}${data.name ? ` · ${data.name}` : ''}`;
-  subtitle.textContent = `${data.exchange} · dữ liệu local · W0 là tuần đóng mới nhất`;
+  subtitle.textContent = `${data.exchange} · dữ liệu local · giá hiển thị VND · W0 là tuần đóng mới nhất`;
   body.replaceChildren();
 
   const summary = document.createElement('div');
@@ -216,12 +216,12 @@ function showResult(data: BreakoutQuickCheck): void {
     `${date(data.w0Start)} – ${date(data.w0End)}`,
     status(data.w0Closed ? 'PASS' : 'FAILED', data.w0Closed ? 'pass' : 'fail', closedFormula),
   ));
-  tbody.appendChild(row('Close W-1', price(data.closeW1)));
-  tbody.appendChild(row('Close W0', price(data.closeW0)));
+  tbody.appendChild(row('Close W-1 (VND)', priceVndFromKvnd(data.closeW1)));
+  tbody.appendChild(row('Close W0 (VND)', priceVndFromKvnd(data.closeW0)));
 
   const weeklyFormula = data.weeklyChangePct === null
-    ? `Close W-1 = ${price(data.closeW1)} không hợp lệ để tính % thay đổi.`
-    : `(${price(data.closeW0)} / ${price(data.closeW1)} - 1) × 100 = ${percent(data.weeklyChangePct)}; ngưỡng ≥ ${percent(t.minWeeklyChangePct)}`;
+    ? `Close W-1 = ${priceVndFromKvnd(data.closeW1)} VND không hợp lệ để tính % thay đổi.`
+    : `(${priceVndFromKvnd(data.closeW0)} / ${priceVndFromKvnd(data.closeW1)} - 1) × 100 = ${percent(data.weeklyChangePct)}; ngưỡng ≥ ${percent(t.minWeeklyChangePct)}`;
   tbody.appendChild(row(
     'Giá tăng tuần',
     data.weeklyChangePct === null ? '—' : percent(data.weeklyChangePct),
@@ -232,10 +232,10 @@ function showResult(data: BreakoutQuickCheck): void {
     ),
   ));
 
-  const breakoutFormula = `${price(data.closeW0)} > max(${formulaList(data.baselineCloses, price)}) = ${price(data.breakoutLevel)}`;
+  const breakoutFormula = `${priceVndFromKvnd(data.closeW0)} > max(${formulaList(data.baselineCloses, priceVndFromKvnd)}) = ${priceVndFromKvnd(data.breakoutLevel)} VND`;
   tbody.appendChild(row(
-    'Max Close W-1…W-8',
-    price(data.breakoutLevel),
+    'Max Close W-1…W-8 (VND)',
+    priceVndFromKvnd(data.breakoutLevel),
     status(data.breakoutPass ? 'PASS breakout' : 'FAILED', data.breakoutPass ? 'pass' : 'fail', breakoutFormula),
   ));
 
