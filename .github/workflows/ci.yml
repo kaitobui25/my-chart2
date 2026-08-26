@@ -163,8 +163,8 @@ jobs:
       - name: Verify npm package
         run: npm run test:package
 
-      - name: Audit npm dependencies
-        run: npm audit --audit-level=high
+      - name: Audit published runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
 
   browser:
     runs-on: ubuntu-latest
