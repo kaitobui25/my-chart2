@@ -107,6 +107,21 @@ def _record_from_position(row: list[str], member_name: str) -> EodRecord:
     )
 
 
+def _row_time(row: list[str], header: dict[str, int] | None) -> int | None:
+    try:
+        if header is not None:
+            date_i = header['date']
+        elif len(row) >= 8 and row[1].strip().upper() in {'D', 'DAY', 'DAILY'}:
+            date_i = 2
+        elif len(row) >= 7:
+            date_i = 1
+        else:
+            return None
+        return _parse_date_cached(row[date_i])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
 def _decoded_lines(raw) -> Iterator[str]:
     for raw_line in raw:
         yield _decode_member(raw_line)
@@ -136,6 +151,7 @@ def _parse_member(
     member_total: int,
     rows_before: int,
     progress: ArchiveProgress | None,
+    min_time: int | None,
 ) -> tuple[dict[tuple[str, int], EodRecord], int]:
     parsed: dict[tuple[str, int], EodRecord] = {}
     attempted = 0
@@ -154,16 +170,19 @@ def _parse_member(
         if row[0].lstrip().startswith(('#', '$')):
             continue
         attempted += 1
-        try:
-            record = (
-                _record_from_header(row, header, member_name)
-                if header is not None
-                else _record_from_position(row, member_name)
-            )
-        except (IndexError, TypeError, ValueError):
-            record = None
-        if record is not None:
-            parsed[(record.symbol, record.time)] = record
+
+        row_time = _row_time(row, header) if min_time is not None else None
+        if min_time is None or row_time is None or row_time >= min_time:
+            try:
+                record = (
+                    _record_from_header(row, header, member_name)
+                    if header is not None
+                    else _record_from_position(row, member_name)
+                )
+            except (IndexError, TypeError, ValueError):
+                record = None
+            if record is not None:
+                parsed[(record.symbol, record.time)] = record
 
         if progress is not None and attempted % PROGRESS_ROW_STEP == 0:
             try:
@@ -184,8 +203,9 @@ def parse_archive_streaming(
     archive_bytes: bytes,
     *,
     progress: ArchiveProgress | None = None,
+    min_time: int | None = None,
 ) -> ParsedArchive:
-    """Parse CafeF ZIP incrementally without materializing every CSV row in memory."""
+    """Parse CafeF ZIP incrementally, optionally skipping rows older than `min_time`."""
     if len(archive_bytes) > MAX_ARCHIVE_BYTES:
         raise CafeFImportError('CafeF archive exceeds size limit')
     try:
@@ -228,6 +248,7 @@ def parse_archive_streaming(
                     member_total=len(text_infos),
                     rows_before=row_count,
                     progress=progress,
+                    min_time=min_time,
                 )
             row_count += attempted
             records.update(member_records)
