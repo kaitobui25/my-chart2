@@ -6,6 +6,11 @@ import {
   readDividendEventsFromSqlite,
 } from '../dividend/sqlite-reader';
 import {
+  LnttDatabaseError,
+  LnttInputError,
+  readQuarterlyLnttFromSqlite,
+} from '../lntt/sqlite-reader';
+import {
   PeDatabaseError,
   PeInputError,
   readQuarterlyPeFromSqlite,
@@ -104,6 +109,37 @@ function serveQuarterlyPe(req: IncomingMessage, res: ServerResponse, dbPath: str
   })();
 }
 
+function serveQuarterlyLntt(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
+  void (async () => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if ((req.method || 'GET') !== 'GET') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    try {
+      sendJson(
+        res,
+        200,
+        await readQuarterlyLnttFromSqlite(dbPath, local.searchParams.get('symbol') ?? ''),
+      );
+    } catch (error) {
+      if (error instanceof LnttInputError) {
+        sendJson(res, 400, { error: error.message });
+        return;
+      }
+      const detail = error instanceof LnttDatabaseError || error instanceof Error
+        ? error.message
+        : String(error);
+      sendJson(res, 503, { error: detail });
+    }
+  })();
+}
+
 function serveDividendEvents(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
   void (async () => {
     if (!isAllowedBrowserRequest(req)) {
@@ -144,6 +180,9 @@ function installStockdataRoutes(middlewares: {
   });
   middlewares.use('/pe-quarterly-api', (req, res) => {
     serveQuarterlyPe(req, res, stockdataDbPath);
+  });
+  middlewares.use('/lntt-quarterly-api', (req, res) => {
+    serveQuarterlyLntt(req, res, stockdataDbPath);
   });
   middlewares.use('/dividend-events-api', (req, res) => {
     serveDividendEvents(req, res, stockdataDbPath);
