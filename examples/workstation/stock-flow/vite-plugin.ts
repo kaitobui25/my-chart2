@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import {
+  DividendDatabaseError,
+  DividendInputError,
+  readDividendEventsFromSqlite,
+} from '../dividend/sqlite-reader';
+import {
   PeDatabaseError,
   PeInputError,
   readQuarterlyPeFromSqlite,
@@ -99,6 +104,37 @@ function serveQuarterlyPe(req: IncomingMessage, res: ServerResponse, dbPath: str
   })();
 }
 
+function serveDividendEvents(req: IncomingMessage, res: ServerResponse, dbPath: string): void {
+  void (async () => {
+    if (!isAllowedBrowserRequest(req)) {
+      sendJson(res, 403, { error: 'Cross-site requests are not allowed' });
+      return;
+    }
+    if ((req.method || 'GET') !== 'GET') {
+      sendJson(res, 405, { error: 'Method not allowed' });
+      return;
+    }
+
+    const local = new URL(req.url || '/', 'http://127.0.0.1');
+    try {
+      sendJson(
+        res,
+        200,
+        await readDividendEventsFromSqlite(dbPath, local.searchParams.get('symbol') ?? ''),
+      );
+    } catch (error) {
+      if (error instanceof DividendInputError) {
+        sendJson(res, 400, { error: error.message });
+        return;
+      }
+      const detail = error instanceof DividendDatabaseError || error instanceof Error
+        ? error.message
+        : String(error);
+      sendJson(res, 503, { error: detail });
+    }
+  })();
+}
+
 function installStockdataRoutes(middlewares: {
   use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
 }): void {
@@ -108,6 +144,9 @@ function installStockdataRoutes(middlewares: {
   });
   middlewares.use('/pe-quarterly-api', (req, res) => {
     serveQuarterlyPe(req, res, stockdataDbPath);
+  });
+  middlewares.use('/dividend-events-api', (req, res) => {
+    serveDividendEvents(req, res, stockdataDbPath);
   });
 }
 
