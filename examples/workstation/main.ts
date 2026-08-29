@@ -78,7 +78,10 @@ import {
   buildReplayDayLabels,
   DEFAULT_REPLAY_DAY_LABEL_COLORS,
 } from './replay/replay-day-labels';
-import { buildReplayMonthProgress } from './replay/replay-month-progress';
+import {
+  buildReplayPeriodProgress,
+  supportsReplayPeriodProgress,
+} from './replay/replay-period-progress';
 import { CandleDataCoordinator, candleDatasetKey } from './data/candle-data-coordinator';
 import { searchInstruments } from '../providers/instruments';
 import { getLocale, observeTranslations, setLocale, tr, translateDom } from './i18n';
@@ -2656,7 +2659,7 @@ class Tile implements ReplayParticipant {
     this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
     this.chart.setData(data);
     this.chart.fitContent();
-    this.refreshReplayMonthProgress(currentTime);
+    this.refreshReplayPeriodProgress(currentTime);
     refreshReplayDayLabels(this);
     const latest = data[data.length - 1];
     if (latest) this.publishReplayCandle(latest);
@@ -2665,7 +2668,7 @@ class Tile implements ReplayParticipant {
   updateReplayCandle(candle: Candle, currentTime: number): void {
     this.chart.updateCandle({ ...candle });
     this.chart.fitPriceScale();
-    this.refreshReplayMonthProgress(currentTime);
+    this.refreshReplayPeriodProgress(currentTime);
     refreshReplayDayLabels(this);
     this.publishReplayCandle(candle);
   }
@@ -2690,15 +2693,19 @@ class Tile implements ReplayParticipant {
     this.chart.setMarketQuote(null);
   }
 
-  private refreshReplayMonthProgress(currentTime: number): void {
+  private refreshReplayPeriodProgress(currentTime: number): void {
     const candles = this.chart.getCandles();
     const latest = candles[candles.length - 1];
-    const marker = this.interval === '1M' && latest
-      ? buildReplayMonthProgress(latest.time, currentTime, providerCalendarOffsetMinutes(activeProvider))
+    const marker = latest && supportsReplayPeriodProgress(this.interval)
+      ? buildReplayPeriodProgress(
+        this.interval,
+        latest.time,
+        currentTime,
+        providerCalendarOffsetMinutes(activeProvider),
+      )
       : null;
     this.chart.setBarProgressMarker(marker);
   }
-
   private updateHistory(candle: Candle): Candle | null {
     const last = this.history[this.history.length - 1];
     if (last && candle.time === last.time) {
