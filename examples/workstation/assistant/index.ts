@@ -175,7 +175,8 @@ function formatCodexStatus(payload: CodexStatusResponse): string {
 function mountAssistant(): void {
   const tabs = document.getElementById('right-tabs');
   const rightPanel = document.getElementById('right-panel');
-  if (!tabs || !rightPanel || document.getElementById('assistant-view')) return;
+  const dock = document.getElementById('workspace-dock');
+  if (!tabs || !rightPanel || !dock || document.getElementById('assistant-view')) return;
 
   const saved = readSettings();
   let mode: AssistantMode = saved.mode === 'analyze' ? 'analyze' : 'chat';
@@ -189,11 +190,25 @@ function mountAssistant(): void {
   let modelOptions: CodexModelOption[] = [];
   let conversation: AssistantConversationMessage[] = [];
 
-  const tab = createElement('button', '', 'AI');
-  tab.type = 'button';
-  tab.dataset.rightTab = 'assistant';
-  const spacer = tabs.querySelector('.spacer');
-  tabs.insertBefore(tab, spacer);
+  const dockToggle = createElement('button', 'workspace-dock-button');
+  dockToggle.id = 'assistant-toggle';
+  dockToggle.type = 'button';
+  dockToggle.dataset.label = 'AI';
+  dockToggle.title = 'Mở AI Chart Assistant';
+  dockToggle.setAttribute('aria-label', 'Mở AI Chart Assistant');
+  dockToggle.setAttribute('aria-pressed', 'false');
+  dockToggle.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M18.5 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6Z"/><path d="M5 14l.8 2.2L8 17l-2.2.8L5 20l-.8-2.2L2 17l2.2-.8L5 14Z"/></svg>';
+  dock.appendChild(dockToggle);
+
+  const placeDockToggleAfterScanner = () => {
+    const scannerToggle = document.getElementById('scanner-toggle');
+    if (scannerToggle?.parentElement === dock && scannerToggle.nextElementSibling !== dockToggle) {
+      scannerToggle.insertAdjacentElement('afterend', dockToggle);
+    }
+  };
+  placeDockToggleAfterScanner();
+  const dockObserver = new MutationObserver(placeDockToggleAfterScanner);
+  dockObserver.observe(dock, { childList: true });
 
   const view = createElement('section', 'right-view assistant-view');
   view.id = 'assistant-view';
@@ -382,26 +397,40 @@ function mountAssistant(): void {
   const openAssistant = () => {
     if (rightPanel.hidden) document.getElementById('right-panel-toggle')?.click();
     tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]').forEach((button) => {
-      button.classList.toggle('active', button === tab);
+      button.classList.remove('active');
     });
     rightPanel.querySelectorAll<HTMLElement>('.right-view').forEach((section) => {
       section.hidden = section !== view;
     });
+    dockToggle.classList.add('active');
+    dockToggle.setAttribute('aria-pressed', 'true');
     currentContext();
     input.focus({ preventScroll: true });
   };
 
-  tab.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
+  dockToggle.addEventListener('click', () => {
+    if (!rightPanel.hidden && !view.hidden) {
+      document.getElementById('right-panel-toggle')?.click();
+      dockToggle.classList.remove('active');
+      dockToggle.setAttribute('aria-pressed', 'false');
+      return;
+    }
     openAssistant();
   });
 
-  tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]:not([data-right-tab="assistant"])')
+  tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]')
     .forEach((button) => button.addEventListener('click', () => {
       view.hidden = true;
-      tab.classList.remove('active');
+      dockToggle.classList.remove('active');
+      dockToggle.setAttribute('aria-pressed', 'false');
     }));
+
+  const rightPanelObserver = new MutationObserver(() => {
+    if (!rightPanel.hidden) return;
+    dockToggle.classList.remove('active');
+    dockToggle.setAttribute('aria-pressed', 'false');
+  });
+  rightPanelObserver.observe(rightPanel, { attributes: true, attributeFilter: ['hidden'] });
 
   modeSelect.addEventListener('change', () => {
     mode = modeSelect.value === 'analyze' ? 'analyze' : 'chat';
