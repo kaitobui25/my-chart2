@@ -235,7 +235,7 @@ Vite proxy
 assistant sidecar / Codex integration
 ```
 
-The workstation bridge exposes a read-only snapshot of the active tile including at most 240 recent candles, indicators, replay state and chart metadata. See `ASSISTANT.md` and `examples/workstation/vite.config.ts`.
+The workstation assistant bridge exposes a read-only snapshot of the active tile centered on the currently visible candle range, with a small nearby buffer capped at 240 candles. Explicitly requested extra timeframes are loaded on demand for the same symbol and anchored to the visible chart time. See `ASSISTANT.md` and `examples/workstation/assistant/context.ts`.
 
 ## 13. Architectural boundaries to preserve
 

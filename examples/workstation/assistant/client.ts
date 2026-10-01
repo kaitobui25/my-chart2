@@ -1,7 +1,6 @@
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
-  AssistantMode,
   AssistantResponse,
   CodexOptionsResponse,
   CodexStatusResponse,
@@ -21,7 +20,6 @@ export class AssistantApiError extends Error {
 
 export interface ChatRequest {
   requestId: string;
-  mode: AssistantMode;
   message: string;
   model: string | null;
   reasoningEffort: ReasoningEffort;

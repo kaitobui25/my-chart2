@@ -3,12 +3,10 @@ import { AssistantApiClient } from './client';
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
-  AssistantMode,
   CodexModelOption,
   CodexRateLimitBucket,
   CodexStatusResponse,
   ReasoningEffort,
-  TradePlan,
 } from './types';
 
 const STORAGE_KEY = 'l2chart.assistant.settings.v1';
@@ -22,7 +20,6 @@ const REASONING_LABELS: Record<ReasoningEffort, string> = {
 };
 
 interface StoredSettings {
-  mode?: AssistantMode;
   model?: string;
   reasoningEffort?: ReasoningEffort;
 }
@@ -109,16 +106,6 @@ function captureActiveChart(): string | null {
   }
 }
 
-function planSummary(plan: TradePlan): string {
-  const lines = [`${plan.decision} · ${plan.marketRegime} · ${Math.round(plan.confidence)}%`];
-  if (plan.entryZone) lines.push(`Entry: ${plan.entryZone.from} – ${plan.entryZone.to}`);
-  if (plan.stopLoss !== null) lines.push(`SL: ${plan.stopLoss}`);
-  if (plan.targets.length > 0) lines.push(`TP: ${plan.targets.join(' · ')}`);
-  if (plan.riskReward !== null) lines.push(`R:R: ${plan.riskReward}`);
-  if (plan.invalidation) lines.push(`Invalidation: ${plan.invalidation}`);
-  return lines.join('\n');
-}
-
 function formatResetTime(timestamp: number | null): string | null {
   if (timestamp === null || !Number.isFinite(timestamp)) return null;
   const milliseconds = timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
@@ -179,7 +166,6 @@ function mountAssistant(): void {
   if (!tabs || !rightPanel || !dock || document.getElementById('assistant-view')) return;
 
   const saved = readSettings();
-  let mode: AssistantMode = saved.mode === 'analyze' ? 'analyze' : 'chat';
   let reasoningEffort: ReasoningEffort = ALL_REASONING_EFFORTS.includes(saved.reasoningEffort ?? 'medium')
     ? saved.reasoningEffort as ReasoningEffort
     : 'medium';
@@ -222,12 +208,6 @@ function mountAssistant(): void {
       <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
     </div>
     <div class="assistant-settings">
-      <label class="assistant-mode-field">Chế độ
-        <select id="assistant-mode">
-          <option value="chat">Chat chart</option>
-          <option value="analyze">Phân tích lệnh</option>
-        </select>
-      </label>
       <label>Model
         <select id="assistant-model">
           <option value="">Đang tải model…</option>
@@ -261,7 +241,6 @@ function mountAssistant(): void {
   const input = view.querySelector<HTMLTextAreaElement>('#assistant-input')!;
   const send = view.querySelector<HTMLButtonElement>('#assistant-send')!;
   const cancel = view.querySelector<HTMLButtonElement>('#assistant-cancel')!;
-  const modeSelect = view.querySelector<HTMLSelectElement>('#assistant-mode')!;
   const modelSelect = view.querySelector<HTMLSelectElement>('#assistant-model')!;
   const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
   const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
@@ -273,16 +252,14 @@ function mountAssistant(): void {
     status.classList.toggle('error', !connected);
   };
 
-  modeSelect.value = mode;
   reasoningSelect.value = reasoningEffort;
 
-  const persist = () => writeSettings({ mode, model, reasoningEffort });
+  const persist = () => writeSettings({ model, reasoningEffort });
 
-  const appendMessage = (role: 'user' | 'assistant', text: string, plan: TradePlan | null = null) => {
+  const appendMessage = (role: 'user' | 'assistant', text: string) => {
     const item = createElement('article', `assistant-message assistant-message-${role}`);
     item.appendChild(createElement('small', 'assistant-role', role === 'user' ? 'Bạn' : 'AI'));
     item.appendChild(createElement('div', 'assistant-message-text', text));
-    if (plan) item.appendChild(createElement('pre', `assistant-plan assistant-plan-${plan.decision.toLowerCase()}`, planSummary(plan)));
     messages.appendChild(item);
     messages.scrollTop = messages.scrollHeight;
   };
@@ -303,7 +280,6 @@ function mountAssistant(): void {
     busy = value;
     input.disabled = value;
     send.disabled = value;
-    modeSelect.disabled = value;
     modelSelect.disabled = value || modelsLoading;
     reasoningSelect.disabled = value;
     cancel.disabled = !value || requestId === null;
@@ -432,14 +408,6 @@ function mountAssistant(): void {
   });
   rightPanelObserver.observe(rightPanel, { attributes: true, attributeFilter: ['hidden'] });
 
-  modeSelect.addEventListener('change', () => {
-    mode = modeSelect.value === 'analyze' ? 'analyze' : 'chat';
-    send.textContent = mode === 'analyze' ? 'Analyze' : 'Send';
-    input.placeholder = mode === 'analyze'
-      ? 'Yêu cầu AI đánh giá setup, entry, SL và TP…'
-      : 'Hỏi về chart đang chọn…';
-    persist();
-  });
   modelSelect.addEventListener('change', applyModelSelection);
   reasoningSelect.addEventListener('change', () => {
     reasoningEffort = reasoningSelect.value as ReasoningEffort;
@@ -482,8 +450,8 @@ function mountAssistant(): void {
       return;
     }
 
-    const context = currentContext();
-    if (!context) {
+    const baseContext = currentContext();
+    if (!baseContext) {
       appendMessage('assistant', 'Không lấy được dữ liệu chart đang chọn. Hãy tải chart xong rồi thử lại.');
       return;
     }
@@ -494,9 +462,15 @@ function mountAssistant(): void {
     setBusy(true);
     const thinking = appendThinking();
     try {
+      const context = await window.__L2CHART_ASSISTANT__?.resolveContext(message) ?? baseContext;
+      if (context.additionalTimeframes.length > 0) {
+        const extras = context.additionalTimeframes.map((item) => (
+          item.error ? `${item.timeframe} lỗi` : `${item.timeframe} ${item.candleCount} nến`
+        )).join(', ');
+        contextBadge.textContent = `${context.symbol} · ${context.timeframe} · ${context.candleCount} nến · + ${extras}`;
+      }
       const response = await client.chat({
         requestId,
-        mode,
         message,
         model: model || null,
         reasoningEffort,
@@ -505,7 +479,7 @@ function mountAssistant(): void {
         screenshotDataUrl: captureActiveChart(),
       });
       thinking.remove();
-      appendMessage('assistant', response.message, response.tradePlan);
+      appendMessage('assistant', response.message);
       const nextConversation: AssistantConversationMessage[] = [
         ...conversation,
         { role: 'user', content: message },
@@ -556,7 +530,6 @@ function mountAssistant(): void {
   });
   void loadModelOptions();
 
-  modeSelect.dispatchEvent(new Event('change'));
   currentContext();
   appendMessage('assistant', 'Sẵn sàng. Chọn model và reasoning rồi hỏi trực tiếp; dùng /status để xem quota Codex.');
 }

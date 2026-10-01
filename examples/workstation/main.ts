@@ -94,6 +94,7 @@ import {
   type IndicatorInstance,
   type Params,
 } from '../../src/indicators/registry';
+import { createAssistantBridge } from './assistant/context';
 
 registerAllIndicators();
 const indicatorCatalog = getIndicators();
@@ -3020,6 +3021,16 @@ class Tile implements ReplayParticipant {
     return { ...(def ? defaultParams(def) : {}), ...(this.paramsById.get(id) ?? {}) };
   }
 
+  getAssistantQuote(): { last: number; bid: number | null; ask: number | null; time: number } | null {
+    if (!this.latestQuote) return null;
+    return {
+      last: this.latestQuote.last,
+      bid: this.latestQuote.hasBidAsk ? this.latestQuote.bid : null,
+      ask: this.latestQuote.hasBidAsk ? this.latestQuote.ask : null,
+      time: this.latestQuote.time,
+    };
+  }
+
   toggleIndicator(id: string, persist = true): void {
     const existing = this.active.get(id);
     if (existing) {
@@ -3084,6 +3095,27 @@ class Tile implements ReplayParticipant {
 const chartsEl = document.getElementById('charts')!;
 const tiles: Tile[] = [];
 let activeTile: Tile | null = null;
+
+window.__L2CHART_ASSISTANT__ = createAssistantBridge({
+  getPrimarySource() {
+    const tile = activeTile;
+    if (!tile) return null;
+    return {
+      symbol: tile.symbol,
+      timeframe: tile.interval,
+      mode: tile.mode,
+      replay: { ...tile.getReplayInfo() },
+      historyRange: tile.getHistoryRange(),
+      candles: tile.chart.getCandles(),
+      visibleIndices: tile.chart.timeScale.visibleRange(),
+      indicators: [...tile.active.keys()].map((id) => ({ id, params: tile.getParams(id) })),
+      quote: tile.getAssistantQuote(),
+    };
+  },
+  getDatafeed() {
+    return currentFeed().feed;
+  },
+});
 
 function setActiveTile(tile: Tile): void {
   tile.mountControls(document.getElementById('active-tile-controls')!);

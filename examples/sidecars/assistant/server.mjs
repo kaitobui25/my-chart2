@@ -50,9 +50,7 @@ async function handleChat(request, response) {
   if (!body.context || typeof body.context !== 'object') return sendJson(response, 400, { error: 'Chart context is required.', code: 'INVALID_CONTEXT' })
   if (activeRequests.has(body.requestId)) return sendJson(response, 409, { error: 'requestId is already active.', code: 'DUPLICATE_REQUEST' })
 
-  const mode = body.mode === 'analyze' ? 'analyze' : 'chat'
   const prompt = buildPrompt({
-    mode,
     message: body.message,
     conversation: body.conversation,
     context: body.context
@@ -63,7 +61,6 @@ async function handleChat(request, response) {
     const result = await Promise.race([
       runCodex({
         runtimeRoot: RUNTIME_ROOT,
-        mode,
         model: body.model,
         reasoningEffort: body.reasoningEffort,
         prompt,

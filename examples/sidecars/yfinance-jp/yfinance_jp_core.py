@@ -10,11 +10,12 @@ from zoneinfo import ZoneInfo
 
 TOKYO_TZ = ZoneInfo("Asia/Tokyo")
 POLL_INTERVAL_SECONDS = 60
-SUPPORTED_INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M")
+SUPPORTED_INTERVALS = ("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M")
 YFINANCE_INTERVALS = {
     "1m": "1m",
     "5m": "5m",
     "15m": "15m",
+    "30m": "30m",
     "1h": "1h",
     "4h": "1h",
     "1d": "1d",
@@ -25,6 +26,7 @@ DEFAULT_HISTORY_PERIODS = {
     "1m": "5d",
     "5m": "1mo",
     "15m": "1mo",
+    "30m": "1mo",
     "1h": "1mo",
     "4h": "1mo",
     "1d": "max",
@@ -35,6 +37,7 @@ LATEST_PERIODS = {
     "1m": "5d",
     "5m": "5d",
     "15m": "5d",
+    "30m": "5d",
     "1h": "5d",
     "4h": "5d",
     "1d": "1mo",

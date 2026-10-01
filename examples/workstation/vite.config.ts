@@ -10,8 +10,6 @@ import { yFinanceJapanIntegration } from './yfinance-jp/vite-plugin';
 const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
 const ASSISTANT_TARGET = 'http://127.0.0.1:8788';
 const WORKSTATION_ROOT = fileURLToPath(new URL('.', import.meta.url));
-const MAIN_MODULE_SUFFIX = '/examples/workstation/main.ts';
-const ACTIVE_TILE_MARKER = 'let activeTile: Tile | null = null;';
 const ASSISTANT_OFFLINE_DETAIL = 'AI sidecar is offline. Restart npm run dev and check the terminal for startup errors.';
 
 interface DnseProxyCredentials {
@@ -246,44 +244,6 @@ function assistantApiProxy(): Plugin {
 function assistantIntegration(): Plugin {
   return {
     name: 'l2chart-assistant-integration',
-    enforce: 'pre',
-    transform(code, id) {
-      const normalizedId = id.split('?')[0].replace(/\\/g, '/');
-      if (!normalizedId.endsWith(MAIN_MODULE_SUFFIX)) return null;
-      if (!code.includes(ACTIVE_TILE_MARKER)) {
-        throw new Error('L2Chart assistant integration marker is missing. Update vite.config.ts for the new workstation structure.');
-      }
-
-      const bridge = `
-window.__L2CHART_ASSISTANT__ = Object.freeze({
-  getContext() {
-    const tile = activeTile;
-    if (!tile) return null;
-    const candles = tile.chart.getCandles().slice(-240).map((candle) => ({
-      time: candle.time,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-      ...(candle.volume === undefined ? {} : { volume: candle.volume }),
-    }));
-    return {
-      version: 1,
-      generatedAt: new Date().toISOString(),
-      symbol: tile.symbol,
-      timeframe: tile.interval,
-      mode: tile.mode,
-      replay: tile.getReplayInfo(),
-      historyRange: tile.getHistoryRange(),
-      candleCount: candles.length,
-      candles,
-      indicators: [...tile.active.keys()].map((id) => ({ id, params: tile.getParams(id) })),
-    };
-  },
-});
-`;
-      return { code: `${code}\n${bridge}`, map: null };
-    },
     transformIndexHtml() {
       return [{
         tag: 'script',

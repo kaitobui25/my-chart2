@@ -58,10 +58,11 @@ function normalized(value: string): string {
 }
 
 export function searchInstruments(query: string, extraSymbols: string[] = [], limit = 8): Instrument[] {
-  const catalog = new Map(VIETNAM_INSTRUMENTS.map((instrument) => [instrument.symbol, instrument]));
+  const catalog = new Map(VIETNAM_INSTRUMENTS.map((instrument) => [normalized(instrument.symbol), instrument]));
   for (const raw of extraSymbols) {
-    const symbol = normalized(raw);
-    if (symbol && !catalog.has(symbol)) catalog.set(symbol, { symbol, name: 'Ma theo doi', exchange: '' });
+    const symbol = raw.trim().toUpperCase();
+    const key = normalized(symbol);
+    if (key && !catalog.has(key)) catalog.set(key, { symbol, name: 'Ma theo doi', exchange: '' });
   }
 
   const needle = normalized(query);

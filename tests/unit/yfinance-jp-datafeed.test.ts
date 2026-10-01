@@ -57,7 +57,7 @@ describe('YFinanceJapanDatafeed', () => {
   });
 
   it('exports exactly the intervals implemented by the yfinance Japan sidecar', () => {
-    expect(YFINANCE_JP_SUPPORTED_INTERVALS).toEqual(['1m', '5m', '15m', '1h', '4h', '1d', '1w', '1M']);
+    expect(YFINANCE_JP_SUPPORTED_INTERVALS).toEqual(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M']);
   });
 
   it('searches through the sidecar and keeps only valid Tokyo symbols', async () => {
@@ -81,7 +81,7 @@ describe('YFinanceJapanDatafeed', () => {
     expect(url.searchParams.get('limit')).toBe('10');
   });
 
-  it.each(['1w', '1M'] as const)('passes chart interval %s unchanged to the sidecar', async (interval) => {
+  it.each(['30m', '1w', '1M'] as const)('passes chart interval %s unchanged to the sidecar', async (interval) => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: [] }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

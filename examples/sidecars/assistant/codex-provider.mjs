@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { withCodexAppServer } from './codex-app-server-client.mjs'
 import { commandExists, spawnCommand } from './command-utils.mjs'
-import { parseResponse, responseSchemaFor } from './response-schema.mjs'
+import { ASSISTANT_RESPONSE_SCHEMA, parseResponse } from './response-schema.mjs'
 
 export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh']
 const REASONING_EFFORT_SET = new Set(CODEX_REASONING_EFFORTS)
@@ -146,7 +146,7 @@ export async function getCodexStatus({ runtimeRoot, model, reasoningEffort }) {
   })
 }
 
-export async function runCodex({ runtimeRoot, mode, model, reasoningEffort, prompt, screenshotDataUrl, onStart }) {
+export async function runCodex({ runtimeRoot, model, reasoningEffort, prompt, screenshotDataUrl, onStart }) {
   if (!codexAvailable()) throw unavailableError()
 
   await mkdir(runtimeRoot, { recursive: true })
@@ -154,7 +154,7 @@ export async function runCodex({ runtimeRoot, mode, model, reasoningEffort, prom
   const schemaPath = path.join(requestDir, 'response-schema.json')
   const outputPath = path.join(requestDir, 'response.json')
   const imagePath = path.join(requestDir, 'chart.png')
-  await writeFile(schemaPath, JSON.stringify(responseSchemaFor(mode)), 'utf8')
+  await writeFile(schemaPath, JSON.stringify(ASSISTANT_RESPONSE_SCHEMA), 'utf8')
 
   const args = [
     'exec',
@@ -198,7 +198,7 @@ export async function runCodex({ runtimeRoot, mode, model, reasoningEffort, prom
       })
       child.stdin.end(prompt)
     })
-    return parseResponse(await readFile(outputPath, 'utf8'), mode)
+    return parseResponse(await readFile(outputPath, 'utf8'))
   } finally {
     await rm(requestDir, { recursive: true, force: true })
   }

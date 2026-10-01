@@ -1,4 +1,3 @@
-export type AssistantMode = 'chat' | 'analyze';
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface AssistantCandle {
@@ -15,17 +14,35 @@ export interface AssistantIndicator {
   params: Record<string, unknown>;
 }
 
+export interface AssistantQuote {
+  last: number;
+  bid: number | null;
+  ask: number | null;
+  time: number;
+}
+
+export interface AssistantTimeframeContext {
+  timeframe: string;
+  candleCount: number;
+  range: { from: number; to: number } | null;
+  candles: AssistantCandle[];
+  error?: string;
+}
+
 export interface AssistantChartContext {
-  version: 1;
+  version: 2;
   generatedAt: string;
   symbol: string;
   timeframe: string;
   mode: string;
   replay: Record<string, unknown>;
   historyRange: { from: number; to: number } | null;
+  visibleRange: { from: number; to: number } | null;
   candleCount: number;
   candles: AssistantCandle[];
   indicators: AssistantIndicator[];
+  quote: AssistantQuote | null;
+  additionalTimeframes: AssistantTimeframeContext[];
 }
 
 export interface AssistantConversationMessage {
@@ -33,23 +50,8 @@ export interface AssistantConversationMessage {
   content: string;
 }
 
-export interface TradePlan {
-  decision: 'LONG' | 'SHORT' | 'WAIT';
-  confidence: number;
-  marketRegime: string;
-  entryZone: { from: number; to: number } | null;
-  stopLoss: number | null;
-  targets: number[];
-  riskReward: number | null;
-  expiryBars: number;
-  invalidation: string;
-  reasons: string[];
-  warnings: string[];
-}
-
 export interface AssistantResponse {
   message: string;
-  tradePlan: TradePlan | null;
 }
 
 export interface CodexModelOption {
@@ -99,6 +101,7 @@ export interface CodexStatusResponse {
 
 export interface AssistantBridge {
   getContext(): AssistantChartContext | null;
+  resolveContext(message: string): Promise<AssistantChartContext | null>;
 }
 
 declare global {

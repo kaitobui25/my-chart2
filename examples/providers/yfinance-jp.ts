@@ -9,7 +9,7 @@ import {
 } from './browser-history-cache';
 
 export const YFINANCE_JP_SUPPORTED_INTERVALS = [
-  '1m', '5m', '15m', '1h', '4h', '1d', '1w', '1M',
+  '1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M',
 ] as const;
 
 export const YFINANCE_JP_DEFAULT_SYMBOLS: string[] = ['7203.T', '6758.T', '9984.T', '8306.T'];

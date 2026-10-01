@@ -94,8 +94,6 @@ body.light .assistant-settings select { color-scheme: light; }
   text-overflow: ellipsis;
 }
 
-.assistant-mode-field { grid-column: 1 / -1; }
-
 .assistant-context {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -185,19 +183,6 @@ body.light .assistant-settings select { color-scheme: light; }
     transform: none;
   }
 }
-
-.assistant-plan {
-  margin: 8px 0 0;
-  padding: 8px;
-  border-radius: 5px;
-  background: rgba(0, 0, 0, .16);
-  font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: pre-wrap;
-}
-
-.assistant-plan-long { border-left: 3px solid #2bb673; }
-.assistant-plan-short { border-left: 3px solid #e05d5d; }
-.assistant-plan-wait { border-left: 3px solid #d6a84b; }
 
 .assistant-form {
   display: grid;

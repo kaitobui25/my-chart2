@@ -95,6 +95,7 @@ class SymbolTests(unittest.TestCase):
 
 class IntervalTests(unittest.TestCase):
     def test_week_and_month_use_yfinance_native_intervals(self) -> None:
+        self.assertEqual(native_interval("30m"), "30m")
         self.assertEqual(native_interval("1w"), "1wk")
         self.assertEqual(native_interval("1M"), "1mo")
         self.assertEqual(native_interval("4h"), "1h")
@@ -102,6 +103,7 @@ class IntervalTests(unittest.TestCase):
     def test_no_range_periods_are_valid_for_every_supported_interval(self) -> None:
         self.assertEqual(DEFAULT_HISTORY_PERIODS["1m"], "5d")
         self.assertEqual(DEFAULT_HISTORY_PERIODS["5m"], "1mo")
+        self.assertEqual(DEFAULT_HISTORY_PERIODS["30m"], "1mo")
         self.assertEqual(DEFAULT_HISTORY_PERIODS["1w"], "max")
         self.assertEqual(DEFAULT_HISTORY_PERIODS["1M"], "max")
         self.assertEqual(set(DEFAULT_HISTORY_PERIODS), set(LATEST_PERIODS))

@@ -1,25 +1,16 @@
-const COMMON_RULES = [
-  'Use the supplied chart context as the source of truth for symbol, timeframe, prices, candles, indicators, and replay state.',
-  'The candles array is the complete allowed history for this turn. Never infer or use future candles.',
-  'The screenshot is supporting visual evidence; structured candle data wins if they appear to conflict.',
-  'Do not invent prices, indicator values, news, fundamentals, or unseen candles.',
-  'Separate observed chart facts from inference.',
-  'Reply in the language used by the user.'
-]
-
-const ANALYSIS_RULES = [
-  'Produce a trade plan only for the current chart context.',
-  'WAIT is valid and preferred when the setup is unclear.',
-  'Do not suggest leverage, position size, or removing a stop loss.',
-  'LONG or SHORT requires a numeric entry zone, stop loss, at least one target, and a clear invalidation.',
-  'Return JSON only and follow the trade-analysis schema exactly.'
-]
-
-const CHAT_RULES = [
-  'Communicate naturally about the current chart and the user question.',
-  'Do not force LONG, SHORT, WAIT, confidence, or a trade plan in normal chat mode.',
-  'Return JSON only with one message field.'
-]
+const RULES = [
+  'Answer only what the user asked.',
+  'Be honest, short, and easy to understand. Explain simply, like you are explaining to a child.',
+  'Use the supplied structured chart context as the source of truth for symbol, timeframe, prices, candles, volume, indicators, replay state, and requested extra timeframes.',
+  'The primary candles are limited to the chart area the user is currently viewing, with only a small nearby buffer.',
+  'Additional timeframes are included only when the user request explicitly asks for them. If a requested timeframe contains an error or no candles, say that the data is unavailable.',
+  'The screenshot is supporting visual evidence only. Structured data wins if they conflict.',
+  'Do not invent prices, volume, indicator values, news, fundamentals, unseen candles, or missing data.',
+  'If the data is not enough to answer, say what is missing instead of guessing.',
+  'Do not add a trade plan, prediction, or advice unless the user explicitly asks for it.',
+  'Reply in the language used by the user.',
+  'Return JSON only with one message field.',
+];
 
 function compactConversation(conversation) {
   return Array.isArray(conversation)
@@ -41,31 +32,56 @@ function compactContext(context) {
     mode: source.mode,
     replay: source.replay,
     historyRange: source.historyRange,
+    visibleRange: source.visibleRange,
     candleCount: source.candleCount,
     candles: Array.isArray(source.candles) ? source.candles.slice(-240) : [],
-    indicators: Array.isArray(source.indicators) ? source.indicators : []
+    indicators: Array.isArray(source.indicators) ? source.indicators : [],
+    quote: source.quote ?? null,
+    additionalTimeframes: Array.isArray(source.additionalTimeframes)
+      ? source.additionalTimeframes.map(item => ({
+          timeframe: item?.timeframe,
+          candleCount: item?.candleCount,
+          range: item?.range ?? null,
+          candles: Array.isArray(item?.candles) ? item.candles.slice(-160) : [],
+          ...(typeof item?.error === 'string' && item.error ? { error: item.error } : {})
+        }))
+      : []
   }
 }
 
-export function buildPrompt({ mode = 'chat', message, conversation, context }) {
-  const analyze = mode === 'analyze'
-  const responseShape = analyze
-    ? '{"message":"concise explanation","tradePlan":{"decision":"LONG|SHORT|WAIT","confidence":0,"marketRegime":"trend|range|transition|unknown","entryZone":null,"stopLoss":null,"targets":[],"riskReward":null,"expiryBars":0,"invalidation":"","reasons":[],"warnings":[]}}'
-    : '{"message":"natural chart-aware answer"}'
+function timeframeSummary(context) {
+  const rows = []
+  if (context && typeof context === 'object') {
+    rows.push(`${context.timeframe ?? 'unknown'}: ${Number(context.candleCount) || 0} candles (primary visible chart context)`)
+    if (Array.isArray(context.additionalTimeframes)) {
+      for (const item of context.additionalTimeframes) {
+        const timeframe = item?.timeframe ?? 'unknown'
+        const count = Number(item?.candleCount) || 0
+        rows.push(item?.error
+          ? `${timeframe}: unavailable (${item.error})`
+          : `${timeframe}: ${count} structured candles available`)
+      }
+    }
+  }
+  return rows.length > 0 ? rows.join('\n') : 'No chart data available.'
+}
 
+export function buildPrompt({ message, conversation, context }) {
   return [
-    `You are a cautious chart assistant embedded in L2Chart. Current instrument: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
-    ...COMMON_RULES.map(rule => `- ${rule}`),
-    ...(analyze ? ANALYSIS_RULES : CHAT_RULES).map(rule => `- ${rule}`),
+    `You are a chart assistant embedded in L2Chart. Current instrument: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
+    ...RULES.map(rule => `- ${rule}`),
     '',
-    `Task mode: ${analyze ? 'Trade analysis' : 'Normal chat'}`,
-    `User request: ${String(message ?? '').trim()}`,
+    'Structured timeframe availability:',
+    timeframeSummary(context),
+    'When answering whether a timeframe is available, trust this summary and the structured candles, not the screenshot or primary timeframe label.',
+    '',
+    `User question: ${String(message ?? '').trim()}`,
     '',
     'Recent conversation JSON:',
     JSON.stringify(compactConversation(conversation)),
     '',
     'Required response shape:',
-    responseShape,
+    '{"message":"short, clear answer"}',
     '',
     'Chart context JSON:',
     JSON.stringify(compactContext(context))
