@@ -408,6 +408,7 @@ class ScannerPanel {
       for (const item of this.sources) {
         const option = document.createElement('option');
         option.value = item.id;
+        if (item.chart_provider) option.dataset.chartProvider = item.chart_provider;
         option.textContent = item.available ? item.label : `${item.label} — unavailable`;
         option.disabled = !item.available;
         this.source.appendChild(option);
@@ -427,6 +428,7 @@ class ScannerPanel {
   private bridgeProvider(): ScannerSourceId | undefined {
     const value = window.__L2CHART_SCANNER_BRIDGE__?.getProvider();
     if (value === 'fiinquant') return 'fiinquant';
+    if (value === 'yfinance-jp') return 'yfinance_jp';
     if (value === 'binance-spot') return 'binance_spot';
     if (value === 'binance-usdm') return 'binance_usdm';
     return undefined;

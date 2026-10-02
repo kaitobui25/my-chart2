@@ -32,11 +32,13 @@ class FakeProvider(ScannerProvider):
         self.capabilities = ProviderCapabilities(
             id='fiinquant',
             label='Fake FiinQuant',
+            chart_provider='vnstock',
             market_cap=False,
             bulk_snapshot=True,
             bulk_history=True,
             universes=('HOSE',),
             default_universes=('HOSE',),
+            universe_kind='exchange',
             timezone='Asia/Ho_Chi_Minh',
             max_history_concurrency=1,
             continuous_market=False,

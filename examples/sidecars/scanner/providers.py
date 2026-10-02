@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -67,11 +68,13 @@ class FiinQuantProvider(ScannerProvider):
         self.capabilities = ProviderCapabilities(
             id='fiinquant',
             label='FiinQuant',
+            chart_provider='vnstock',
             market_cap=False,
             bulk_snapshot=True,
             bulk_history=True,
             universes=('HOSE', 'HNX', 'UPCOM'),
             default_universes=('HOSE', 'HNX', 'UPCOM'),
+            universe_kind='exchange',
             timezone='Asia/Ho_Chi_Minh',
             max_history_concurrency=1,
             continuous_market=False,
@@ -357,11 +360,13 @@ class BinanceProvider(ScannerProvider):
         self.capabilities = ProviderCapabilities(
             id=provider_id,
             label=label,
+            chart_provider='binance-spot' if provider_id == 'binance_spot' else 'binance-usdm',
             market_cap=False,
             bulk_snapshot=True,
             bulk_history=False,
             universes=('USDT',),
             default_universes=('USDT',),
+            universe_kind='quote_asset',
             timezone='UTC',
             max_history_concurrency=8,
             continuous_market=True,
@@ -481,12 +486,180 @@ class BinanceProvider(ScannerProvider):
             self.session = None
 
 
+class YahooJapanProvider(ScannerProvider):
+    """Scanner adapter for the existing Yahoo Japan market-data sidecar.
+
+    The Yahoo sidecar owns yfinance and exchange-specific discovery. Scanner only
+    consumes its normalized HTTP contract, which keeps one Yahoo implementation
+    shared by charts and scans.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        session: aiohttp.ClientSession | None = None,
+    ) -> None:
+        self.base_url = (
+            base_url
+            or os.environ.get('YFINANCE_JP_SCANNER_URL')
+            or 'http://127.0.0.1:8760'
+        ).rstrip('/')
+        self._owned_session = session is None
+        self.session = session
+        self._universe_cache: list[dict[str, Any]] = []
+        self._universe_cached_at = 0.0
+        self._universe_lock = asyncio.Lock()
+        self.capabilities = ProviderCapabilities(
+            id='yfinance_jp',
+            label='Yahoo Japan',
+            chart_provider='yfinance-jp',
+            market_cap=True,
+            bulk_snapshot=True,
+            bulk_history=True,
+            universes=('JPX',),
+            default_universes=('JPX',),
+            universe_kind='exchange',
+            timezone='Asia/Tokyo',
+            max_history_concurrency=2,
+            continuous_market=False,
+            snapshot_ttl_seconds=60,
+            history_ttl_seconds=300,
+        )
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self.session is None:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180))
+        return self.session
+
+    async def _json(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        session = await self._get_session()
+        async with session.request(method, f'{self.base_url}{path}', json=payload) as response:
+            if response.status >= 400:
+                body = (await response.text())[:400]
+                raise RuntimeError(f'Yahoo Japan HTTP {response.status}: {body}')
+            return await response.json()
+
+    async def _universe(self, force: bool = False) -> list[dict[str, Any]]:
+        now = time.monotonic()
+        if not force and self._universe_cache and now - self._universe_cached_at <= 60:
+            return self._universe_cache
+        async with self._universe_lock:
+            now = time.monotonic()
+            if not force and self._universe_cache and now - self._universe_cached_at <= 60:
+                return self._universe_cache
+            payload = await self._json('GET', '/scanner/universe')
+            rows = payload.get('instruments', []) if isinstance(payload, dict) else []
+            normalized = [row for row in rows if isinstance(row, dict) and str(row.get('symbol') or '').strip()]
+            self._universe_cache = normalized
+            self._universe_cached_at = now
+            return normalized
+
+    async def list_instruments(self, universes: tuple[str, ...]) -> list[Instrument]:
+        allowed = {item.upper() for item in (universes or self.capabilities.default_universes)}
+        rows = await self._universe()
+        result: list[Instrument] = []
+        for row in rows:
+            exchange = str(row.get('exchange') or 'JPX').strip().upper() or 'JPX'
+            if allowed and exchange not in allowed:
+                continue
+            symbol = str(row.get('symbol') or '').strip().upper()
+            if not symbol:
+                continue
+            result.append(Instrument(
+                'yfinance_jp',
+                symbol,
+                str(row.get('name') or '').strip(),
+                exchange,
+                str(row.get('assetType') or 'EQUITY').strip().upper(),
+                True,
+            ))
+        return result
+
+    async def snapshots(self, symbols: list[str]) -> list[MarketSnapshot]:
+        wanted = {symbol.upper() for symbol in symbols}
+        rows = await self._universe()
+        result: list[MarketSnapshot] = []
+        for row in rows:
+            symbol = str(row.get('symbol') or '').strip().upper()
+            if symbol not in wanted:
+                continue
+            data_time = _finite(row.get('dataTime'))
+            result.append(MarketSnapshot(
+                symbol,
+                _finite(row.get('price')),
+                _finite(row.get('volume')),
+                _finite(row.get('marketCap')),
+                None if data_time is None else int(data_time),
+            ))
+        return result
+
+    async def daily_history(
+        self,
+        symbols: list[str],
+        limit: int,
+        since_time: int | None = None,
+    ) -> dict[str, list[Candle]]:
+        if not symbols:
+            return {}
+        payload = await self._json('POST', '/scanner/history', payload={
+            'symbols': symbols,
+            'limit': max(1, int(limit)),
+            'sinceTime': since_time,
+        })
+        raw = payload.get('candles', {}) if isinstance(payload, dict) else {}
+        if not isinstance(raw, dict):
+            return {}
+        output: dict[str, list[Candle]] = {}
+        for raw_symbol, rows in raw.items():
+            if not isinstance(rows, list):
+                continue
+            candles: list[Candle] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                timestamp = _finite(row.get('time'))
+                values = [_finite(row.get(key)) for key in ('open', 'high', 'low', 'close')]
+                if timestamp is None or any(value is None for value in values):
+                    continue
+                open_price, high, low, close = (float(value) for value in values if value is not None)
+                if (
+                    min(open_price, high, low, close) <= 0
+                    or high < max(open_price, low, close)
+                    or low > min(open_price, high, close)
+                ):
+                    continue
+                candles.append(Candle(
+                    int(timestamp),
+                    open_price,
+                    high,
+                    low,
+                    close,
+                    _finite(row.get('volume')),
+                    bool(row.get('isClosed', True)),
+                ))
+            if candles:
+                output[str(raw_symbol).upper()] = sorted(candles, key=lambda item: item.time)[-limit:]
+        return output
+
+    async def close(self) -> None:
+        if self._owned_session and self.session is not None:
+            await self.session.close()
+            self.session = None
+
+
 def build_providers(
     fiinquant_username: str,
     fiinquant_password: str,
 ) -> dict[ProviderId, ScannerProvider]:
     return {
         'fiinquant': FiinQuantProvider(fiinquant_username, fiinquant_password),
+        'yfinance_jp': YahooJapanProvider(),
         'binance_spot': BinanceProvider('binance_spot'),
         'binance_usdm': BinanceProvider('binance_usdm'),
     }

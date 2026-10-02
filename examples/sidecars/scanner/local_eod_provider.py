@@ -11,11 +11,13 @@ class LocalEodProvider(ScannerProvider):
         self.capabilities = ProviderCapabilities(
             id='vn_eod',
             label='VN EOD (CafeF)',
+            chart_provider='vnstock',
             market_cap=False,
             bulk_snapshot=False,
             bulk_history=False,
             universes=('HOSE', 'HNX', 'UPCOM'),
             default_universes=('HOSE', 'HNX', 'UPCOM'),
+            universe_kind='exchange',
             timezone='Asia/Ho_Chi_Minh',
             max_history_concurrency=0,
             continuous_market=False,

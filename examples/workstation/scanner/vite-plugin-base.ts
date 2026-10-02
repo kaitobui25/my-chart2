@@ -430,16 +430,11 @@ export function scannerIntegration(): Plugin {
 window.__L2CHART_SCANNER_BRIDGE__ = Object.freeze({
   getProvider() { return activeProvider; },
   openSymbol(symbol) {
-    const providerMap = {
-      fiinquant: 'fiinquant',
-      vn_eod: 'fiinquant',
-      vnstock: 'vnstock',
-      binance_spot: 'binance-spot',
-      binance_usdm: 'binance-usdm',
-    };
-    const scannerSource = document.getElementById('scanner-source')?.value ?? '';
-    const targetProvider = providerMap[String(scannerSource)];
-    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider);
+    const scannerSource = document.getElementById('scanner-source');
+    const targetProvider = scannerSource instanceof HTMLSelectElement
+      ? scannerSource.selectedOptions[0]?.dataset.chartProvider
+      : undefined;
+    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider as PriceProviderId);
     activeTile?.setSymbol(String(symbol ?? ''));
   },
 });

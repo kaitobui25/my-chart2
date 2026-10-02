@@ -119,12 +119,19 @@ async function startScannerSidecar(server?: ViteDevServer): Promise<boolean> {
   }
   if (!scannerChild) {
     const python = scannerPython();
+    const workstationPort = server?.config.server.port;
+    const yahooJapanScannerUrl = workstationPort
+      ? `http://127.0.0.1:${workstationPort}/yfinance-jp-api`
+      : process.env.YFINANCE_JP_SCANNER_URL;
     console.log(`[scanner] Starting sidecar with ${python}`);
     scannerChild = spawn(python, [SCANNER_SCRIPT], {
       cwd: SCANNER_DIR,
       stdio: 'inherit',
       windowsHide: false,
-      env: process.env,
+      env: {
+        ...process.env,
+        ...(yahooJapanScannerUrl ? { YFINANCE_JP_SCANNER_URL: yahooJapanScannerUrl } : {}),
+      },
     });
     const child = scannerChild;
     child.once('exit', (code, signal) => {
@@ -562,33 +569,23 @@ function patchLazyProviderLifecycle(original: string): string {
     code,
     lines(
       '  openSymbol(symbol) {',
-      '    const providerMap = {',
-      "      fiinquant: 'fiinquant',",
-      "      vn_eod: 'fiinquant',",
-      "      vnstock: 'vnstock',",
-      "      binance_spot: 'binance-spot',",
-      "      binance_usdm: 'binance-usdm',",
-      '    };',
-      "    const scannerSource = document.getElementById('scanner-source')?.value ?? '';",
-      '    const targetProvider = providerMap[String(scannerSource)];',
-      '    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider);',
+      "    const scannerSource = document.getElementById('scanner-source');",
+      '    const targetProvider = scannerSource instanceof HTMLSelectElement',
+      '      ? scannerSource.selectedOptions[0]?.dataset.chartProvider',
+      '      : undefined;',
+      '    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider as PriceProviderId);',
       "    activeTile?.setSymbol(String(symbol ?? ''));",
       '  },',
     ),
     lines(
       '  async openSymbol(symbol) {',
-      '    const providerMap = {',
-      "      fiinquant: 'fiinquant',",
-      "      vn_eod: 'fiinquant',",
-      "      vnstock: 'vnstock',",
-      "      binance_spot: 'binance-spot',",
-      "      binance_usdm: 'binance-usdm',",
-      '    };',
-      "    const scannerSource = document.getElementById('scanner-source')?.value ?? '';",
-      '    const targetProvider = providerMap[String(scannerSource)];',
+      "    const scannerSource = document.getElementById('scanner-source');",
+      '    const targetProvider = scannerSource instanceof HTMLSelectElement',
+      '      ? scannerSource.selectedOptions[0]?.dataset.chartProvider',
+      '      : undefined;',
       "    if (targetProvider === 'fiinquant' && !(await ensureFiinQuantRuntime())) return;",
       "    if (targetProvider === 'vnstock' && !(await reportVnstockHealth(false))) return;",
-      '    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider);',
+      '    if (targetProvider && activeProvider !== targetProvider) setActiveProvider(targetProvider as PriceProviderId);',
       "    activeTile?.setSymbol(String(symbol ?? ''));",
       '  },',
     ),

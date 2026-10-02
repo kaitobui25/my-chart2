@@ -1,10 +1,11 @@
-export type ScannerSourceId = 'fiinquant' | 'vn_eod' | 'binance_spot' | 'binance_usdm';
+export type ScannerSourceId = 'fiinquant' | 'vn_eod' | 'binance_spot' | 'binance_usdm' | 'yfinance_jp';
 export type ScannerTimeframe = '1w' | '1M';
 export type ScannerCandleKind = 'current' | 'closed';
 
 export interface ScannerSource {
   id: ScannerSourceId;
   label: string;
+  chart_provider: string;
   market_cap: boolean;
   bulk_snapshot: boolean;
   bulk_history: boolean;
