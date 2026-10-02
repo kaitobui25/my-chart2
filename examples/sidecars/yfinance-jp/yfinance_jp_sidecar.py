@@ -4,13 +4,16 @@ import asyncio
 import json
 import os
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any
 
 from aiohttp import web
 
 from yfinance_jp_core import (
     SUPPORTED_INTERVALS,
+    TOKYO_TZ,
     YFinanceJapanGateway,
+    daily_candle_is_closed,
     native_interval,
     normalize_symbol,
     session_metadata,
@@ -135,12 +138,65 @@ async def latest_handler(request: web.Request) -> web.Response:
         return _json({"message": str(exc)}, 502)
 
 
+async def scanner_universe_handler(_: web.Request) -> web.Response:
+    try:
+        instruments = await asyncio.to_thread(GATEWAY.scanner_universe)
+        return _json({
+            "source": "yfinance-jp",
+            "instruments": [asdict(item) for item in instruments],
+        })
+    except ValueError as exc:
+        return _json({"message": str(exc)}, 400)
+    except Exception as exc:
+        return _json({"message": str(exc)}, 502)
+
+
+async def scanner_history_handler(request: web.Request) -> web.Response:
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        raw_symbols = payload.get("symbols")
+        if not isinstance(raw_symbols, list):
+            raise ValueError("symbols must be an array")
+        symbols = [str(item) for item in raw_symbols]
+        raw_limit = payload.get("limit")
+        limit = _parse_limit(None if raw_limit is None else str(raw_limit), 800)
+        raw_since_time = payload.get("sinceTime")
+        since_time = _parse_optional_timestamp(
+            None if raw_since_time is None else str(raw_since_time),
+            "sinceTime",
+        )
+        history = await asyncio.to_thread(GATEWAY.daily_history, symbols, limit, since_time)
+        now = datetime.now(TOKYO_TZ)
+        return _json({
+            "source": "yfinance-jp",
+            "interval": "1d",
+            "timezone": "Asia/Tokyo",
+            "candles": {
+                symbol: [
+                    {**asdict(candle), "isClosed": daily_candle_is_closed(candle.time, now)}
+                    for candle in candles
+                ]
+                for symbol, candles in history.items()
+            },
+        })
+    except json.JSONDecodeError:
+        return _json({"message": "request body must be valid JSON"}, 400)
+    except ValueError as exc:
+        return _json({"message": str(exc)}, 400)
+    except Exception as exc:
+        return _json({"message": str(exc)}, 502)
+
+
 def create_app() -> web.Application:
     app = web.Application(client_max_size=1024 * 1024)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/symbols", symbols_handler)
     app.router.add_get("/history", history_handler)
     app.router.add_get("/latest", latest_handler)
+    app.router.add_get("/scanner/universe", scanner_universe_handler)
+    app.router.add_post("/scanner/history", scanner_history_handler)
     return app
 
 

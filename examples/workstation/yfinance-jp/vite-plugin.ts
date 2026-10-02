@@ -60,6 +60,13 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
+async function readBody(req: IncomingMessage): Promise<Buffer | undefined> {
+  if (req.method === 'GET' || req.method === 'HEAD') return undefined;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
 function pythonIn(venv: string): string {
   return process.platform === 'win32'
     ? path.join(venv, 'Scripts', 'python.exe')
@@ -186,8 +193,13 @@ function installProxy(server: ViteDevServer | undefined, middlewares: {
     }
     try {
       const localUrl = new URL(req.url || '/', 'http://127.0.0.1');
+      const body = await readBody(req);
       const response = await fetch(`${SIDECAR_TARGET}${localUrl.pathname}${localUrl.search}`, {
         method: req.method,
+        headers: {
+          ...(req.headers['content-type'] ? { 'content-type': String(req.headers['content-type']) } : {}),
+        },
+        body: body && body.length ? new Uint8Array(body) : undefined,
         signal: AbortSignal.timeout(35_000),
       });
       res.statusCode = response.status;
