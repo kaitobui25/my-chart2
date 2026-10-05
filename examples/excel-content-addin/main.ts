@@ -12,6 +12,10 @@ import { JapanMarketController } from './japan-market-controller';
 import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
 import { bindSymbolCombobox } from './symbol-combobox';
+import { bindViewTabs, type ViewTabsBinding } from './view-tabs';
+import { WatchListController } from './watchlist-controller';
+import { WatchListStore } from './watchlist-store';
+import { WatchListView } from './watchlist-view';
 import './style.css';
 
 const chartElement = requiredElement<HTMLElement>('#chart');
@@ -21,10 +25,20 @@ const symbolInput = requiredElement<HTMLInputElement>('#symbol-input');
 const symbolOptions = requiredElement<HTMLDataListElement>('#symbol-options');
 const timeframeSelect = requiredElement<HTMLSelectElement>('#timeframe-select');
 const indicatorSelect = requiredElement<HTMLSelectElement>('#indicator-select');
+const chartTab = requiredElement<HTMLButtonElement>('#chart-tab');
+const watchlistTab = requiredElement<HTMLButtonElement>('#watchlist-tab');
+const chartViewElement = requiredElement<HTMLElement>('#chart-view');
+const watchlistViewElement = requiredElement<HTMLElement>('#watchlist-view');
+const watchlistInput = requiredElement<HTMLInputElement>('#watchlist-symbol-input');
+const watchlistOptions = requiredElement<HTMLDataListElement>('#watchlist-symbol-options');
+const watchlistAddButton = requiredElement<HTMLButtonElement>('#watchlist-add');
 
 const chart = new L2Chart(chartElement, excelStealthChartOptions);
 const indicators = new IndicatorController(chart);
 const market = new JapanMarketController(chart);
+const watchlistStore = new WatchListStore(JAPAN_MARKET_CONFIG.defaultSymbols);
+let watchlist: WatchListController;
+let viewTabs: ViewTabsBinding;
 let activeSource: ExcelAssistantSource = 'market';
 let statusMessage: string = excelStealthUi.loading;
 let statusIsError = false;
@@ -38,6 +52,33 @@ const assistant = new ExcelAssistantController(createExcelAssistantBridge({
   getSymbol: () => market.getSnapshot()?.symbol ?? symbolInput.value.trim(),
   getTimeframe: () => market.getSnapshot()?.timeframe ?? timeframeSelect.value,
 }));
+
+const watchlistView = new WatchListView({
+  list: requiredElement<HTMLElement>('#watchlist-list'),
+  empty: requiredElement<HTMLElement>('#watchlist-empty'),
+  count: requiredElement<HTMLElement>('#watchlist-count'),
+  status: requiredElement<HTMLElement>('#watchlist-status'),
+}, {
+  onOpen: (symbol) => openWatchlistSymbol(symbol),
+  onRemove: (symbol) => watchlist.removeSymbol(symbol),
+});
+
+watchlist = new WatchListController({
+  feed: market.getDatafeed(),
+  store: watchlistStore,
+  view: watchlistView,
+  input: watchlistInput,
+  suggestions: watchlistOptions,
+  addButton: watchlistAddButton,
+});
+
+viewTabs = bindViewTabs({
+  chartTab,
+  watchlistTab,
+  chartView: chartViewElement,
+  watchlistView: watchlistViewElement,
+  onChange: (view) => watchlist.setActive(view === 'watchlist'),
+});
 
 populateTimeframes();
 populateIndicators();
@@ -72,6 +113,8 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('beforeunload', () => {
   unbindSymbol();
+  viewTabs.dispose();
+  watchlist.dispose();
   assistant.dispose();
   indicators.dispose();
   market.dispose();
@@ -96,6 +139,7 @@ async function reloadMarket(): Promise<void> {
     symbolInput.value = result.symbol;
     activeSource = 'market';
     assistant.refreshContext();
+    watchlist.setActiveSymbol(result.symbol);
     setPersistentStatus(`${result.symbol} · ${timeframeLabel(result.timeframe)} · ${result.candles.length.toLocaleString()} nến`);
   } catch (error) {
     if (loadId !== marketLoadId) return;
@@ -117,12 +161,19 @@ async function loadSelectedRange(): Promise<void> {
     chart.fitContent();
     activeSource = 'sheet';
     assistant.refreshContext();
+    watchlist.setActiveSymbol(null);
     setPersistentStatus(`Sheet · ${candles.length.toLocaleString()} nến`);
   } catch (error) {
     setPersistentStatus(error instanceof Error ? error.message : excelStealthUi.genericError, true);
   } finally {
     loadButton.disabled = false;
   }
+}
+
+function openWatchlistSymbol(symbol: string): void {
+  symbolInput.value = symbol;
+  viewTabs.select('chart');
+  void reloadMarket();
 }
 
 function populateTimeframes(): void {

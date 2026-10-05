@@ -11,7 +11,12 @@ export interface SymbolComboboxOptions {
   onError(message: string): void;
 }
 
-export function bindSymbolCombobox(options: SymbolComboboxOptions): () => void {
+export interface SymbolComboboxBinding {
+  commit(): void;
+  dispose(): void;
+}
+
+export function createSymbolCombobox(options: SymbolComboboxOptions): SymbolComboboxBinding {
   let timer: number | null = null;
   let requestId = 0;
 
@@ -58,12 +63,15 @@ export function bindSymbolCombobox(options: SymbolComboboxOptions): () => void {
   options.input.addEventListener('change', commit);
   options.input.addEventListener('keydown', onKeyDown);
 
-  return () => {
-    if (timer !== null) window.clearTimeout(timer);
-    requestId += 1;
-    options.input.removeEventListener('input', scheduleSearch);
-    options.input.removeEventListener('change', commit);
-    options.input.removeEventListener('keydown', onKeyDown);
+  return {
+    commit,
+    dispose() {
+      if (timer !== null) window.clearTimeout(timer);
+      requestId += 1;
+      options.input.removeEventListener('input', scheduleSearch);
+      options.input.removeEventListener('change', commit);
+      options.input.removeEventListener('keydown', onKeyDown);
+    },
   };
 
   function renderOptions(items: readonly Partial<SymbolSearchResult>[]): void {
@@ -80,4 +88,9 @@ export function bindSymbolCombobox(options: SymbolComboboxOptions): () => void {
     }
     options.list.replaceChildren(fragment);
   }
+}
+
+export function bindSymbolCombobox(options: SymbolComboboxOptions): () => void {
+  const binding = createSymbolCombobox(options);
+  return () => binding.dispose();
 }

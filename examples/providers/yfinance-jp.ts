@@ -54,6 +54,12 @@ interface HistoryPayload {
   error?: string;
 }
 
+interface MultiHistoryPayload {
+  candles?: Record<string, unknown>;
+  message?: string;
+  error?: string;
+}
+
 export function normalizeYFinanceJapanSymbol(value: string): string {
   const upper = value.trim().toUpperCase();
   const base = upper.endsWith('.T') ? upper.slice(0, -2) : upper;
@@ -154,6 +160,43 @@ export class YFinanceJapanDatafeed implements Datafeed {
         exchange: typeof row.exchange === 'string' ? row.exchange.trim() : 'JPX',
       } satisfies SymbolSearchResult];
     });
+  }
+
+  /**
+   * Fetch a small daily history window for multiple Tokyo symbols in one sidecar
+   * request. This is intentionally provider-specific and is used by compact
+   * background surfaces such as the Excel watch list.
+   */
+  async getDailyHistoryMany(symbols: readonly string[], limit = 2): Promise<Record<string, Candle[]>> {
+    const normalized = [...new Set(symbols
+      .map((symbol) => normalizeYFinanceJapanSymbol(symbol))
+      .filter((symbol): symbol is string => Boolean(symbol)))];
+    if (normalized.length === 0) return {};
+
+    const response = await this.fetchImpl(`${this.baseUrl}/scanner/history`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        symbols: normalized,
+        limit: Math.min(10, Math.max(1, Math.floor(limit))),
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    const payload = await response.json().catch(() => ({})) as MultiHistoryPayload;
+    if (!response.ok) {
+      throw new Error(payload.message ?? payload.error ?? `Yahoo Japan sidecar HTTP ${response.status}`);
+    }
+
+    const output: Record<string, Candle[]> = {};
+    for (const symbol of normalized) {
+      const rows = payload.candles?.[symbol];
+      if (!Array.isArray(rows)) continue;
+      output[symbol] = rows
+        .map(parseCandle)
+        .filter((candle): candle is Candle => candle !== null)
+        .sort((left, right) => left.time - right.time);
+    }
+    return output;
   }
 
   async getCachedHistory(

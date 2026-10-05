@@ -81,6 +81,31 @@ describe('YFinanceJapanDatafeed', () => {
     expect(url.searchParams.get('limit')).toBe('10');
   });
 
+  it('loads small multi-symbol daily histories in one sidecar request for watchlists', async () => {
+    const first = { time: 1_754_774_400, open: 100, high: 104, low: 99, close: 103, volume: 1_000 };
+    const second = { time: 1_754_860_800, open: 103, high: 106, low: 102, close: 105, volume: 900 };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      candles: {
+        '7203.T': [first, second],
+        '6758.T': [{ ...first, open: 200, high: 204, low: 199, close: 202 }],
+      },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+
+    const result = await feed.getDailyHistoryMany(['7203', '6758.T', '7203.T'], 2);
+
+    expect(result['7203.T']).toEqual([first, second]);
+    expect(result['6758.T']).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [input, init] = vi.mocked(fetchImpl).mock.calls[0];
+    expect(String(input)).toBe('/yfinance-jp-api/scanner/history');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ symbols: ['7203.T', '6758.T'], limit: 2 });
+  });
+
   it.each(['30m', '1w', '1M'] as const)('passes chart interval %s unchanged to the sidecar', async (interval) => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: [] }), {
       status: 200,

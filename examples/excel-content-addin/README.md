@@ -15,6 +15,18 @@ The add-in opens in **Japan equity mode** by default:
 
 When the content object is narrower than 480 px, the command strip becomes two rows so the symbol/timeframe controls remain usable instead of being squeezed.
 
+## Watch List
+
+The **Watch List** tab keeps a small persisted list of Tokyo symbols next to the chart workflow:
+
+- The initial list uses the same default Tokyo symbols as the market view and is persisted in `localStorage` after add/remove operations.
+- The list is capped at 20 symbols so refresh cost stays bounded inside the Excel WebView.
+- Quotes refresh only while the Watch List tab is visible. A single provider batch request fetches two daily candles per symbol every 60 seconds, so `% day` is calculated from the previous close rather than the current session open.
+- Rows are reconciled incrementally instead of rebuilding the full list on every refresh.
+- Selecting a row switches back to **Chart** and loads that symbol at the currently selected timeframe. Removing a Watch List row never changes the chart that is already open.
+
+Watch List code is split into configuration, persistence, market-data, view, and controller modules so storage/UI/provider concerns can evolve independently.
+
 ## AI assistant
 
 The `AI` action opens a non-modal assistant drawer **over the chart** instead of permanently shrinking the chart area. On a normal content-add-in size it docks to the right; below 600 px it becomes a bottom sheet. Closing the drawer keeps the current conversation in memory.

@@ -12,6 +12,7 @@ import {
 
 export interface JapanMarketDatafeed extends Datafeed {
   searchSymbols(query: string, limit?: number): Promise<SymbolSearchResult[]>;
+  getDailyHistoryMany?(symbols: readonly string[], limit?: number): Promise<Record<string, Candle[]>>;
   dispose?(): void;
 }
 
@@ -77,7 +78,7 @@ export class JapanMarketController {
     return this.feed.searchSymbols(query, JAPAN_MARKET_CONFIG.symbolSearchLimit);
   }
 
-  getDatafeed(): Datafeed {
+  getDatafeed(): JapanMarketDatafeed {
     return this.feed;
   }
 

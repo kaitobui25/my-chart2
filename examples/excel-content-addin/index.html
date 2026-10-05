@@ -9,66 +9,95 @@
   </head>
   <body>
     <main class="app-shell">
-      <header class="market-strip" aria-label="Điều khiển dữ liệu biểu đồ">
-        <label class="control symbol-control" title="Mã cổ phiếu Nhật">
-          <span class="visually-hidden">Mã cổ phiếu Nhật</span>
-          <input id="symbol-input" list="symbol-options" autocomplete="off" spellcheck="false" aria-label="Mã cổ phiếu Nhật" />
-          <datalist id="symbol-options"></datalist>
-        </label>
-        <label class="control timeframe-control" title="Khung thời gian">
-          <span class="visually-hidden">Khung thời gian</span>
-          <select id="timeframe-select" aria-label="Khung thời gian"></select>
-        </label>
-        <label class="control indicator-control" title="Indicator">
-          <span class="visually-hidden">Indicator</span>
-          <select id="indicator-select" aria-label="Indicator"></select>
-        </label>
-        <div class="strip-actions">
-          <button
-            id="assistant-toggle"
-            class="strip-button assistant-toggle"
-            type="button"
-            aria-controls="assistant-panel"
-            aria-expanded="false"
-            title="Mở trợ lý"
-          >AI</button>
-          <button id="load-selection" class="strip-button sheet-button" type="button" disabled title="Dùng vùng OHLC đang chọn trong Excel">Sheet</button>
-        </div>
-        <span id="status" aria-live="polite">Đang tải…</span>
-      </header>
-      <section class="chart-stage">
-        <div id="chart" aria-label="Biến động dữ liệu"></div>
-        <aside id="assistant-panel" class="assistant-panel" aria-label="Trợ lý phân tích" hidden>
-          <header class="assistant-head">
-            <div class="assistant-head-copy">
-              <strong>Trợ lý</strong>
-              <span id="assistant-status">Đang kết nối…</span>
+      <nav class="view-tabs" role="tablist" aria-label="Chế độ hiển thị">
+        <button id="chart-tab" type="button" role="tab" aria-controls="chart-view" aria-selected="true">Chart</button>
+        <button id="watchlist-tab" type="button" role="tab" aria-controls="watchlist-view" aria-selected="false">Watch List</button>
+      </nav>
+
+      <section class="view-stack">
+        <section id="chart-view" class="view-panel chart-view" role="tabpanel" aria-labelledby="chart-tab">
+          <header class="market-strip" aria-label="Điều khiển dữ liệu biểu đồ">
+            <label class="control symbol-control" title="Mã cổ phiếu Nhật">
+              <span class="visually-hidden">Mã cổ phiếu Nhật</span>
+              <input id="symbol-input" list="symbol-options" autocomplete="off" spellcheck="false" aria-label="Mã cổ phiếu Nhật" />
+              <datalist id="symbol-options"></datalist>
+            </label>
+            <label class="control timeframe-control" title="Khung thời gian">
+              <span class="visually-hidden">Khung thời gian</span>
+              <select id="timeframe-select" aria-label="Khung thời gian"></select>
+            </label>
+            <label class="control indicator-control" title="Indicator">
+              <span class="visually-hidden">Indicator</span>
+              <select id="indicator-select" aria-label="Indicator"></select>
+            </label>
+            <div class="strip-actions">
+              <button
+                id="assistant-toggle"
+                class="strip-button assistant-toggle"
+                type="button"
+                aria-controls="assistant-panel"
+                aria-expanded="false"
+                title="Mở trợ lý"
+              >AI</button>
+              <button id="load-selection" class="strip-button sheet-button" type="button" disabled title="Dùng vùng OHLC đang chọn trong Excel">Sheet</button>
             </div>
-            <div class="assistant-head-actions">
-              <button id="assistant-settings-toggle" type="button" aria-controls="assistant-settings" aria-expanded="false">Tùy chọn</button>
-              <button id="assistant-new" type="button">Mới</button>
-              <button id="assistant-close" type="button" aria-label="Đóng trợ lý">×</button>
-            </div>
+            <span id="status" aria-live="polite">Đang tải…</span>
           </header>
-          <div id="assistant-settings" class="assistant-settings" hidden>
-            <label>Model
-              <select id="assistant-model" aria-label="Model AI"></select>
+          <section class="chart-stage">
+            <div id="chart" aria-label="Biến động dữ liệu"></div>
+            <aside id="assistant-panel" class="assistant-panel" aria-label="Trợ lý phân tích" hidden>
+              <header class="assistant-head">
+                <div class="assistant-head-copy">
+                  <strong>Trợ lý</strong>
+                  <span id="assistant-status">Đang kết nối…</span>
+                </div>
+                <div class="assistant-head-actions">
+                  <button id="assistant-settings-toggle" type="button" aria-controls="assistant-settings" aria-expanded="false">Tùy chọn</button>
+                  <button id="assistant-new" type="button">Mới</button>
+                  <button id="assistant-close" type="button" aria-label="Đóng trợ lý">×</button>
+                </div>
+              </header>
+              <div id="assistant-settings" class="assistant-settings" hidden>
+                <label>Model
+                  <select id="assistant-model" aria-label="Model AI"></select>
+                </label>
+                <label>Reasoning
+                  <select id="assistant-reasoning" aria-label="Mức suy luận"></select>
+                </label>
+              </div>
+              <div id="assistant-context" class="assistant-context">Chưa có dữ liệu chart</div>
+              <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
+              <form id="assistant-form" class="assistant-form">
+                <textarea id="assistant-input" rows="2" placeholder="Hỏi về chart đang xem…" aria-label="Tin nhắn cho trợ lý"></textarea>
+                <div class="assistant-actions">
+                  <button id="assistant-cancel" type="button" hidden>Hủy</button>
+                  <span>Enter gửi · Shift+Enter xuống dòng</span>
+                  <button id="assistant-send" type="submit">Gửi</button>
+                </div>
+              </form>
+            </aside>
+          </section>
+        </section>
+
+        <section id="watchlist-view" class="view-panel watchlist-view" role="tabpanel" aria-labelledby="watchlist-tab" hidden>
+          <header class="watchlist-toolbar">
+            <label class="watchlist-add-control">
+              <span class="visually-hidden">Thêm mã vào Watch List</span>
+              <input id="watchlist-symbol-input" list="watchlist-symbol-options" autocomplete="off" spellcheck="false" placeholder="Thêm mã TSE" aria-label="Thêm mã vào Watch List" />
+              <datalist id="watchlist-symbol-options"></datalist>
             </label>
-            <label>Reasoning
-              <select id="assistant-reasoning" aria-label="Mức suy luận"></select>
-            </label>
+            <button id="watchlist-add" type="button">Thêm</button>
+            <span id="watchlist-status" aria-live="polite"></span>
+          </header>
+          <div class="watchlist-head" aria-hidden="true">
+            <span>Mã <small id="watchlist-count">0</small></span>
+            <span>Giá</span>
+            <span>% ngày</span>
+            <span></span>
           </div>
-          <div id="assistant-context" class="assistant-context">Chưa có dữ liệu chart</div>
-          <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
-          <form id="assistant-form" class="assistant-form">
-            <textarea id="assistant-input" rows="2" placeholder="Hỏi về chart đang xem…" aria-label="Tin nhắn cho trợ lý"></textarea>
-            <div class="assistant-actions">
-              <button id="assistant-cancel" type="button" hidden>Hủy</button>
-              <span>Enter gửi · Shift+Enter xuống dòng</span>
-              <button id="assistant-send" type="submit">Gửi</button>
-            </div>
-          </form>
-        </aside>
+          <div id="watchlist-list" class="watchlist-list" role="list"></div>
+          <div id="watchlist-empty" class="watchlist-empty" hidden>Chưa có mã trong Watch List.</div>
+        </section>
       </section>
     </main>
     <script type="module" src="/main.ts"></script>
