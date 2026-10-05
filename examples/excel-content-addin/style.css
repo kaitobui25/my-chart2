@@ -28,7 +28,7 @@ body {
 
 .market-strip {
   display: grid;
-  grid-template-columns: minmax(108px, 140px) 62px minmax(108px, 152px) auto minmax(0, 1fr);
+  grid-template-columns: 78px 52px 88px auto minmax(0, 1fr);
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -357,7 +357,7 @@ body {
 
 @media (max-width: 480px) {
   .market-strip {
-    grid-template-columns: minmax(116px, 1fr) 58px auto;
+    grid-template-columns: 78px 50px minmax(0, 1fr);
     grid-template-areas:
       "symbol timeframe actions"
       "indicator status status";
