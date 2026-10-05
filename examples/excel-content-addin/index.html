@@ -26,10 +26,21 @@
               <span class="visually-hidden">Khung thời gian</span>
               <select id="timeframe-select" aria-label="Khung thời gian"></select>
             </label>
-            <label class="control indicator-control" title="Indicator">
-              <span class="visually-hidden">Indicator</span>
-              <select id="indicator-select" aria-label="Indicator"></select>
-            </label>
+            <div id="indicator-control" class="control indicator-control">
+              <select id="indicator-select" class="visually-hidden" aria-hidden="true" tabindex="-1"></select>
+              <button
+                id="indicator-trigger"
+                class="indicator-trigger"
+                type="button"
+                aria-haspopup="menu"
+                aria-controls="indicator-menu"
+                aria-expanded="false"
+              >
+                <span id="indicator-trigger-label">Indicator</span>
+                <span class="indicator-trigger-caret" aria-hidden="true">▾</span>
+              </button>
+              <div id="indicator-menu" class="indicator-menu" role="menu" hidden></div>
+            </div>
             <div class="strip-actions">
               <button
                 id="assistant-toggle"

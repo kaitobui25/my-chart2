@@ -24,7 +24,11 @@ const loadButton = requiredElement<HTMLButtonElement>('#load-selection');
 const symbolInput = requiredElement<HTMLInputElement>('#symbol-input');
 const symbolOptions = requiredElement<HTMLDataListElement>('#symbol-options');
 const timeframeSelect = requiredElement<HTMLSelectElement>('#timeframe-select');
+const indicatorControl = requiredElement<HTMLElement>('#indicator-control');
 const indicatorSelect = requiredElement<HTMLSelectElement>('#indicator-select');
+const indicatorTrigger = requiredElement<HTMLButtonElement>('#indicator-trigger');
+const indicatorTriggerLabel = requiredElement<HTMLElement>('#indicator-trigger-label');
+const indicatorMenu = requiredElement<HTMLElement>('#indicator-menu');
 const chartTab = requiredElement<HTMLButtonElement>('#chart-tab');
 const watchlistTab = requiredElement<HTMLButtonElement>('#watchlist-tab');
 const chartViewElement = requiredElement<HTMLElement>('#chart-view');
@@ -99,11 +103,26 @@ timeframeSelect.addEventListener('change', () => void reloadMarket());
 indicatorSelect.addEventListener('change', () => {
   try {
     indicators.select(indicatorSelect.value);
+    syncIndicatorTrigger();
+    renderIndicatorMenu();
     assistant.refreshContext();
     setPersistentStatus(statusMessage);
   } catch (error) {
     setPersistentStatus(error instanceof Error ? error.message : 'Không thể bật indicator.', true);
   }
+});
+indicatorTrigger.addEventListener('click', () => {
+  setIndicatorMenuOpen(Boolean(indicatorMenu.hidden));
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!indicatorMenu.hidden && !indicatorControl.contains(event.target as Node)) {
+    setIndicatorMenuOpen(false);
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || indicatorMenu.hidden) return;
+  setIndicatorMenuOpen(false);
+  indicatorTrigger.focus();
 });
 loadButton.addEventListener('click', () => void loadSelectedRange());
 chart.on('crosshair', ({ candle }) => setFocusStatus(candle));
@@ -188,30 +207,115 @@ function populateTimeframes(): void {
 }
 
 function populateIndicators(): void {
+  const selectedId = indicatorSelect.value;
   const none = document.createElement('option');
   none.value = '';
   none.textContent = 'Indicator';
-  const groups = new Map<string, HTMLOptGroupElement>();
+  const options = indicators.options();
+  const optionElements = options.map((item) => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name;
+    return option;
+  });
+  indicatorSelect.replaceChildren(none, ...optionElements);
+  indicatorSelect.value = selectedId;
+  syncIndicatorTrigger();
+  renderIndicatorMenu(options);
+}
+
+function renderIndicatorMenu(options = indicators.options()): void {
   const labels: Record<string, string> = {
     overlay: 'Overlay',
     oscillator: 'Oscillator',
     volume: 'Volume',
   };
+  const favorites = options.filter((item) => item.favorite);
+  const regular = options.filter((item) => !item.favorite);
+  const fragment = document.createDocumentFragment();
 
-  for (const item of indicators.options()) {
-    let group = groups.get(item.category);
-    if (!group) {
-      group = document.createElement('optgroup');
-      group.label = labels[item.category] ?? item.category;
-      groups.set(item.category, group);
-    }
-    const option = document.createElement('option');
-    option.value = item.id;
-    option.textContent = item.name;
-    group.appendChild(option);
+  const clearRow = createIndicatorRow('', 'Không dùng indicator', false);
+  fragment.appendChild(clearRow);
+
+  if (favorites.length > 0) {
+    fragment.appendChild(createIndicatorGroupLabel('Yêu thích'));
+    favorites.forEach((item) => fragment.appendChild(createIndicatorRow(item.id, item.name, true)));
   }
 
-  indicatorSelect.replaceChildren(none, ...groups.values());
+  const grouped = new Map<string, typeof regular>();
+  for (const item of regular) {
+    const group = grouped.get(item.category) ?? [];
+    group.push(item);
+    grouped.set(item.category, group);
+  }
+  for (const [category, items] of grouped) {
+    fragment.appendChild(createIndicatorGroupLabel(labels[category] ?? category));
+    items.forEach((item) => fragment.appendChild(createIndicatorRow(item.id, item.name, false)));
+  }
+
+  indicatorMenu.replaceChildren(fragment);
+}
+
+function createIndicatorGroupLabel(label: string): HTMLElement {
+  const heading = document.createElement('div');
+  heading.className = 'indicator-menu-group';
+  heading.textContent = label;
+  return heading;
+}
+
+function createIndicatorRow(id: string, name: string, favorite: boolean): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'indicator-menu-row';
+  row.dataset.selected = String(indicatorSelect.value === id);
+
+  const selectButton = document.createElement('button');
+  selectButton.type = 'button';
+  selectButton.className = 'indicator-menu-select';
+  selectButton.setAttribute('role', 'menuitemradio');
+  selectButton.setAttribute('aria-checked', String(indicatorSelect.value === id));
+  selectButton.textContent = name;
+  selectButton.addEventListener('click', () => {
+    indicatorSelect.value = id;
+    indicatorSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    setIndicatorMenuOpen(false);
+    indicatorTrigger.focus();
+  });
+  row.appendChild(selectButton);
+
+  if (id) {
+    const favoriteButton = document.createElement('button');
+    favoriteButton.type = 'button';
+    favoriteButton.className = 'indicator-menu-favorite';
+    favoriteButton.textContent = favorite ? '★' : '☆';
+    favoriteButton.setAttribute('aria-pressed', String(favorite));
+    favoriteButton.setAttribute(
+      'aria-label',
+      favorite ? `Bỏ ${name} khỏi yêu thích` : `Đánh dấu ${name} yêu thích`,
+    );
+    favoriteButton.title = favorite ? 'Bỏ khỏi yêu thích' : 'Yêu thích';
+    favoriteButton.addEventListener('click', () => {
+      try {
+        indicators.toggleFavorite(id);
+        populateIndicators();
+      } catch (error) {
+        setPersistentStatus(error instanceof Error ? error.message : 'Không thể cập nhật yêu thích.', true);
+      }
+    });
+    row.appendChild(favoriteButton);
+  }
+
+  return row;
+}
+
+function syncIndicatorTrigger(): void {
+  const selected = indicators.options().find((item) => item.id === indicatorSelect.value);
+  indicatorTriggerLabel.textContent = selected?.name ?? 'Indicator';
+  indicatorTrigger.title = selected?.name ?? 'Indicator';
+}
+
+function setIndicatorMenuOpen(open: boolean): void {
+  indicatorMenu.hidden = !open;
+  indicatorTrigger.setAttribute('aria-expanded', String(open));
 }
 
 function setFocusStatus(candle: Candle | null): void {

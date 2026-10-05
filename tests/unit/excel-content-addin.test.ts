@@ -12,6 +12,7 @@ import {
   JAPAN_TIMEFRAMES,
 } from '../../examples/excel-content-addin/japan-market-config';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
+import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import {
   candlesFromRange,
   inferCandleIntervalSeconds,
@@ -113,6 +114,33 @@ describe('Excel Japan market configuration', () => {
     expect(builtinIndicators.length).toBeGreaterThan(5);
     expect(new Set(builtinIndicators.map((item) => item.id)).size).toBe(builtinIndicators.length);
     expect(builtinIndicators.every((item) => item.category !== 'custom')).toBe(true);
+  });
+
+  it('persists indicator favorites and sorts them before non-favorites', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    const chart = {
+      on: vi.fn(() => () => undefined),
+    } as unknown as L2Chart;
+    const controller = new IndicatorController(chart, storage);
+    const initialOptions = controller.options();
+    const target = initialOptions[initialOptions.length - 1];
+    expect(target).toBeDefined();
+
+    controller.toggleFavorite(target!.id);
+
+    expect(controller.options()[0]).toMatchObject({ id: target!.id, favorite: true });
+    const restored = new IndicatorController(chart, storage);
+    expect(restored.isFavorite(target!.id)).toBe(true);
+    expect(restored.options()[0].id).toBe(target!.id);
+
+    controller.dispose();
+    restored.dispose();
   });
 });
 
