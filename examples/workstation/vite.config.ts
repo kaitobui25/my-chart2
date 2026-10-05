@@ -2,15 +2,14 @@ import { createHmac, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv, type Plugin, type ProxyOptions } from 'vite';
+import { assistantApiIntegration } from '../assistant/vite-plugin';
 import { fiinQuantProxyToken, providerRuntimeIntegration } from './provider-runtime/vite-plugin';
 import { scannerIntegration } from './scanner/vite-plugin';
 import { stockFlowIntegration } from './stock-flow/vite-plugin';
 import { yFinanceJapanIntegration } from './yfinance-jp/vite-plugin';
 
 const DNSE_REST_TARGET = 'https://openapi.dnse.com.vn';
-const ASSISTANT_TARGET = 'http://127.0.0.1:8788';
 const WORKSTATION_ROOT = fileURLToPath(new URL('.', import.meta.url));
-const ASSISTANT_OFFLINE_DETAIL = 'AI sidecar is offline. Restart npm run dev and check the terminal for startup errors.';
 
 interface DnseProxyCredentials {
   apiKey: string;
@@ -175,72 +174,6 @@ function dnseRestProxy(credentials: DnseProxyCredentials): Plugin {
   };
 }
 
-function forwardedHeaders(req: IncomingMessage): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (!value || ['connection', 'content-length', 'host'].includes(key.toLowerCase())) continue;
-    headers[key] = Array.isArray(value) ? value.join(', ') : value;
-  }
-  return headers;
-}
-
-function sendAssistantOffline(req: IncomingMessage, res: ServerResponse): void {
-  const path = new URL(req.url || '/', 'http://127.0.0.1').pathname;
-  if (req.method === 'GET' && path === '/health') {
-    sendJson(res, 200, { ok: true, codexAvailable: false, detail: ASSISTANT_OFFLINE_DETAIL });
-    return;
-  }
-  if (req.method === 'GET' && path === '/options') {
-    sendJson(res, 200, { models: [], reasoningEfforts: ['low', 'medium', 'high', 'xhigh'] });
-    return;
-  }
-  sendJson(res, 503, { error: ASSISTANT_OFFLINE_DETAIL, code: 'SIDECAR_OFFLINE' });
-}
-
-function installAssistantApiProxy(middlewares: {
-  use(route: string, handler: (req: IncomingMessage, res: ServerResponse) => void): void;
-}): void {
-  middlewares.use('/assistant-api', async (req, res) => {
-    if (!isAllowedBrowserRequest(req)) {
-      sendJson(res, 403, { error: 'Cross-site requests are not allowed', code: 'FORBIDDEN' });
-      return;
-    }
-
-    try {
-      const rawUrl = req.url || '/';
-      const localUrl = new URL(rawUrl, 'http://127.0.0.1');
-      const targetUrl = `${ASSISTANT_TARGET}${localUrl.pathname}${localUrl.search}`;
-      const body = await readBody(req);
-      const response = await fetch(targetUrl, {
-        method: req.method,
-        headers: forwardedHeaders(req),
-        body: body ? new Uint8Array(body) : undefined,
-      });
-      res.statusCode = response.status;
-      response.headers.forEach((value, key) => {
-        if (!['connection', 'content-encoding', 'transfer-encoding'].includes(key.toLowerCase())) {
-          res.setHeader(key, value);
-        }
-      });
-      res.end(Buffer.from(await response.arrayBuffer()));
-    } catch {
-      sendAssistantOffline(req, res);
-    }
-  });
-}
-
-function assistantApiProxy(): Plugin {
-  return {
-    name: 'l2chart-assistant-api-proxy',
-    configureServer(server) {
-      installAssistantApiProxy(server.middlewares);
-    },
-    configurePreviewServer(server) {
-      installAssistantApiProxy(server.middlewares);
-    },
-  };
-}
-
 function assistantIntegration(): Plugin {
   return {
     name: 'l2chart-assistant-integration',
@@ -316,7 +249,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       providerRuntimeIntegration(),
       dnseRestProxy(credentials),
-      assistantApiProxy(),
+      assistantApiIntegration(),
       assistantIntegration(),
       scannerIntegration(),
       yFinanceJapanIntegration(),

@@ -2,6 +2,12 @@ import type { Candle, LinePoint, Theme } from './types';
 import type { TimeScale } from './time-scale';
 import type { PriceScale } from './price-scale';
 import { formatPrice, formatCompact } from './utils';
+import {
+  candleBodyWidth,
+  candleOpacity,
+  normalizeCandleRenderingOptions,
+  type CandleRenderingOptions,
+} from './candle-rendering';
 
 export interface RenderContext {
   ctx: CanvasRenderingContext2D;
@@ -9,6 +15,8 @@ export interface RenderContext {
   ps: PriceScale;
   from: number;
   to: number;
+  /** Effective local/synchronized bar focus. Undefined keeps custom callers backward compatible. */
+  focusIndex?: number | null;
   paneWidth: number;
   paneHeight: number;
   legendWidth: number;
@@ -55,9 +63,27 @@ export class CandleSeries extends Series {
   mode: PriceSeriesMode = 'candles';
   lineColor: string | null = null;
   areaColor: string | null = null;
+  private rendering: CandleRenderingOptions;
 
-  constructor(private getData: () => readonly Candle[]) {
+  constructor(
+    private getData: () => readonly Candle[],
+    rendering: Partial<CandleRenderingOptions> = {},
+  ) {
     super();
+    this.rendering = normalizeCandleRenderingOptions(rendering);
+  }
+
+  setRendering(options: Partial<CandleRenderingOptions>): void {
+    this.rendering = normalizeCandleRenderingOptions({ ...this.rendering, ...options });
+  }
+
+  getRendering(): Readonly<CandleRenderingOptions> {
+    return this.rendering;
+  }
+
+  usesFocusLens(): boolean {
+    const supportsFocusLens = this.mode === 'candles' || this.mode === 'heikin-ashi';
+    return supportsFocusLens && this.rendering.focusOpacity !== this.rendering.baseOpacity;
   }
 
   minMax(from: number, to: number): MinMax | null {
@@ -106,15 +132,32 @@ export class CandleSeries extends Series {
     // A shared canvas must not leak a shadow/glow from a previously drawn series.
     ctx.shadowBlur = 0;
     ctx.shadowColor = 'transparent';
-    // An odd body width keeps the one-pixel wick centered and crisp.
-    let bw = Math.max(1, Math.round(ts.barSpacing * 0.72));
-    if (bw > 1 && bw % 2 === 0) bw -= 1;
+    const bw = candleBodyWidth(ts.barSpacing, this.rendering);
     const half = bw >> 1;
-    const drawWicks = ts.barSpacing >= 1.5;
+    const drawWicks = ts.barSpacing >= this.rendering.minWickSpacing;
+    const baseAlpha = ctx.globalAlpha;
+    const focusIndex = rc.focusIndex ?? null;
+    const focusActive = focusIndex !== null && this.usesFocusLens();
+    let activeOpacity: number | null = null;
+    let alphaAdjusted = false;
+
+    if (!focusActive && this.rendering.baseOpacity !== 1) {
+      ctx.globalAlpha = baseAlpha * this.rendering.baseOpacity;
+      alphaAdjusted = true;
+    }
+
     for (let i = from; i <= to; i++) {
       const c = data[i];
       const x = Math.round(ts.xForIndex(i));
       const up = c.close >= c.open;
+      if (focusActive) {
+        const opacity = candleOpacity(i, focusIndex, this.rendering);
+        if (opacity !== activeOpacity) {
+          ctx.globalAlpha = baseAlpha * opacity;
+          activeOpacity = opacity;
+          alphaAdjusted = true;
+        }
+      }
       if (drawWicks) {
         ctx.fillStyle = up ? theme.wickUp : theme.wickDown;
         const yH = ps.yFor(c.high);
@@ -122,9 +165,20 @@ export class CandleSeries extends Series {
       }
       const yO = ps.yFor(c.open);
       const yC = ps.yFor(c.close);
-      ctx.fillStyle = up ? theme.up : theme.down;
-      ctx.fillRect(x - half, Math.min(yO, yC), bw, Math.max(1, Math.abs(yO - yC)));
+      const bodyTop = Math.min(yO, yC);
+      const bodyHeight = Math.max(1, Math.abs(yO - yC));
+      const color = up ? theme.up : theme.down;
+      const hollow = up ? this.rendering.hollowUp : this.rendering.hollowDown;
+      if (hollow && bw > 1 && bodyHeight > 1) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x - half + 0.5, bodyTop + 0.5, Math.max(1, bw - 1), Math.max(1, bodyHeight - 1));
+      } else {
+        ctx.fillStyle = color;
+        ctx.fillRect(x - half, bodyTop, bw, bodyHeight);
+      }
     }
+    if (alphaAdjusted) ctx.globalAlpha = baseAlpha;
   }
 
   private drawBars(rc: RenderContext): void {

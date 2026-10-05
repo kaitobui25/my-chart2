@@ -340,14 +340,9 @@ function integrateHtml(original: string): string {
 
 export function yFinanceJapanIntegration(): Plugin {
   return {
+    ...yFinanceJapanApiIntegration(),
     name: 'l2chart-yfinance-japan-integration',
     enforce: 'pre',
-    configureServer(server) {
-      installProxy(server, server.middlewares);
-    },
-    configurePreviewServer(server) {
-      installProxy(undefined, server.middlewares);
-    },
     transform(code, id) {
       const normalizedId = id.split('?')[0].replace(/\\/g, '/');
       if (!normalizedId.endsWith(MAIN_MODULE_SUFFIX)) return null;
@@ -355,6 +350,19 @@ export function yFinanceJapanIntegration(): Plugin {
     },
     transformIndexHtml(html) {
       return integrateHtml(html);
+    },
+  };
+}
+
+/** Same-origin Yahoo Japan API + managed Python sidecar, without workstation source transforms. */
+export function yFinanceJapanApiIntegration(): Plugin {
+  return {
+    name: 'l2chart-yfinance-japan-api',
+    configureServer(server) {
+      installProxy(server, server.middlewares);
+    },
+    configurePreviewServer(server) {
+      installProxy(undefined, server.middlewares);
     },
   };
 }

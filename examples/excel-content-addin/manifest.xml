@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="ContentApp">
+  <Id>e9d556ce-80e4-4d23-85f2-ec31cf40c9b7</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>L2Chart</ProviderName>
+  <DefaultLocale>vi-VN</DefaultLocale>
+  <DisplayName DefaultValue="L2Chart Excel" />
+  <Description DefaultValue="Interactive chart embedded directly in an Excel worksheet." />
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png" />
+  <SupportUrl DefaultValue="https://github.com/pviet85/lamlong-charts" />
+  <Hosts>
+    <Host Name="Workbook" />
+  </Hosts>
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="ExcelApi" MinVersion="1.1" />
+    </Sets>
+  </Requirements>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/index.html" />
+    <RequestedWidth>900</RequestedWidth>
+    <RequestedHeight>520</RequestedHeight>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>

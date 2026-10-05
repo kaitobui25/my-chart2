@@ -15,6 +15,7 @@
   },
   "include": [
     "../src",
+    "../examples/excel-content-addin",
     "../examples/workstation",
     "../examples/providers",
     "../tests",

@@ -48,8 +48,12 @@
   ],
   "scripts": {
     "dev": "node scripts/run-assistant.mjs",
+    "excel:manifest": "node examples/excel-content-addin/generate-manifest.mjs",
+    "preexcel:dev": "npm run excel:manifest",
+    "excel:dev": "vite --config examples/excel-content-addin/vite.config.ts",
     "build": "npm run build:demo",
     "build:demo": "vite build --config examples/workstation/vite.config.ts",
+    "build:excel": "vite build --config examples/excel-content-addin/vite.config.ts",
     "build:lib": "vite build --config config/vite.lib.config.ts && tsc -p config/tsconfig.build.json",
     "preview": "vite preview --config examples/workstation/vite.config.ts",
     "preview:lan": "npm run build:demo && vite preview --config examples/workstation/vite.config.ts --host 0.0.0.0 --port 53175 --strictPort",

@@ -1,34 +1,20 @@
 import { registerIndicator, type IndicatorDef } from './registry';
-import bollinger from './builtin/bollinger';
-import ema from './builtin/ema';
+import { builtinIndicators } from './builtin/all';
 import dividend from './external/dividend';
 import institutionalFlow from './external/institutional-flow';
 import lntt from './external/lntt';
-import macd from './builtin/macd';
 import pe from './external/pe';
-import rsi from './builtin/rsi';
-import sma from './builtin/sma';
-import { indicators as taSuite } from './builtin/ta-suite';
-import visibleRangeExtrema from './builtin/visible-range-extrema';
-import volume from './builtin/volume';
 
 /**
  * Bundled indicators are imported explicitly so the public bundle always
  * contains the full indicator registry. Local custom indicators remain auto-discovered.
  */
 const bundled: IndicatorDef[] = [
-  sma,
-  ema,
-  bollinger,
-  visibleRangeExtrema,
-  volume,
+  ...builtinIndicators,
   pe,
   institutionalFlow,
   dividend,
   lntt,
-  rsi,
-  macd,
-  ...taSuite,
 ];
 
 const modules = import.meta.glob('./custom/*.ts', { eager: true }) as Record<

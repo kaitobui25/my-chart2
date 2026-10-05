@@ -1,4 +1,5 @@
 import { type Candle, type Theme, darkTheme } from './types';
+import type { CandleRenderingOptions } from './candle-rendering';
 import { heikinAshi, heikinAshiCandle } from './heikin-ashi';
 import { tr } from './i18n';
 import { ChevronDown, ChevronUp, createElement as createLucideElement, Eye, EyeOff, Settings2, Trash2, X } from 'lucide';
@@ -46,6 +47,9 @@ import {
 
 export interface ChartOptions {
   theme?: Partial<Theme>;
+  candleRendering?: Partial<CandleRenderingOptions>;
+  chrome?: Partial<ChartChromeOptions>;
+  cursor?: 'crosshair' | 'default' | 'cell';
   /** Seconds per bar (for time labels). Inferred from data when omitted. */
   intervalSec?: number;
   /** Fixed decimals for prices. Omit to infer precision from the visible scale. */
@@ -53,6 +57,26 @@ export interface ChartOptions {
   priceAxisWidth?: number;
   timeAxisHeight?: number;
 }
+
+export interface ChartChromeOptions {
+  grid: boolean;
+  priceAxis: boolean;
+  timeAxis: boolean;
+  legend: boolean;
+  crosshair: boolean;
+  lastPrice: boolean;
+  sessionBands: boolean;
+}
+
+const DEFAULT_CHART_CHROME: Readonly<ChartChromeOptions> = Object.freeze({
+  grid: true,
+  priceAxis: true,
+  timeAxis: true,
+  legend: true,
+  crosshair: true,
+  lastPrice: true,
+  sessionBands: true,
+});
 
 export interface BarLabel {
   time: number;
@@ -191,6 +215,8 @@ export class L2Chart {
   private heikinAshiCandles: Candle[] = [];
   private intervalSec: number;
   private intervalExplicit: boolean;
+  private readonly chrome: ChartChromeOptions;
+  private readonly idleCursor: 'crosshair' | 'default' | 'cell';
   private axisW: number;
   private readonly configuredAxisW: number | null;
   private readonly timeAxisH: number;
@@ -271,11 +297,14 @@ export class L2Chart {
 
   constructor(container: HTMLElement, options: ChartOptions = {}) {
     this.theme = { ...darkTheme, ...options.theme };
+    this.chrome = { ...DEFAULT_CHART_CHROME, ...options.chrome };
+    this.idleCursor = options.cursor ?? 'crosshair';
     this.intervalSec = options.intervalSec ?? 60;
     this.intervalExplicit = options.intervalSec !== undefined;
-    this.configuredAxisW = options.priceAxisWidth ?? null;
+    this.configuredAxisW = this.chrome.priceAxis ? options.priceAxisWidth ?? null : 0;
     this.axisW = this.configuredAxisW ?? 92;
-    this.timeAxisH = options.timeAxisHeight ?? 28;
+    this.timeAxisH = this.chrome.timeAxis ? options.timeAxisHeight ?? 28 : 0;
+    this.sessionsVisible = this.chrome.sessionBands;
 
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
@@ -288,7 +317,7 @@ export class L2Chart {
       background: this.theme.bg,
       userSelect: 'none',
       touchAction: 'none',
-      cursor: 'crosshair',
+      cursor: this.idleCursor,
     } satisfies Partial<CSSStyleDeclaration>);
     container.appendChild(this.root);
 
@@ -307,6 +336,7 @@ export class L2Chart {
       height: `${this.timeAxisH}px`,
       flex: 'none',
     } satisfies Partial<CSSStyleDeclaration>);
+    this.timeAxisEl.hidden = !this.chrome.timeAxis;
     this.taCanvas = document.createElement('canvas');
     this.taOverlay = document.createElement('canvas');
     for (const c of [this.taCanvas, this.taOverlay]) {
@@ -324,7 +354,7 @@ export class L2Chart {
     this.indicatorContext = this.createIndicatorContext();
     this.root.appendChild(this.indicatorContext);
 
-    this.mainSeries = new CandleSeries(() => this.priceSeriesCandles());
+    this.mainSeries = new CandleSeries(() => this.priceSeriesCandles(), options.candleRendering);
     const mainPane = this.createPane(3);
     mainPane.priceScale.setPrecision(options.pricePrecision ?? null);
     mainPane.series.push(this.mainSeries);
@@ -446,6 +476,11 @@ export class L2Chart {
   setPriceSeriesColors(colors: { line?: string; area?: string }): void {
     this.mainSeries.lineColor = colors.line || null;
     this.mainSeries.areaColor = colors.area || null;
+    this.invalidate();
+  }
+
+  setCandleRendering(options: Partial<CandleRenderingOptions>): void {
+    this.mainSeries.setRendering(options);
     this.invalidate();
   }
 
@@ -613,8 +648,11 @@ export class L2Chart {
    * Extra candle series from computed data — Heikin-Ashi, renko, another
    * symbol... `getData` is called on every render.
    */
-  addCandles(getData: () => readonly Candle[], opts: { pane?: Pane; title?: string } = {}): CandleSeries {
-    const s = new CandleSeries(getData);
+  addCandles(
+    getData: () => readonly Candle[],
+    opts: { pane?: Pane; title?: string; rendering?: Partial<CandleRenderingOptions> } = {},
+  ): CandleSeries {
+    const s = new CandleSeries(getData, opts.rendering);
     s.title = opts.title ?? '';
     s.indicatorId = this.indicatorOwner;
     s.opacity = this.indicatorAppearance?.opacity ?? 1;
@@ -733,7 +771,11 @@ export class L2Chart {
     this.drawingDraft = null;
     this.drawingPointerId = null;
     if (tool !== 'cursor') this.selectedDrawingId = null;
-    this.root.style.cursor = this.replaySelectionMode || tool === 'cursor' ? 'crosshair' : 'cell';
+    this.root.style.cursor = this.replaySelectionMode
+      ? 'crosshair'
+      : tool === 'cursor'
+        ? this.idleCursor
+        : 'cell';
     this.invalidateOverlay();
   }
 
@@ -843,7 +885,11 @@ export class L2Chart {
       this.drawingPointerId = null;
       this.selectedDrawingId = null;
     }
-    this.root.style.cursor = active || this.drawingTool === 'cursor' ? 'crosshair' : 'cell';
+    this.root.style.cursor = active
+      ? 'crosshair'
+      : this.drawingTool === 'cursor'
+        ? this.idleCursor
+        : 'cell';
     this.invalidateOverlay();
   }
 
@@ -924,8 +970,11 @@ export class L2Chart {
   setExternalCrosshair(time: number | null): void {
     const idx = time === null ? null : this.indexNearTime(time);
     if (idx === this.externalIndex) return;
+    const previousFocus = this.effectiveFocusIndex();
     this.externalIndex = idx;
-    this.invalidateOverlay();
+    const focusChanged = this.effectiveFocusIndex() !== previousFocus && this.hasFocusSensitiveSeries();
+    if (this.chrome.crosshair) this.invalidateOverlay();
+    if (focusChanged) this.invalidate();
   }
 
   private indexNearTime(time: number): number | null {
@@ -1040,6 +1089,7 @@ export class L2Chart {
       zIndex: '2',
       whiteSpace: 'nowrap',
     } satisfies Partial<CSSStyleDeclaration>);
+    pane.legendEl.hidden = !this.chrome.legend;
     pane.el.appendChild(pane.legendEl);
     this.panesEl.appendChild(pane.el);
     this.panes.push(pane);
@@ -1886,7 +1936,11 @@ export class L2Chart {
     } else if (this.drawingTool === 'cursor' && this.isPointerOverMovableDrawing(clientX, clientY)) {
       this.root.style.cursor = 'grab';
     } else {
-      this.root.style.cursor = this.replaySelectionMode || this.drawingTool === 'cursor' ? 'crosshair' : 'cell';
+      this.root.style.cursor = this.replaySelectionMode
+        ? 'crosshair'
+        : this.drawingTool === 'cursor'
+          ? this.idleCursor
+          : 'cell';
     }
   }
 
@@ -1911,23 +1965,38 @@ export class L2Chart {
       found = { pane: hit.pane, x: hit.x, y: hit.y, index };
     }
     const prevIndex = this.crosshair?.index ?? null;
+    const previousFocus = this.effectiveFocusIndex();
     this.crosshair = found;
-    this.invalidateOverlay();
+    const focusChanged = this.effectiveFocusIndex() !== previousFocus && this.hasFocusSensitiveSeries();
+    if (this.chrome.crosshair) this.invalidateOverlay();
     if ((found?.index ?? null) !== prevIndex) {
       this.emit('crosshair', {
         index: found?.index ?? null,
         candle: found ? (this.candles[found.index] ?? null) : null,
       });
-      this.invalidate(); // legend follows the crosshair
+      if (focusChanged || this.chrome.legend) this.invalidate();
     }
   }
 
-  private clearCrosshair(): void {
+  /** Clear the active pointer/crosshair state and any candle focus lens. */
+  clearCrosshair(): void {
     if (!this.crosshair) return;
+    const previousFocus = this.effectiveFocusIndex();
     this.crosshair = null;
+    const focusChanged = this.effectiveFocusIndex() !== previousFocus && this.hasFocusSensitiveSeries();
     this.emit('crosshair', { index: null, candle: null });
-    this.invalidateOverlay();
-    this.invalidate();
+    if (this.chrome.crosshair) this.invalidateOverlay();
+    if (focusChanged || this.chrome.legend) this.invalidate();
+  }
+
+  private effectiveFocusIndex(): number | null {
+    return this.crosshair?.index ?? this.externalIndex;
+  }
+
+  private hasFocusSensitiveSeries(): boolean {
+    return this.panes.some((pane) => pane.series.some(
+      (series) => series.visible && series instanceof CandleSeries && series.usesFocusLens(),
+    ));
   }
 
   invalidate(): void {
@@ -2082,7 +2151,7 @@ export class L2Chart {
       if (range) {
         pane.autoscale(range.from, range.to);
         this.drawSessionBands(pane, range.from, range.to);
-        this.drawGrid(pane);
+        if (this.chrome.grid) this.drawGrid(pane);
         if (pane === this.panes[0] && this.watermark) {
           ctx.save();
           ctx.globalAlpha = 0.05;
@@ -2101,6 +2170,7 @@ export class L2Chart {
           ps: pane.priceScale,
           from: range.from,
           to: range.to,
+          focusIndex: this.effectiveFocusIndex(),
           paneWidth: this.timeScale.width,
           paneHeight: pane.height,
           legendWidth: legendBounds.width,
@@ -2283,6 +2353,7 @@ export class L2Chart {
   }
 
   private drawPriceAxis(pane: Pane): void {
+    if (!this.chrome.priceAxis) return;
     const ctx = pane.ctx;
     const x0 = this.timeScale.width;
     ctx.fillStyle = this.theme.axisBg;
@@ -2300,7 +2371,6 @@ export class L2Chart {
       ctx.fillText(pane.priceScale.formatLabel(p), x0 + 7, y);
     }
 
-    // Last matched price is always visible on the main pane.
     if (pane === this.panes[0] && this.candles.length > 0) {
       const last = this.candles[this.candles.length - 1];
       const prev = this.candles[this.candles.length - 2] ?? last;
@@ -2308,7 +2378,8 @@ export class L2Chart {
         ? this.marketQuote.last
         : last.close;
       const y = Math.round(pane.priceScale.yFor(matchedPrice));
-      if (y >= 0 && y <= pane.height) {
+      let matchedLabelY: number | null = null;
+      if (this.chrome.lastPrice && y >= 0 && y <= pane.height) {
         const up = matchedPrice >= prev.close;
         const color = up ? this.theme.lastPriceUpBg : this.theme.lastPriceDownBg;
         // Draw the last matched price across the main pane.
@@ -2320,12 +2391,13 @@ export class L2Chart {
         ctx.font = FONT_STRONG;
         ctx.fillText(pane.priceScale.formatLabel(matchedPrice), x0 + 7, y);
         ctx.font = FONT;
+        matchedLabelY = y;
       }
-      this.drawMarketQuoteLines(pane, y);
+      this.drawMarketQuoteLines(pane, matchedLabelY);
     }
   }
 
-  private drawMarketQuoteLines(pane: Pane, matchedLabelY: number): void {
+  private drawMarketQuoteLines(pane: Pane, matchedLabelY: number | null): void {
     const quote = this.marketQuote;
     if (!quote || !(Number(quote.bid) > 0) || !(Number(quote.ask) > 0)) return;
     const ctx = pane.ctx;
@@ -2336,8 +2408,8 @@ export class L2Chart {
     ];
     const rawY = entries.map((entry) => pane.priceScale.yFor(entry.price));
     const labelY = [...rawY];
-    if (Math.abs(labelY[0] - matchedLabelY) < 18) labelY[0] = matchedLabelY - 18;
-    if (Math.abs(labelY[1] - matchedLabelY) < 18) labelY[1] = matchedLabelY + 18;
+    if (matchedLabelY !== null && Math.abs(labelY[0] - matchedLabelY) < 18) labelY[0] = matchedLabelY - 18;
+    if (matchedLabelY !== null && Math.abs(labelY[1] - matchedLabelY) < 18) labelY[1] = matchedLabelY + 18;
     if (Math.abs(labelY[0] - labelY[1]) < 18) {
       const middle = (labelY[0] + labelY[1]) / 2;
       labelY[0] = middle - 9;
@@ -2357,6 +2429,7 @@ export class L2Chart {
   }
 
   private renderTimeAxis(): void {
+    if (!this.chrome.timeAxis) return;
     const dpr = window.devicePixelRatio || 1;
     const ctx = this.taCtx;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2411,6 +2484,8 @@ export class L2Chart {
     this.drawMeasure();
     if (this.replaySelectionMode && this.crosshair) this.drawReplaySelection(this.crosshair.index);
 
+    if (!this.chrome.crosshair) return;
+
     const ch = this.crosshair;
     const index = ch ? ch.index : this.externalIndex;
     if (index === null || this.candles.length === 0) return;
@@ -2424,25 +2499,26 @@ export class L2Chart {
       if (ch && pane === ch.pane) {
         const yy = Math.round(ch.y);
         for (let x = 0; x < this.timeScale.width; x += 5) ctx.fillRect(x, yy, 2, 1);
-        // Price label in the axis area.
-        const price = pane.priceScale.priceFor(ch.y);
-        ctx.font = FONT;
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
-        ctx.fillStyle = this.theme.crosshairLabelBg;
-        this.roundRect(ctx, this.timeScale.width + 2, yy - 9, this.axisW - 5, 18, 3);
-        ctx.fillStyle = this.theme.crosshairLabelText;
-        ctx.fillText(
-          pane.priceScale.formatLabel(price),
-          this.timeScale.width + 7,
-          yy,
-        );
+        if (this.chrome.priceAxis) {
+          const price = pane.priceScale.priceFor(ch.y);
+          ctx.font = FONT;
+          ctx.textBaseline = 'middle';
+          ctx.textAlign = 'left';
+          ctx.fillStyle = this.theme.crosshairLabelBg;
+          this.roundRect(ctx, this.timeScale.width + 2, yy - 9, this.axisW - 5, 18, 3);
+          ctx.fillStyle = this.theme.crosshairLabelText;
+          ctx.fillText(
+            pane.priceScale.formatLabel(price),
+            this.timeScale.width + 7,
+            yy,
+          );
+        }
       }
     }
 
     // Time label under the crosshair.
     const candle = this.candles[index];
-    if (candle) {
+    if (candle && this.chrome.timeAxis) {
       const ctx = this.taOverlayCtx;
       ctx.font = FONT;
       ctx.textBaseline = 'middle';
@@ -2602,6 +2678,7 @@ export class L2Chart {
   }
 
   private legendBounds(pane: Pane): { width: number; height: number } {
+    if (!this.chrome.legend) return { width: 0, height: 0 };
     const rect = pane.legendEl.getBoundingClientRect();
     const priceRows = pane === this.panes[0] && this.candles.length > 0 ? 1 : 0;
     if (pane === this.panes[0] && this.legendCollapsed) {
@@ -2618,6 +2695,11 @@ export class L2Chart {
   }
 
   private updateLegend(pane: Pane): void {
+    if (!this.chrome.legend) {
+      pane.legendEl.hidden = true;
+      return;
+    }
+    pane.legendEl.hidden = false;
     const idx = this.crosshair?.index ?? this.candles.length - 1;
     const priceCandles = this.priceSeriesCandles();
     const c = priceCandles[idx];

@@ -1,0 +1,15 @@
+{
+  "development": {
+    "host": "localhost",
+    "port": 3000,
+    "certificate": {
+      "directory": ".office-addin-dev-certs",
+      "certFile": "localhost.crt",
+      "keyFile": "localhost.key"
+    }
+  },
+  "content": {
+    "requestedWidth": 900,
+    "requestedHeight": 520
+  }
+}

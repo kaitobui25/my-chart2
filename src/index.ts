@@ -1,6 +1,7 @@
 export { L2Chart } from './core/stable-chart';
 export {
   type ChartOptions,
+  type ChartChromeOptions,
   type CrosshairEvent,
   type BarClickEvent,
   type VisibleRangeChangeEvent,
@@ -30,6 +31,10 @@ export {
   type BandSeriesOptions,
   type RenderContext,
 } from './core/series';
+export {
+  defaultCandleRenderingOptions,
+  type CandleRenderingOptions,
+} from './core/candle-rendering';
 export {
   registerIndicator,
   getIndicator,

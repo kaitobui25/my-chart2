@@ -5,7 +5,7 @@ Small local `aiohttp` service for Tokyo Stock Exchange price data through `yfina
 ## Behavior
 
 - TSE codes are normalized to Yahoo Finance's `.T` suffix. Both numeric codes such as `7203` and alphanumeric four-character codes such as `130A` are accepted.
-- Chart intervals are `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`, and `1M`.
+- Chart intervals are `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1w`, and `1M`.
 - `1w` is requested from yfinance as native `1wk`; `1M` is requested as native `1mo`. `4h` is the only derived interval and is built from yfinance `1h` bars within each Tokyo trading day.
 - `/history` forwards explicit `from`/`to` timestamps to yfinance without adding a sidecar lookback cap. Yahoo/yfinance can still reject ranges outside its own limits. When no range is supplied, the sidecar uses provider-safe defaults (`5d` for `1m`, `1mo` for the other intraday intervals, and `max` for daily/weekly/monthly history) instead of sending invalid intraday `period=max` requests.
 - `adjusted=false` is the default and returns unadjusted OHLC (`auto_adjust=False`). Pass `adjusted=true` to request split/dividend-adjusted OHLC (`auto_adjust=True`). The response always echoes the selected mode.
