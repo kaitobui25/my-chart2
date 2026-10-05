@@ -38,7 +38,7 @@ export const excelStealthChartOptions: ChartOptions = {
     hollowDown: false,
     baseOpacity: 0.18,
     focusOpacity: 0.72,
-    focusRadius: 2,
+    focusRadius: 0,
     minWickSpacing: 1.2,
   },
   chrome: {

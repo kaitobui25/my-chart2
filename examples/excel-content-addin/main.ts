@@ -169,7 +169,7 @@ function setFocusStatus(candle: Candle | null): void {
     return;
   }
   setStatus(
-    `O ${formatPrice(candle.open)}  H ${formatPrice(candle.high)}  `
+    `${formatCandleTime(candle.time)} · O ${formatPrice(candle.open)}  H ${formatPrice(candle.high)}  `
     + `L ${formatPrice(candle.low)}  C ${formatPrice(candle.close)}`,
   );
 }
@@ -184,12 +184,24 @@ function formatPrice(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 }).format(value);
 }
 
+function formatCandleTime(timestampSeconds: number): string {
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(timestampSeconds * 1000));
+}
+
 function timeframeLabel(value: JapanTimeframe): string {
   return JAPAN_TIMEFRAMES.find((item) => item.value === value)?.label ?? value;
 }
 
 function setStatus(message: string, error = false): void {
   statusElement.textContent = message;
+  statusElement.title = message;
   statusElement.dataset.state = error ? 'error' : 'ready';
 }
 
