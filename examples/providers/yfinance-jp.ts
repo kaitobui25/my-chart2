@@ -1,6 +1,11 @@
 import type { Candle } from '../../src/core/types';
 import type { Datafeed, HistoryRange, SymbolSearchResult } from '../../src/datafeed';
-import { intervalApproxSeconds, isCalendarInterval, nextIntervalStart } from '../../src/interval';
+import {
+  estimateIntervalBars,
+  intervalApproxSeconds,
+  isCalendarInterval,
+  nextIntervalStart,
+} from '../../src/interval';
 import {
   BrowserHistoryCache,
   mergeHistoryCoverage,
@@ -20,6 +25,14 @@ const TOKYO_UTC_OFFSET_MINUTES = 9 * 60;
 const MAX_HISTORY_REQUEST = 50_000;
 const DEFAULT_POLL_MS = 60_000;
 const JP_CODE_PATTERN = /^(?:\d{4}|\d{3}[ACDFGHJKLMNPRSTUWXY]|\d[ACDFGHJKLMNPRSTUWXY]\d{2})$/;
+const LIVE_RECOVERY_LOOKBACK_SECONDS: Record<string, number> = {
+  '1m': 5 * 86_400,
+  '5m': 30 * 86_400,
+  '15m': 30 * 86_400,
+  '30m': 30 * 86_400,
+  '1h': 30 * 86_400,
+  '4h': 30 * 86_400,
+};
 
 export interface YFinanceJapanHealth {
   ok: boolean;
@@ -46,6 +59,7 @@ interface PollSubscription {
   symbol: string;
   interval: string;
   listeners: Set<(candle: Candle) => void>;
+  lastTime?: number;
 }
 
 interface HistoryPayload {
@@ -109,6 +123,7 @@ export class YFinanceJapanDatafeed implements Datafeed {
   private readonly fetchImpl: typeof fetch;
   private readonly pollMs: number;
   private readonly subscriptions = new Map<string, PollSubscription>();
+  private readonly latestTimes = new Map<string, number>();
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInFlight = false;
   private disposed = false;
@@ -126,6 +141,7 @@ export class YFinanceJapanDatafeed implements Datafeed {
 
   async clearCache(): Promise<void> {
     await this.cache.clearSource(YFINANCE_JP_HISTORY_SOURCE);
+    this.latestTimes.clear();
   }
 
   async health(): Promise<YFinanceJapanHealth> {
@@ -305,6 +321,8 @@ export class YFinanceJapanDatafeed implements Datafeed {
     let subscription = this.subscriptions.get(key);
     if (!subscription) {
       subscription = { symbol: normalizedSymbol, interval, listeners: new Set() };
+      const lastTime = this.latestTimes.get(key);
+      if (lastTime !== undefined) subscription.lastTime = lastTime;
       this.subscriptions.set(key, subscription);
     }
     subscription.listeners.add(onCandle);
@@ -327,6 +345,7 @@ export class YFinanceJapanDatafeed implements Datafeed {
   dispose(): void {
     this.disposed = true;
     this.subscriptions.clear();
+    this.latestTimes.clear();
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = null;
   }
@@ -371,14 +390,60 @@ export class YFinanceJapanDatafeed implements Datafeed {
       for (const subscription of subscriptions) {
         const candle = parseCandle(payload.candles?.[subscription.symbol]);
         if (!candle) continue;
-        await this.persistHistory(subscription.symbol, interval, [candle]);
-        const current = this.subscriptions.get(`${subscription.symbol}\u0000${interval}`);
-        if (!current) continue;
-        for (const listener of current.listeners) listener(candle);
+        try {
+          const candles = await this.liveCandles(subscription, candle);
+          if (candles.length === 0) continue;
+          await this.persistHistory(subscription.symbol, interval, candles);
+          const current = this.subscriptions.get(`${subscription.symbol}\u0000${interval}`);
+          if (!current) continue;
+          for (const next of candles) {
+            for (const listener of current.listeners) listener(next);
+            current.lastTime = Math.max(current.lastTime ?? next.time, next.time);
+          }
+        } catch {
+          // Keep the previous live cursor so a later poll can retry the gap.
+        }
       }
     } catch {
       // Realtime polling is best effort; the next history load remains the recovery path.
     }
+  }
+
+  private async liveCandles(subscription: PollSubscription, latest: Candle): Promise<Candle[]> {
+    let lastTime = subscription.lastTime;
+    if (lastTime === undefined) {
+      lastTime = this.latestTimes.get(`${subscription.symbol}\u0000${subscription.interval}`);
+    }
+    if (lastTime === undefined) {
+      const cached = await this.cache.readLatest(
+        YFINANCE_JP_HISTORY_SOURCE,
+        subscription.symbol,
+        subscription.interval,
+        1,
+      );
+      lastTime = cached[cached.length - 1]?.time;
+      subscription.lastTime = lastTime;
+    }
+
+    if (lastTime === undefined) return [latest];
+    if (latest.time < lastTime) return [];
+    if (latest.time === lastTime) return [latest];
+
+    const expectedNext = nextIntervalStart(lastTime, subscription.interval, TOKYO_UTC_OFFSET_MINUTES);
+    if (latest.time <= expectedNext) return [latest];
+
+    const recoveryWindow = LIVE_RECOVERY_LOOKBACK_SECONDS[subscription.interval];
+    const recoveryFrom = recoveryWindow === undefined
+      ? lastTime
+      : Math.max(lastTime, latest.time - recoveryWindow);
+    const limit = this.normalizeLimit(estimateIntervalBars(recoveryFrom, latest.time, subscription.interval));
+    const recovered = await this.fetchHistory(
+      subscription.symbol,
+      subscription.interval,
+      limit,
+      { from: recoveryFrom, to: latest.time },
+    );
+    return mergeCandles(recovered, [latest]).filter((candle) => candle.time > lastTime);
   }
 
   private async fetchHistory(
@@ -415,13 +480,15 @@ export class YFinanceJapanDatafeed implements Datafeed {
 
   private async persistHistory(symbol: string, interval: string, candles: Candle[]): Promise<void> {
     if (candles.length === 0) return;
-    await this.cache.write(YFINANCE_JP_HISTORY_SOURCE, symbol, interval, candles);
     const first = candles[0].time;
     const last = candles[candles.length - 1].time;
+    await this.cache.write(YFINANCE_JP_HISTORY_SOURCE, symbol, interval, candles);
     const to = isCalendarInterval(interval)
       ? nextIntervalStart(last, interval, TOKYO_UTC_OFFSET_MINUTES)
       : last + Math.max(1, intervalApproxSeconds(interval));
     await this.cache.markCoverage(YFINANCE_JP_HISTORY_SOURCE, symbol, interval, { from: first, to });
+    const key = `${symbol}\u0000${interval}`;
+    this.latestTimes.set(key, Math.max(this.latestTimes.get(key) ?? last, last));
   }
 
   private normalizeRange(range: HistoryRange): HistoryRange {
