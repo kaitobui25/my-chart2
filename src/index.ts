@@ -24,11 +24,13 @@ export {
   LineSeries,
   HistogramSeries,
   BandSeries,
+  OverlaySeries,
   ZoneSeries,
   type PriceSeriesMode,
   type LineSeriesOptions,
   type HistogramSeriesOptions,
   type BandSeriesOptions,
+  type OverlaySeriesOptions,
   type RenderContext,
 } from './core/series';
 export {

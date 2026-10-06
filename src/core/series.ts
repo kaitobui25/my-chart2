@@ -60,6 +60,34 @@ export abstract class Series {
 
 export type PriceSeriesMode = 'candles' | 'heikin-ashi' | 'bars' | 'line' | 'area';
 
+export interface OverlaySeriesOptions {
+  title?: string;
+  draw: (rc: RenderContext) => void;
+}
+
+/** Custom price-pane rendering for indicators that need shapes or annotations. */
+export class OverlaySeries extends Series {
+  private readonly renderOverlay: (rc: RenderContext) => void;
+
+  constructor(options: OverlaySeriesOptions) {
+    super();
+    this.title = options.title ?? '';
+    this.renderOverlay = options.draw;
+  }
+
+  minMax(_from: number, _to: number): MinMax | null {
+    return null;
+  }
+
+  valueAt(): number | null {
+    return null;
+  }
+
+  draw(rc: RenderContext): void {
+    this.renderOverlay(rc);
+  }
+}
+
 /** The main OHLC series of a chart. Reads candles owned by the chart (no copy). */
 export class CandleSeries extends Series {
   mode: PriceSeriesMode = 'candles';

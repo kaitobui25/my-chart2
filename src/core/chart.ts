@@ -11,12 +11,14 @@ import {
   CandleSeries,
   HistogramSeries,
   LineSeries,
+  OverlaySeries,
   Series,
   VisibleRangeExtremaSeries,
   ZoneSeries,
   type BandSeriesOptions,
   type HistogramSeriesOptions,
   type LineSeriesOptions,
+  type OverlaySeriesOptions,
   type PriceSeriesMode,
   type RenderContext,
   type VisibleRangeExtremaSeriesOptions,
@@ -627,6 +629,15 @@ export class L2Chart {
     });
     s.indicatorId = this.indicatorOwner;
     s.opacity = appearance?.opacity ?? 1;
+    (opts.pane ?? this.panes[0]).series.push(s);
+    this.invalidate();
+    return s;
+  }
+
+  addOverlay(opts: OverlaySeriesOptions & { pane?: Pane }): OverlaySeries {
+    const s = new OverlaySeries(opts);
+    s.indicatorId = this.indicatorOwner;
+    s.opacity = this.indicatorAppearance?.opacity ?? 1;
     (opts.pane ?? this.panes[0]).series.push(s);
     this.invalidate();
     return s;

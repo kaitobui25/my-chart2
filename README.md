@@ -43,6 +43,7 @@ to replace every one of them.
 - Dark and light themes with HiDPI rendering and responsive containers
 - Drawing primitives, object selection, styling, persistence hooks, undo, and redo
 - Parameterized indicator registry and a demo catalog of technical indicators
+- Smart Money Concepts overlay with BOS/CHoCH, swing points, order blocks, and fair value gaps
 - Session highlighting, bar replay, volume, and visible-range extrema in the demo
 - Multi-chart layouts and a complete workstation demo built on the same public core
 
@@ -229,6 +230,12 @@ const ema9: IndicatorDef = {
 
 registerIndicator(ema9);
 ```
+
+For indicators that draw annotations or price zones instead of continuous
+series, use `chart.addOverlay({ title, draw })`. The draw callback receives a
+`RenderContext` with the canvas context, index-to-pixel and price-to-pixel
+scales, visible bar range, and theme. Overlay series do not affect price
+autoscaling and are removed with `chart.removeSeries(overlay)`.
 
 Only contribute indicator implementations whose source and license can be
 verified. Mathematical definitions should be implemented independently and
