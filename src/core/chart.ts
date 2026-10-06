@@ -50,6 +50,8 @@ export interface ChartOptions {
   candleRendering?: Partial<CandleRenderingOptions>;
   chrome?: Partial<ChartChromeOptions>;
   cursor?: 'crosshair' | 'default' | 'cell';
+  /** Side used for the vertical price axis. Defaults to right. */
+  priceAxisSide?: 'left' | 'right';
   /** Opacity for the price/time value labels projected from the crosshair. */
   crosshairLabelOpacity?: number;
   /** Font size in pixels for the price/time value labels projected from the crosshair. */
@@ -223,6 +225,7 @@ export class L2Chart {
   private readonly idleCursor: 'crosshair' | 'default' | 'cell';
   private readonly crosshairLabelOpacity: number;
   private readonly crosshairLabelFontSize: number;
+  private readonly priceAxisSide: 'left' | 'right';
   private axisW: number;
   private readonly configuredAxisW: number | null;
   private readonly timeAxisH: number;
@@ -305,6 +308,7 @@ export class L2Chart {
     this.theme = { ...darkTheme, ...options.theme };
     this.chrome = { ...DEFAULT_CHART_CHROME, ...options.chrome };
     this.idleCursor = options.cursor ?? 'crosshair';
+    this.priceAxisSide = options.priceAxisSide ?? 'right';
     this.crosshairLabelOpacity = clamp(options.crosshairLabelOpacity ?? 1, 0, 1);
     this.crosshairLabelFontSize = clamp(options.crosshairLabelFontSize ?? 12, 6, 24);
     this.intervalSec = options.intervalSec ?? 60;
@@ -849,7 +853,7 @@ export class L2Chart {
     if (paneIndex < 0) return null;
     const paneRect = drawing.pane.el.getBoundingClientRect();
     return {
-      x: paneRect.left + this.timeScale.xForIndex(drawing.start.index),
+      x: paneRect.left + this.plotLeft() + this.timeScale.xForIndex(drawing.start.index),
       y: paneRect.top + drawing.pane.priceScale.yFor(drawing.start.price),
       paneIndex,
     };
@@ -1243,7 +1247,21 @@ export class L2Chart {
     }
     this.width = width;
     this.timeScale.setWidth(Math.max(0, this.width - this.axisW));
+    const legendLeft = this.plotLeft() + 8;
+    for (const pane of this.panes) pane.legendEl.style.left = `${legendLeft}px`;
     this.invalidate();
+  }
+
+  private plotLeft(): number {
+    return this.priceAxisSide === 'left' ? this.axisW : 0;
+  }
+
+  private plotRight(): number {
+    return this.plotLeft() + this.timeScale.width;
+  }
+
+  private localPlotX(clientX: number, rectLeft: number): number {
+    return clamp(clientX - rectLeft - this.plotLeft(), 0, this.timeScale.width);
   }
 
   private bindEvents(): void {
@@ -1371,7 +1389,7 @@ export class L2Chart {
         const dist = this.pinchDist();
         if (this.lastPinchDist > 0) {
           const rect = el.getBoundingClientRect();
-          const xs = [...this.pointers.values()].map((p) => p.x - rect.left);
+          const xs = [...this.pointers.values()].map((p) => p.x - rect.left - this.plotLeft());
           this.timeScale.zoom(dist / this.lastPinchDist, (xs[0] + xs[1]) / 2);
           this.invalidate();
           this.emitVisibleRangeChange();
@@ -1465,7 +1483,7 @@ export class L2Chart {
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         this.timeScale.scroll(-e.deltaX);
       } else {
-        this.timeScale.zoom(Math.exp(-e.deltaY * 0.002), e.clientX - rect.left);
+        this.timeScale.zoom(Math.exp(-e.deltaY * 0.002), e.clientX - rect.left - this.plotLeft());
       }
       this.invalidate();
       this.emitVisibleRangeChange();
@@ -1606,7 +1624,7 @@ export class L2Chart {
     const drawing = this.drawingDraft;
     if (!drawing || this.candles.length === 0) return;
     const rect = drawing.pane.el.getBoundingClientRect();
-    const x = clamp(clientX - rect.left, 0, this.timeScale.width);
+    const x = this.localPlotX(clientX, rect.left);
     const y = clamp(clientY - rect.top, 0, drawing.pane.height);
     const rawIndex = this.timeScale.indexForX(x);
     const next = {
@@ -1647,7 +1665,7 @@ export class L2Chart {
   private updateDrawingHandle(state: DrawingDragState, clientX: number, clientY: number): void {
     const { drawing, handle } = state;
     const rect = drawing.pane.el.getBoundingClientRect();
-    const x = clamp(clientX - rect.left, 0, this.timeScale.width);
+    const x = this.localPlotX(clientX, rect.left);
     const y = clamp(clientY - rect.top, 0, drawing.pane.height);
     const nextIndex = Math.round(this.timeScale.indexForX(x));
     const nextPrice = drawing.pane.priceScale.priceFor(y);
@@ -1752,7 +1770,7 @@ export class L2Chart {
     const m = this.measure;
     if (!m || this.candles.length === 0) return;
     const r = m.pane.el.getBoundingClientRect();
-    const x = clamp(clientX - r.left, 0, this.timeScale.width);
+    const x = this.localPlotX(clientX, r.left);
     const y = clamp(clientY - r.top, 0, m.pane.height);
     m.endIndex = Math.round(this.timeScale.indexForX(x));
     m.endPrice = m.pane.priceScale.priceFor(y);
@@ -1768,7 +1786,7 @@ export class L2Chart {
     for (const pane of this.panes) {
       const r = pane.el.getBoundingClientRect();
       if (clientY >= r.top && clientY <= r.bottom) {
-        return { pane, x: clamp(clientX - r.left, 0, this.timeScale.width), y: clientY - r.top };
+        return { pane, x: this.localPlotX(clientX, r.left), y: clientY - r.top };
       }
     }
     return null;
@@ -1790,7 +1808,14 @@ export class L2Chart {
     const hit = this.hitPane(clientX, clientY);
     const rootRect = this.root.getBoundingClientRect();
     const range = this.timeScale.visibleRange();
-    if (!hit || !range || clientX - rootRect.left > this.timeScale.width || this.candles.length === 0) return null;
+    const rootX = clientX - rootRect.left;
+    if (
+      !hit ||
+      !range ||
+      rootX < this.plotLeft() ||
+      rootX > this.plotRight() ||
+      this.candles.length === 0
+    ) return null;
     const index = clamp(Math.round(this.timeScale.indexForX(hit.x)), 0, this.candles.length - 1);
     const legendBounds = this.legendBounds(hit.pane);
     const rc: RenderContext = {
@@ -1828,9 +1853,14 @@ export class L2Chart {
   }
 
   private hitPriceAxis(clientX: number, clientY: number): Pane | null {
+    if (!this.chrome.priceAxis || this.axisW <= 0) return null;
     const rootRect = this.root.getBoundingClientRect();
     const x = clientX - rootRect.left;
-    if (x < this.timeScale.width || x > this.width) return null;
+    if (this.priceAxisSide === 'left') {
+      if (x < 0 || x > this.axisW) return null;
+    } else if (x < this.plotRight() || x > this.width) {
+      return null;
+    }
     return this.hitPane(clientX, clientY)?.pane ?? null;
   }
 
@@ -2181,6 +2211,8 @@ export class L2Chart {
       pane.priceScale.setHeight(pane.height);
 
       if (range) {
+        ctx.save();
+        ctx.translate(this.plotLeft(), 0);
         pane.autoscale(range.from, range.to);
         this.drawSessionBands(pane, range.from, range.to);
         if (this.chrome.grid) this.drawGrid(pane);
@@ -2231,6 +2263,7 @@ export class L2Chart {
           this.drawBarProgressMarker(pane, range.from, range.to);
           this.drawBarLabels(pane, range.from, range.to);
         }
+        ctx.restore();
         ctx.restore();
       }
       this.drawPriceAxis(pane);
@@ -2387,11 +2420,13 @@ export class L2Chart {
   private drawPriceAxis(pane: Pane): void {
     if (!this.chrome.priceAxis) return;
     const ctx = pane.ctx;
-    const x0 = this.timeScale.width;
+    const x0 = this.priceAxisSide === 'left' ? 0 : this.plotRight();
+    const plotLeft = this.plotLeft();
+    const plotRight = this.plotRight();
     ctx.fillStyle = this.theme.axisBg;
     ctx.fillRect(x0, 0, this.axisW, pane.height);
     ctx.fillStyle = this.theme.border;
-    ctx.fillRect(x0, 0, 1, pane.height);
+    ctx.fillRect(this.priceAxisSide === 'left' ? x0 + this.axisW - 1 : x0, 0, 1, pane.height);
 
     ctx.font = FONT;
     ctx.textBaseline = 'middle';
@@ -2416,7 +2451,7 @@ export class L2Chart {
         const color = up ? this.theme.lastPriceUpBg : this.theme.lastPriceDownBg;
         // Draw the last matched price across the main pane.
         ctx.fillStyle = hexToRgba(color, 0.55);
-        for (let dx = 0; dx < x0 - 2; dx += 6) ctx.fillRect(dx, y, 2, 1);
+        for (let dx = plotLeft; dx < plotRight - 2; dx += 6) ctx.fillRect(dx, y, 2, 1);
         ctx.fillStyle = color;
         this.roundRect(ctx, x0 + 2, y - 9, this.axisW - 5, 18, 3);
         ctx.fillStyle = '#ffffff';
@@ -2433,7 +2468,9 @@ export class L2Chart {
     const quote = this.marketQuote;
     if (!quote || !(Number(quote.bid) > 0) || !(Number(quote.ask) > 0)) return;
     const ctx = pane.ctx;
-    const x0 = this.timeScale.width;
+    const x0 = this.priceAxisSide === 'left' ? 0 : this.plotRight();
+    const plotLeft = this.plotLeft();
+    const plotRight = this.plotRight();
     const entries = [
       { label: 'ASK', price: Number(quote.ask), color: this.theme.down },
       { label: 'BID', price: Number(quote.bid), color: this.theme.up },
@@ -2451,7 +2488,7 @@ export class L2Chart {
       const y = Math.round(rawY[index]);
       if (y < 0 || y > pane.height) return;
       ctx.fillStyle = hexToRgba(entry.color, 0.42);
-      for (let x = 0; x < x0 - 2; x += 7) ctx.fillRect(x, y, 3, 1);
+      for (let x = plotLeft; x < plotRight - 2; x += 7) ctx.fillRect(x, y, 3, 1);
       const ly = clamp(Math.round(labelY[index]), 9, pane.height - 9);
       ctx.fillStyle = entry.color;
       this.roundRect(ctx, x0 + 2, ly - 8, this.axisW - 5, 16, 3);
@@ -2474,8 +2511,9 @@ export class L2Chart {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
     for (const t of this.timeTicks) {
-      const x = Math.round(this.timeScale.xForIndex(t.index));
-      if (x < 15 || x > this.timeScale.width - 15) continue;
+      const localX = Math.round(this.timeScale.xForIndex(t.index));
+      if (localX < 15 || localX > this.timeScale.width - 15) continue;
+      const x = this.plotLeft() + localX;
       ctx.font = t.major ? FONT_STRONG : FONT;
       ctx.fillStyle = t.major ? this.theme.text : this.theme.textDim;
       ctx.fillText(t.label, x, this.timeAxisH / 2 + 1);
@@ -2492,6 +2530,10 @@ export class L2Chart {
     this.taOverlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.taOverlayCtx.clearRect(0, 0, this.width, this.timeAxisH);
 
+    for (const pane of this.panes) {
+      pane.overlayCtx.save();
+      pane.overlayCtx.translate(this.plotLeft(), 0);
+    }
     for (const drawing of this.drawings) {
       drawChartDrawing({
         drawing,
@@ -2515,14 +2557,16 @@ export class L2Chart {
     }
     this.drawMeasure();
     if (this.replaySelectionMode && this.crosshair) this.drawReplaySelection(this.crosshair.index);
+    for (const pane of this.panes) pane.overlayCtx.restore();
 
     if (!this.chrome.crosshair) return;
 
     const ch = this.crosshair;
     const index = ch ? ch.index : this.externalIndex;
     if (index === null || this.candles.length === 0) return;
-    const snapX = Math.round(this.timeScale.xForIndex(index));
-    if (snapX < 0 || snapX > this.timeScale.width) return;
+    const localSnapX = Math.round(this.timeScale.xForIndex(index));
+    if (localSnapX < 0 || localSnapX > this.timeScale.width) return;
+    const snapX = this.plotLeft() + localSnapX;
 
     for (const pane of this.panes) {
       const ctx = pane.overlayCtx;
@@ -2530,7 +2574,7 @@ export class L2Chart {
       for (let y = 0; y < pane.height; y += 5) ctx.fillRect(snapX, y, 1, 2);
       if (ch && pane === ch.pane) {
         const yy = Math.round(ch.y);
-        for (let x = 0; x < this.timeScale.width; x += 5) ctx.fillRect(x, yy, 2, 1);
+        for (let x = this.plotLeft(); x < this.plotRight(); x += 5) ctx.fillRect(x, yy, 2, 1);
         if (this.chrome.priceAxis) {
           const price = pane.priceScale.priceFor(ch.y);
           const labelHeight = Math.max(12, Math.round(this.crosshairLabelFontSize + 6));
@@ -2540,9 +2584,10 @@ export class L2Chart {
           ctx.textBaseline = 'middle';
           ctx.textAlign = 'left';
           ctx.fillStyle = this.theme.crosshairLabelBg;
+          const axisX = this.priceAxisSide === 'left' ? 0 : this.plotRight();
           this.roundRect(
             ctx,
-            this.timeScale.width + 2,
+            axisX + 2,
             yy - labelHeight / 2,
             this.axisW - 5,
             labelHeight,
@@ -2551,7 +2596,7 @@ export class L2Chart {
           ctx.fillStyle = this.theme.crosshairLabelText;
           ctx.fillText(
             pane.priceScale.formatLabel(price),
-            this.timeScale.width + 7,
+            axisX + 7,
             yy,
           );
           ctx.restore();
@@ -2571,7 +2616,9 @@ export class L2Chart {
       ctx.textAlign = 'center';
       const label = formatTimeFull(candle.time, this.intervalSec);
       const w = ctx.measureText(label).width + 10;
-      const x = clamp(snapX - w / 2, 0, this.width - w);
+      const minX = this.plotLeft();
+      const maxX = Math.max(minX, this.plotRight() - w);
+      const x = clamp(snapX - w / 2, minX, maxX);
       ctx.fillStyle = this.theme.crosshairLabelBg;
       this.roundRect(ctx, x, (this.timeAxisH - labelHeight) / 2, w, labelHeight, 3);
       ctx.fillStyle = this.theme.crosshairLabelText;

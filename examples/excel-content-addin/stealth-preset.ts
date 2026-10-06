@@ -30,6 +30,7 @@ export const excelStealthTheme: Theme = {
 export const excelStealthChartOptions: ChartOptions = {
   theme: excelStealthTheme,
   cursor: 'cell',
+  priceAxisSide: 'left',
   crosshairLabelOpacity: 0.5,
   crosshairLabelFontSize: 8,
   candleRendering: {
