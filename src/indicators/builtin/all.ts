@@ -5,6 +5,7 @@ import rsi from './rsi';
 import sma from './sma';
 import smartMoneyConcepts from './smart-money-concepts';
 import smartMoneyConceptsV2 from './smart-money-concepts-v2';
+import smartMoneyConceptsV3 from './smart-money-concepts-v3';
 import { indicators as taSuite } from './ta-suite';
 import visibleRangeExtrema from './visible-range-extrema';
 import volume from './volume';
@@ -19,6 +20,7 @@ export const builtinIndicators: readonly IndicatorDef[] = Object.freeze([
   visibleRangeExtrema,
   smartMoneyConcepts,
   smartMoneyConceptsV2,
+  smartMoneyConceptsV3,
   rsi,
   macd,
   ...taSuite,

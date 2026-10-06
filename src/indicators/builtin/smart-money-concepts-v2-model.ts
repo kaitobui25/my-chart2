@@ -38,6 +38,8 @@ export interface SmcV2StructureLine {
   toIndex: number;
   toPrice: number;
   confirmedAt: number;
+  /** V3 keeps replaced legs for causal historical views, but renders only active legs. */
+  supersededAt?: number;
   scope: SmcV2Scope;
 }
 
@@ -265,8 +267,22 @@ function deleteGaps(gaps: SmcV2Zone[], candle: Candle): void {
   }
 }
 
+/** A fresh policy per scope is created for each calculation; raw pivots remain owned by the engine. */
+export type SmcStructurePolicy = (
+  high: SmcV2Pivot | null, low: SmcV2Pivot | null, candle: Candle, index: number,
+) => SmcV2Structure[];
+
+function recordPolicyEvents(result: SmcV2Result, state: StructureState, events: SmcV2Structure[]): void {
+  for (const event of events) {
+    state.bias = event.direction === 'bullish' ? 1 : -1;
+    result.structures.push(event);
+    if (event.scope === 'swing') result.swingBiasHistory.push({ index: event.index, bias: state.bias });
+    recordAlert(result, { index: event.index, name: `${event.scope}${event.direction === 'bullish' ? 'Bullish' : 'Bearish'}${event.type}` });
+  }
+}
+
 /** Historical bar-by-bar port of ref/indicator/02_SMC_ductri.pine, including its source quirks. */
-export function calculateSmartMoneyConceptsV2(candles: readonly Candle[], options: SmcV2Options): SmcV2Result {
+export function calculateSmartMoneyConceptsV2(candles: readonly Candle[], options: SmcV2Options, policies: Partial<Record<SmcV2Scope, SmcStructurePolicy>> = {}): SmcV2Result {
   for (const length of [options.swingLength, options.internalLength, options.equalLength]) {
     if (!Number.isInteger(length) || length < 1) throw new RangeError('SMC pivot lengths must be positive integers');
   }
@@ -353,12 +369,18 @@ export function calculateSmartMoneyConceptsV2(candles: readonly Candle[], option
         }
       }
     }
-    if ((options.showInternal ?? true) || options.showInternalOrderBlocks) {
-      const events = recordStructure(result, internal, swing, candle, previous, index, 'internal', previousInternalLevels, options.internalConfluence);
+    if (policies.internal || (options.showInternal ?? true) || options.showInternalOrderBlocks) {
+      const events = policies.internal
+        ? policies.internal(internal.high, internal.low, candle, index)
+        : recordStructure(result, internal, swing, candle, previous, index, 'internal', previousInternalLevels, options.internalConfluence);
+      if (policies.internal) recordPolicyEvents(result, internal, events);
       if (options.showInternalOrderBlocks) for (const event of events) storeOrderBlock(internalBlocks, event, parsedHighs, parsedLows);
     }
-    if ((options.showSwing ?? false) || options.showSwingOrderBlocks || (options.showStrongWeak ?? true)) {
-      const events = recordStructure(result, swing, swing, candle, previous, index, 'swing', previousSwingLevels, false);
+    if (policies.swing || (options.showSwing ?? false) || options.showSwingOrderBlocks || (options.showStrongWeak ?? true)) {
+      const events = policies.swing
+        ? policies.swing(swing.high, swing.low, candle, index)
+        : recordStructure(result, swing, swing, candle, previous, index, 'swing', previousSwingLevels, false);
+      if (policies.swing) recordPolicyEvents(result, swing, events);
       if (options.showSwingOrderBlocks) for (const event of events) storeOrderBlock(swingBlocks, event, parsedHighs, parsedLows);
     }
     if (options.showInternalOrderBlocks) deleteOrderBlocks(internalBlocks, 'internal', candle, index, options.mitigation, result);

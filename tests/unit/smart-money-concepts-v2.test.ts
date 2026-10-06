@@ -62,6 +62,17 @@ const swingRows = [
 ];
 
 describe('SMC V2 — DucTri Pine backend parity', () => {
+  it('does not render a V3 connector superseded by a newer leg', () => {
+    const result = calculate(candles(swingRows), options);
+    result.structureLines = [
+      { fromIndex: 0, fromPrice: 9, toIndex: 2, toPrice: 15, confirmedAt: 4, supersededAt: 5, scope: 'swing' },
+      { fromIndex: 0, fromPrice: 9, toIndex: 3, toPrice: 16, confirmedAt: 5, scope: 'swing' },
+    ];
+    const { ctx } = renderFixture(result, { swingLine: true });
+    expect(ctx.moveTo).toHaveBeenCalledTimes(1);
+    expect(ctx.lineTo).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the last displayed BOS in Present when a newer CHoCH is filtered out', () => {
     const result = calculate(candles(swingRows), options);
     result.structures.push({ ...result.structures[0], index: 9, type: 'CHoCH' });

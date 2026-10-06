@@ -524,6 +524,7 @@ function drawSmcV2(
       }, new Map<string, SmcV2Structure>())
     : null;
   for (const line of data.structureLines) {
+    if (line.supersededAt !== undefined && line.supersededAt < data.barStates.length) continue;
     if (line.scope === 'internal' ? display.internalLine : display.swingLine) {
       showStructureLine(rc, line,
         line.scope === 'internal' ? display.internalLineStyle : display.swingLineStyle,
@@ -553,11 +554,16 @@ function drawSmcV2(
   });
 }
 
+/** Shared settings, rendering and timeframe lifecycle for the SMC family. */
+export function createSmcIndicator(
+  identity: { id: string; name: string; title: string; order: number },
+  calculate: typeof calculateSmartMoneyConceptsV2 = (candles, options) => calculateSmartMoneyConceptsV2(candles, options),
+): IndicatorDef {
 const def: IndicatorDef = {
-  id: 'smart-money-concepts-v2',
-  name: 'SMC V2 · Ductri style',
+  id: identity.id,
+  name: identity.name,
   category: 'overlay',
-  order: 14,
+  order: identity.order,
   params: [
     ...(['internal', 'swing'] as const).flatMap(scope => [
       selection(`${scope}Trend`, `${scope} trend`, 'none', [['none', 'None'], ['candles', 'Candles'], ['background', 'Background']], 'Trend colors'),
@@ -737,11 +743,11 @@ const def: IndicatorDef = {
       swingTrendBear: String(params.swingTrendBear ?? '#f23645'),
     };
     const requestedFvg = analysisOptions.showFairValueGaps && analysisOptions.fvgTimeframe !== 'chart';
-    let data = calculateSmartMoneyConceptsV2(chart.getCandles(), {
+    let data = calculate(chart.getCandles(), {
       ...analysisOptions, showFairValueGaps: analysisOptions.showFairValueGaps && !requestedFvg,
     });
     const overlay = chart.addOverlay({
-      title: 'SMC V2',
+      title: identity.title,
       draw: (rc) => drawSmcV2(rc, data, display, chart.getCandles()),
     });
     let removed = false;
@@ -758,7 +764,7 @@ const def: IndicatorDef = {
         requestKey = key;
         firstCandle = candles[0];
         const currentGeneration = ++generation;
-        overlay.title = 'SMC V2';
+        overlay.title = identity.title;
         if (reset) {
           analysisOptions.fvgCandles = undefined;
           analysisOptions.periodCandles = {};
@@ -771,7 +777,7 @@ const def: IndicatorDef = {
         for (const frame of frames) {
           const request = chart.getIndicatorCandles?.(frame);
           if (!request) {
-            if (requestedFvg && frame === analysisOptions.fvgTimeframe) overlay.title = 'SMC V2 · timeframe provider unavailable';
+            if (requestedFvg && frame === analysisOptions.fvgTimeframe) overlay.title = `${identity.title} · timeframe provider unavailable`;
             continue;
           }
           void request.then(bars => {
@@ -783,7 +789,7 @@ const def: IndicatorDef = {
             chart.invalidate();
           }).catch(error => {
             if (removed || generation !== currentGeneration) return;
-            overlay.title = `SMC V2 · ${String(error instanceof Error ? error.message : error)}`;
+            overlay.title = `${identity.title} · ${String(error instanceof Error ? error.message : error)}`;
             chart.invalidate();
           });
         }
@@ -792,7 +798,7 @@ const def: IndicatorDef = {
     };
     const updateData = () => {
       // A lower-timeframe request must wait for real provider intrabars.
-      data = calculateSmartMoneyConceptsV2(chart.getCandles(), {
+      data = calculate(chart.getCandles(), {
         ...analysisOptions,
         showFairValueGaps: analysisOptions.showFairValueGaps && (!requestedFvg || !!analysisOptions.fvgCandles),
       });
@@ -804,5 +810,9 @@ const def: IndicatorDef = {
     };
   },
 };
+return def;
+}
 
-export default def;
+export default createSmcIndicator({
+  id: 'smart-money-concepts-v2', name: 'SMC V2 · Ductri style', title: 'SMC V2', order: 14,
+});
