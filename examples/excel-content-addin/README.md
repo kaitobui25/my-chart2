@@ -8,10 +8,12 @@ The add-in opens in **Japan equity mode** by default:
 
 - Default symbol: `7203.T` (Toyota Motor).
 - Default timeframe: `1D`.
-- The top command strip is ordered **Symbol → Timeframe → Indicator → AI/Sheet actions**. Symbol is a searchable combobox backed by Yahoo Japan search; timeframe and indicator are compact dropdowns.
+- The top command strip is ordered **Symbol → Timeframe → Indicator → AI/Sheet actions**. Symbol is a searchable combobox backed by Yahoo Japan search; timeframe is compact and the indicator picker is a custom dropdown.
 - Market history uses a centralized timeframe/lookback policy with a client limit of 5,000 candles. Intraday requests use explicit Yahoo-safe lookback windows and fall back to the provider-safe default request if Yahoo rejects a wider range.
 - Live candles use the existing Yahoo Japan datafeed polling path (60 seconds).
-- The indicator dropdown contains only built-in OHLCV indicators; Vietnam-specific external indicators are intentionally excluded.
+- The indicator dropdown contains only built-in OHLCV indicators; Vietnam-specific external indicators are intentionally excluded. Every indicator row has an inline `☆` / `★` favorite control. Favorites are persisted in `localStorage` and are moved into a **Yêu thích** section at the top of the dropdown.
+- The stealth chart keeps price/time chrome hidden until the pointer enters the add-in. While the pointer remains anywhere inside the add-in, the price axis and time axis stay visible; they hide again after the pointer leaves the add-in, the window loses focus, or the document becomes hidden.
+- While the mouse is over the chart itself, a small pointer dot follows the cursor. The active crosshair projects the hovered value onto the price and time axes with compact labels using 50% opacity and an 8 px font (two-thirds of the normal 12 px axis text).
 
 When the content object is narrower than 480 px, the command strip becomes two rows so the symbol/timeframe controls remain usable instead of being squeezed.
 

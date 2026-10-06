@@ -19,6 +19,8 @@ import { WatchListView } from './watchlist-view';
 import './style.css';
 
 const chartElement = requiredElement<HTMLElement>('#chart');
+const chartPointerDot = requiredElement<HTMLElement>('#chart-pointer-dot');
+const appShell = requiredElement<HTMLElement>('.app-shell');
 const statusElement = requiredElement<HTMLElement>('#status');
 const loadButton = requiredElement<HTMLButtonElement>('#load-selection');
 const symbolInput = requiredElement<HTMLInputElement>('#symbol-input');
@@ -126,9 +128,23 @@ document.addEventListener('keydown', (event) => {
 });
 loadButton.addEventListener('click', () => void loadSelectedRange());
 chart.on('crosshair', ({ candle }) => setFocusStatus(candle));
-window.addEventListener('blur', () => chart.clearCrosshair());
+appShell.addEventListener('pointerenter', () => setChartHoverChrome(true));
+appShell.addEventListener('pointerleave', () => setChartHoverChrome(false));
+chartElement.addEventListener('pointermove', (event) => updateChartPointerDot(event));
+chartElement.addEventListener('pointerleave', () => {
+  hideChartPointerDot();
+});
+chartElement.addEventListener('pointercancel', hideChartPointerDot);
+window.addEventListener('blur', () => {
+  chart.clearCrosshair();
+  hideChartPointerDot();
+  setChartHoverChrome(false);
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) chart.clearCrosshair();
+  if (!document.hidden) return;
+  chart.clearCrosshair();
+  hideChartPointerDot();
+  setChartHoverChrome(false);
 });
 window.addEventListener('beforeunload', () => {
   unbindSymbol();
@@ -204,6 +220,35 @@ function populateTimeframes(): void {
     fragment.appendChild(option);
   }
   timeframeSelect.replaceChildren(fragment);
+}
+
+function updateChartPointerDot(event: PointerEvent): void {
+  if (event.pointerType && event.pointerType !== 'mouse') {
+    hideChartPointerDot();
+    return;
+  }
+  const rect = chartElement.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+    hideChartPointerDot();
+    return;
+  }
+  chartPointerDot.style.left = `${x}px`;
+  chartPointerDot.style.top = `${y}px`;
+  chartPointerDot.hidden = false;
+}
+
+function hideChartPointerDot(): void {
+  chartPointerDot.hidden = true;
+}
+
+function setChartHoverChrome(active: boolean): void {
+  chart.setChrome({
+    priceAxis: active,
+    timeAxis: active,
+    crosshair: active,
+  });
 }
 
 function populateIndicators(): void {

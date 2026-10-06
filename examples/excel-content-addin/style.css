@@ -525,6 +525,23 @@ body {
   inset: 0;
 }
 
+.chart-pointer-dot {
+  position: absolute;
+  z-index: 7;
+  width: 7px;
+  height: 7px;
+  border: 1px solid #ffffff;
+  border-radius: 50%;
+  background: #68757c;
+  box-shadow: 0 0 0 1px rgba(68, 78, 84, 0.22);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.chart-pointer-dot[hidden] {
+  display: none;
+}
+
 .assistant-panel {
   position: absolute;
   z-index: 8;
