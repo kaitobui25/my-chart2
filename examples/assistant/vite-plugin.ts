@@ -9,6 +9,7 @@ const API_ROUTE = '/assistant-api';
 const SIDECAR_HOST = '127.0.0.1';
 const SIDECAR_PORT = 8788;
 const SIDECAR_TARGET = `http://${SIDECAR_HOST}:${SIDECAR_PORT}`;
+export const ASSISTANT_API_VERSION = 2;
 const SIDECAR_SCRIPT = fileURLToPath(new URL('../sidecars/assistant/server.mjs', import.meta.url));
 const SIDECAR_CWD = resolve(dirname(SIDECAR_SCRIPT), '../../..');
 
@@ -77,10 +78,16 @@ function forwardedHeaders(req: IncomingMessage): Record<string, string> {
   return sanitizeAssistantProxyHeaders(req.headers);
 }
 
+export function isCompatibleAssistantHealth(payload: unknown): boolean {
+  if (payload === null || typeof payload !== 'object') return false;
+  const value = payload as { ok?: unknown; apiVersion?: unknown };
+  return value.ok === true && value.apiVersion === ASSISTANT_API_VERSION;
+}
+
 async function serviceIsHealthy(): Promise<boolean> {
   try {
     const response = await fetch(`${SIDECAR_TARGET}/health`, { signal: AbortSignal.timeout(900) });
-    return response.ok && (await response.json())?.ok === true;
+    return response.ok && isCompatibleAssistantHealth(await response.json());
   } catch {
     return false;
   }
@@ -121,8 +128,20 @@ async function startSidecar(server?: ViteDevServer): Promise<boolean> {
   return waitForHealth();
 }
 
+async function stopManagedSidecar(): Promise<void> {
+  const child = sidecarChild;
+  if (!child || child.killed) return;
+  child.kill();
+  await Promise.race([
+    new Promise<void>((resolve) => child.once('exit', () => resolve())),
+    new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+  ]);
+  if (sidecarChild === child) sidecarChild = null;
+}
+
 async function ensureSidecar(server?: ViteDevServer): Promise<boolean> {
   if (await serviceIsHealthy()) return true;
+  if (sidecarChild) await stopManagedSidecar();
   if (!sidecarStarting) {
     sidecarStarting = startSidecar(server).finally(() => {
       sidecarStarting = null;
@@ -171,7 +190,7 @@ function installProxy(
   });
 }
 
-/** Same-origin assistant API backed by the managed local Codex sidecar. */
+/** Same-origin assistant API backed by the managed local AI sidecar. */
 export function assistantApiIntegration(): Plugin {
   return {
     name: 'l2chart-assistant-api',

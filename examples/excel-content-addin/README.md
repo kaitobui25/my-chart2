@@ -33,9 +33,9 @@ Watch List code is split into configuration, persistence, market-data, view, and
 
 The `AI` action opens a non-modal assistant drawer **over the chart** instead of permanently shrinking the chart area. On a normal content-add-in size it docks to the right; below 600 px it becomes a bottom sheet. Closing the drawer keeps the current conversation in memory.
 
-The Excel shell reuses the shared assistant client/context contracts in `examples/assistant` and the existing local Codex sidecar. Context is deliberately bounded: the shared context builder sends only candles around the visible chart range (up to 240 primary candles), the active indicator snapshot, latest quote information, and only explicitly requested extra timeframes. The Excel client does not attach a chart screenshot, keeping request size and rendering overhead low.
+The Excel shell reuses the shared assistant client/context contracts in `examples/assistant` and exposes two assistant providers in the drawer: **ChatGPT** and **Codex**. Context is deliberately bounded: the shared context builder sends only candles around the visible chart range (up to 240 primary candles), the active indicator snapshot, latest quote information, and only explicitly requested extra timeframes. The Excel client does not attach a chart screenshot, keeping request size and rendering overhead low.
 
-Development `/assistant-api` traffic is same-origin proxied to the loopback assistant sidecar. The sidecar uses the locally installed **Codex CLI signed in with ChatGPT**; no OpenAI API key is embedded in the add-in. Do not expose the loopback sidecar directly to a network. A multi-user production deployment needs an authenticated per-user backend rather than sharing one host Codex identity/quota.
+Development `/assistant-api` traffic is same-origin proxied to the loopback assistant sidecar. **ChatGPT** uses the local LAMlongchart Chrome extension and the signed-in ChatGPT tab. **Codex** uses the locally installed Codex CLI signed in with ChatGPT. No OpenAI API key is embedded in the add-in. Do not expose the loopback sidecar directly to a network. A multi-user production deployment needs an authenticated per-user backend rather than sharing one host identity/quota.
 
 ## Data layout
 
@@ -75,7 +75,7 @@ npm run excel:dev
 
 Development origin, certificate files, and the requested content-add-in size live in `addin.config.json`. `npm run excel:dev` regenerates the development `manifest.xml` from `manifest.template.xml` before starting Vite.
 
-The Excel Vite server exposes `/yfinance-jp-api` and `/assistant-api` through shared development integrations. Both local sidecars start on demand. Python 3.10+ is required for Japan market data; Codex CLI signed in with ChatGPT is required for AI chat. Production deployments need HTTPS backend routes with appropriate authentication/authorization.
+The Excel Vite server exposes `/yfinance-jp-api` and `/assistant-api` through shared development integrations. Both local sidecars start on demand. Python 3.10+ is required for Japan market data. For **ChatGPT**, load the LAMlongchart ChatGPT Bridge extension from `examples/chatgpt-extension` unpacked in Chrome and keep Chrome signed in to ChatGPT. For **Codex**, install/sign in to Codex CLI. A public tunnel is not required. Production deployments need HTTPS backend routes with appropriate authentication/authorization.
 
 With the server running, open Excel and sideload `examples/excel-content-addin/manifest.xml` through **Home > Add-ins > My Add-ins > Manage My Add-ins > Upload My Add-in**. Then insert/open **L2Chart Excel**, select the OHLC(V) range, and choose **Sheet**.
 

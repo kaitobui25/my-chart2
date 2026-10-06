@@ -1,4 +1,15 @@
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+  | 'ultra'
+  | 'pro';
+
+export type AssistantProvider = 'chatgpt' | 'codex';
 
 export interface AssistantCandle {
   time: number;
@@ -54,19 +65,36 @@ export interface AssistantResponse {
   message: string;
 }
 
-export interface CodexModelOption {
+export interface AssistantModelOption {
   id: string;
   label: string;
   defaultReasoningEffort: ReasoningEffort;
   supportedReasoningEfforts: ReasoningEffort[];
+  aliases?: string[];
 }
 
-export interface CodexOptionsResponse {
-  models: CodexModelOption[];
+export interface AssistantOptionsResponse {
+  models: AssistantModelOption[];
   reasoningEfforts: ReasoningEffort[];
 }
 
-export interface CodexRateLimitBucket {
+/** @deprecated Kept for the Excel demo while the shared assistant API becomes provider-neutral. */
+export type CodexModelOption = AssistantModelOption;
+/** @deprecated Kept for the Excel demo while the shared assistant API becomes provider-neutral. */
+export type CodexOptionsResponse = AssistantOptionsResponse;
+
+export interface AssistantHealthResponse {
+  ok: boolean;
+  apiVersion: number;
+  provider: AssistantProvider;
+  assistantAvailable: boolean;
+  bridgeConnected: boolean;
+  detail: string;
+  /** @deprecated Compatibility with the existing Excel demo. */
+  codexAvailable: boolean;
+}
+
+export interface AssistantRateLimitBucket {
   slot: string;
   usedPercent: number | null;
   remainingPercent: number | null;
@@ -75,7 +103,7 @@ export interface CodexRateLimitBucket {
   limitId: string | null;
 }
 
-export interface CodexStatusResponse {
+export interface AssistantStatusResponse {
   account: {
     type: string | null;
     email: string | null;
@@ -87,8 +115,8 @@ export interface CodexStatusResponse {
     reasoningEffort: ReasoningEffort;
   };
   rateLimits: {
-    primary: CodexRateLimitBucket | null;
-    secondary: CodexRateLimitBucket | null;
+    primary: AssistantRateLimitBucket | null;
+    secondary: AssistantRateLimitBucket | null;
     reachedType: string | null;
     individualLimit: unknown;
     spendControlReached: boolean | null;
@@ -96,6 +124,24 @@ export interface CodexStatusResponse {
   resetCredits: {
     availableCount: number;
     credits: unknown[] | null;
+  } | null;
+  provider?: AssistantProvider;
+  bridgeConnected?: boolean;
+  conversationId?: string | null;
+  detail?: string;
+}
+
+/** @deprecated Legacy alias retained for the Excel demo. */
+export type CodexRateLimitBucket = AssistantRateLimitBucket;
+/** @deprecated Legacy alias retained for the Excel demo. */
+export type CodexStatusResponse = AssistantStatusResponse;
+
+export interface AssistantNewConversationResponse {
+  sessionId: string;
+  conversationId: string | null;
+  selection: {
+    model: string;
+    reasoningEffort: ReasoningEffort;
   } | null;
 }
 

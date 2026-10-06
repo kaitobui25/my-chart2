@@ -4,12 +4,10 @@ const RULES = [
   'Use the supplied structured chart context as the source of truth for symbol, timeframe, prices, candles, volume, indicators, replay state, and requested extra timeframes.',
   'The primary candles are limited to the chart area the user is currently viewing, with only a small nearby buffer.',
   'Additional timeframes are included only when the user request explicitly asks for them. If a requested timeframe contains an error or no candles, say that the data is unavailable.',
-  'The screenshot is supporting visual evidence only. Structured data wins if they conflict.',
   'Do not invent prices, volume, indicator values, news, fundamentals, unseen candles, or missing data.',
   'If the data is not enough to answer, say what is missing instead of guessing.',
   'Do not add a trade plan, prediction, or advice unless the user explicitly asks for it.',
   'Reply in the language used by the user.',
-  'Return JSON only with one message field.',
 ];
 
 function compactConversation(conversation) {
@@ -66,24 +64,31 @@ function timeframeSummary(context) {
   return rows.length > 0 ? rows.join('\n') : 'No chart data available.'
 }
 
-export function buildPrompt({ message, conversation, context }) {
-  return [
+export function buildPrompt({ message, conversation, context, includeConversation = false }) {
+  const prompt = [
     `You are a chart assistant embedded in L2Chart. Current instrument: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
     ...RULES.map(rule => `- ${rule}`),
     '',
     'Structured timeframe availability:',
     timeframeSummary(context),
-    'When answering whether a timeframe is available, trust this summary and the structured candles, not the screenshot or primary timeframe label.',
+    'When answering whether a timeframe is available, trust this summary and the structured candles, not the primary timeframe label.',
     '',
     `User question: ${String(message ?? '').trim()}`,
-    '',
-    'Recent conversation JSON:',
-    JSON.stringify(compactConversation(conversation)),
-    '',
-    'Required response shape:',
-    '{"message":"short, clear answer"}',
+  ]
+  if (includeConversation) {
+    prompt.push(
+      '',
+      'Recent conversation JSON:',
+      JSON.stringify(compactConversation(conversation)),
+      '',
+      'Required response shape:',
+      '{"message":"short, clear answer"}'
+    )
+  }
+  prompt.push(
     '',
     'Chart context JSON:',
     JSON.stringify(compactContext(context))
-  ].join('\n')
+  )
+  return prompt.join('\n')
 }

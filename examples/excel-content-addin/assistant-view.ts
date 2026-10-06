@@ -1,4 +1,4 @@
-import type { CodexModelOption, ReasoningEffort } from '../assistant/types';
+import type { AssistantProvider, CodexModelOption, ReasoningEffort } from '../assistant/types';
 import { ALL_REASONING_EFFORTS, REASONING_LABELS } from './assistant-config';
 
 export type AssistantMessageRole = 'user' | 'assistant';
@@ -17,6 +17,7 @@ export class AssistantPanelView {
   readonly fresh = requiredElement<HTMLButtonElement>('#assistant-new');
   readonly settingsToggle = requiredElement<HTMLButtonElement>('#assistant-settings-toggle');
   readonly settings = requiredElement<HTMLElement>('#assistant-settings');
+  readonly provider = requiredElement<HTMLSelectElement>('#assistant-provider');
   readonly model = requiredElement<HTMLSelectElement>('#assistant-model');
   readonly reasoning = requiredElement<HTMLSelectElement>('#assistant-reasoning');
   private thinking: HTMLElement | null = null;
@@ -73,15 +74,20 @@ export class AssistantPanelView {
     this.cancel.hidden = !busy || !cancellable;
     this.cancel.disabled = !cancellable;
     this.fresh.disabled = busy;
+    this.provider.disabled = busy;
     this.model.disabled = busy;
     this.reasoning.disabled = busy;
   }
 
-  setModels(options: readonly CodexModelOption[], selected: string): void {
+  setModels(
+    options: readonly CodexModelOption[],
+    selected: string,
+    provider: AssistantProvider,
+  ): void {
     const nodes: HTMLOptionElement[] = [];
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'Codex default';
+    defaultOption.textContent = provider === 'codex' ? 'Codex default' : 'ChatGPT current';
     nodes.push(defaultOption);
     for (const item of options) {
       const option = document.createElement('option');

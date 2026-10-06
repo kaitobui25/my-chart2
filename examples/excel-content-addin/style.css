@@ -690,7 +690,7 @@ body {
 
 .assistant-settings {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 5px;
   padding: 6px;
   border: 1px solid #e4e6e8;

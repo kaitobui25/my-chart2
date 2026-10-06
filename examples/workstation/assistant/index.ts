@@ -3,20 +3,26 @@ import { AssistantApiClient } from './client';
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
-  CodexModelOption,
-  CodexRateLimitBucket,
-  CodexStatusResponse,
+  AssistantModelOption,
+  AssistantStatusResponse,
   ReasoningEffort,
 } from './types';
 
 const STORAGE_KEY = 'l2chart.assistant.settings.v1';
 const MAX_CONVERSATION_MESSAGES = 10;
-const ALL_REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
+const ALL_REASONING_EFFORTS: ReasoningEffort[] = [
+  'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro',
+];
 const REASONING_LABELS: Record<ReasoningEffort, string> = {
+  none: 'Instant',
+  minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
   xhigh: 'Extra high',
+  max: 'Max',
+  ultra: 'Ultra',
+  pro: 'Pro',
 };
 
 interface StoredSettings {
@@ -52,110 +58,14 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
-function visibleTiles(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>('#charts > .tile')]
-    .filter((tile) => !tile.hidden && getComputedStyle(tile).display !== 'none');
-}
-
-function activeTileElement(): HTMLElement | null {
-  const tiles = visibleTiles();
-  return tiles.find((tile) => tile.classList.contains('active')) ?? tiles[0] ?? null;
-}
-
-function captureActiveChart(): string | null {
-  const tile = activeTileElement();
-  const shell = tile?.querySelector<HTMLElement>('.tile-chart-shell');
-  if (!tile || !shell) return null;
-
-  const shellRect = shell.getBoundingClientRect();
-  if (shellRect.width < 2 || shellRect.height < 2) return null;
-  const canvases = [...shell.querySelectorAll<HTMLCanvasElement>('canvas')]
-    .filter((canvas) => {
-      const rect = canvas.getBoundingClientRect();
-      return rect.width > 1 && rect.height > 1;
-    });
-  if (canvases.length === 0) return null;
-
-  const scale = Math.min(2, window.devicePixelRatio || 1);
-  const output = document.createElement('canvas');
-  output.width = Math.max(1, Math.round(shellRect.width * scale));
-  output.height = Math.max(1, Math.round(shellRect.height * scale));
-  const context = output.getContext('2d');
-  if (!context) return null;
-
-  const background = getComputedStyle(shell).backgroundColor || getComputedStyle(document.body).backgroundColor;
-  context.fillStyle = background === 'rgba(0, 0, 0, 0)' ? '#0b0d10' : background;
-  context.fillRect(0, 0, output.width, output.height);
-  context.scale(scale, scale);
-
-  for (const canvas of canvases) {
-    const rect = canvas.getBoundingClientRect();
-    context.drawImage(
-      canvas,
-      rect.left - shellRect.left,
-      rect.top - shellRect.top,
-      rect.width,
-      rect.height,
-    );
-  }
-
-  try {
-    return output.toDataURL('image/png');
-  } catch {
-    return null;
-  }
-}
-
-function formatResetTime(timestamp: number | null): string | null {
-  if (timestamp === null || !Number.isFinite(timestamp)) return null;
-  const milliseconds = timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
-  return new Date(milliseconds).toLocaleString();
-}
-
-function formatWindowName(bucket: CodexRateLimitBucket): string {
-  const minutes = bucket.windowDurationMins;
-  if (minutes === 1440) return 'Ngày';
-  if (minutes === 10080) return '7 ngày';
-  if (minutes === 300) return '5 giờ';
-  if (minutes !== null && Number.isFinite(minutes)) {
-    if (minutes % 1440 === 0) return `${minutes / 1440} ngày`;
-    if (minutes % 60 === 0) return `${minutes / 60} giờ`;
-    return `${minutes} phút`;
-  }
-  return bucket.slot === 'secondary' ? 'Giới hạn phụ' : 'Giới hạn chính';
-}
-
-function formatRateLimit(bucket: CodexRateLimitBucket | null): string | null {
-  if (!bucket) return null;
-  const used = bucket.usedPercent !== null && Number.isFinite(bucket.usedPercent)
-    ? `${bucket.usedPercent}% đã dùng`
-    : 'đã dùng: không rõ';
-  const remaining = bucket.remainingPercent !== null && Number.isFinite(bucket.remainingPercent)
-    ? `còn ${bucket.remainingPercent}%`
-    : null;
-  const reset = formatResetTime(bucket.resetsAt);
-  return `${formatWindowName(bucket)}: ${[used, remaining, reset ? `reset ${reset}` : null].filter(Boolean).join(' · ')}`;
-}
-
-function formatCodexStatus(payload: CodexStatusResponse): string {
-  const lines = ['Codex quota'];
-  if (payload.account) {
-    const identity = payload.account.email || payload.account.type || 'đã đăng nhập';
-    lines.push(`Tài khoản: ${identity}${payload.account.planType ? ` · ${payload.account.planType}` : ''}`);
-  } else {
-    lines.push('Tài khoản: không có thông tin');
-  }
-  lines.push(`Model: ${payload.selected.model || 'Codex default'}`);
-  lines.push(`Reasoning: ${payload.selected.reasoningEffort}`);
-
-  const limits = [payload.rateLimits.primary, payload.rateLimits.secondary]
-    .map(formatRateLimit)
-    .filter((value): value is string => Boolean(value));
-  lines.push(...(limits.length > 0 ? limits : ['Quota: Codex không trả về dữ liệu giới hạn.']));
-
-  if (payload.rateLimits.reachedType) lines.push(`Limit reached: ${payload.rateLimits.reachedType}`);
-  if (payload.rateLimits.spendControlReached === true) lines.push('Spend control: đã chạm giới hạn');
-  if (payload.resetCredits) lines.push(`Reset credits: ${payload.resetCredits.availableCount}`);
+function formatAssistantStatus(payload: AssistantStatusResponse): string {
+  const lines = [
+    payload.bridgeConnected === false ? 'ChatGPT Bridge: offline' : 'ChatGPT Bridge: connected',
+    'Model: ' + (payload.selected.model || 'ChatGPT current'),
+    'Reasoning: ' + payload.selected.reasoningEffort,
+  ];
+  if (payload.conversationId) lines.push('Conversation: ' + payload.conversationId);
+  if (payload.detail) lines.push(payload.detail);
   return lines.join('\n');
 }
 
@@ -173,7 +83,7 @@ function mountAssistant(): void {
   let requestId: string | null = null;
   let busy = false;
   let modelsLoading = true;
-  let modelOptions: CodexModelOption[] = [];
+  let modelOptions: AssistantModelOption[] = [];
   let conversation: AssistantConversationMessage[] = [];
 
   const dockToggle = createElement('button', 'workspace-dock-button');
@@ -203,7 +113,7 @@ function mountAssistant(): void {
     <div class="assistant-head">
       <div>
         <strong>AI Chart Assistant</strong>
-        <span id="assistant-status">Đang kiểm tra Codex…</span>
+        <span id="assistant-status">Đang kiểm tra ChatGPT Bridge…</span>
       </div>
       <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
     </div>
@@ -231,7 +141,7 @@ function mountAssistant(): void {
         <button id="assistant-send" type="submit">Send</button>
       </div>
     </form>
-    <small class="assistant-hint">Enter để gửi · Shift+Enter xuống dòng · /status xem quota · AI không gửi lệnh.</small>
+    <small class="assistant-hint">Enter để gửi · Shift+Enter xuống dòng · /status xem kết nối · AI không gửi lệnh.</small>
   `;
   rightPanel.appendChild(view);
 
@@ -241,6 +151,7 @@ function mountAssistant(): void {
   const input = view.querySelector<HTMLTextAreaElement>('#assistant-input')!;
   const send = view.querySelector<HTMLButtonElement>('#assistant-send')!;
   const cancel = view.querySelector<HTMLButtonElement>('#assistant-cancel')!;
+  const fresh = view.querySelector<HTMLButtonElement>('#assistant-new')!;
   const modelSelect = view.querySelector<HTMLSelectElement>('#assistant-model')!;
   const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
   const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
@@ -279,9 +190,10 @@ function mountAssistant(): void {
   const setBusy = (value: boolean) => {
     busy = value;
     input.disabled = value;
-    send.disabled = value;
+    send.disabled = value || modelsLoading;
+    fresh.disabled = value || modelsLoading;
     modelSelect.disabled = value || modelsLoading;
-    reasoningSelect.disabled = value;
+    reasoningSelect.disabled = value || modelsLoading;
     cancel.disabled = !value || requestId === null;
   };
 
@@ -305,7 +217,7 @@ function mountAssistant(): void {
     reasoningSelect.value = reasoningEffort;
   };
 
-  const selectedModelOption = (): CodexModelOption | undefined => (
+  const selectedModelOption = (): AssistantModelOption | undefined => (
     modelOptions.find((option) => option.id === model)
   );
 
@@ -323,7 +235,7 @@ function mountAssistant(): void {
     const options: HTMLOptionElement[] = [];
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'Codex default';
+    defaultOption.textContent = 'ChatGPT current';
     options.push(defaultOption);
 
     for (const item of modelOptions) {
@@ -351,7 +263,7 @@ function mountAssistant(): void {
     try {
       const response = await client.options();
       modelOptions = Array.isArray(response.models) ? response.models : [];
-      modelSelect.title = `${modelOptions.length} model từ Codex`;
+      modelSelect.title = `${modelOptions.length} model từ ChatGPT`;
     } catch (error) {
       modelOptions = [];
       modelSelect.title = error instanceof Error ? error.message : String(error);
@@ -414,10 +326,33 @@ function mountAssistant(): void {
     persist();
   });
 
-  view.querySelector<HTMLButtonElement>('#assistant-new')!.addEventListener('click', () => {
-    conversation = [];
-    messages.replaceChildren();
-    appendMessage('assistant', 'Đã bắt đầu cuộc trò chuyện mới cho chart hiện tại.');
+  fresh.addEventListener('click', () => {
+    if (busy) return;
+    void (async () => {
+      setBusy(true);
+      try {
+        const response = await client.newConversation({ model: model || null, reasoningEffort });
+        if (response.selection && ALL_REASONING_EFFORTS.includes(response.selection.reasoningEffort)) {
+          reasoningEffort = response.selection.reasoningEffort;
+          renderReasoningOptions(
+            selectedModelOption()?.supportedReasoningEfforts ?? ALL_REASONING_EFFORTS,
+            reasoningEffort,
+          );
+          persist();
+        }
+        conversation = [];
+        messages.replaceChildren();
+        appendMessage('assistant', 'Đã mở cuộc trò chuyện ChatGPT mới cho chart hiện tại.');
+        setConnectionStatus('ChatGPT connected', true);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        appendMessage('assistant', 'Lỗi tạo chat mới: ' + text);
+        setConnectionStatus(text, false);
+      } finally {
+        setBusy(false);
+        input.focus({ preventScroll: true });
+      }
+    })();
   });
 
   async function showStatus(command: string): Promise<void> {
@@ -429,8 +364,11 @@ function mountAssistant(): void {
     try {
       const response = await client.status({ model: model || null, reasoningEffort });
       thinking.remove();
-      appendMessage('assistant', formatCodexStatus(response));
-      setConnectionStatus('Codex connected', true);
+      appendMessage('assistant', formatAssistantStatus(response));
+      setConnectionStatus(
+        response.bridgeConnected === false ? 'ChatGPT Bridge offline' : 'ChatGPT connected',
+        response.bridgeConnected !== false,
+      );
     } catch (error) {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
@@ -476,7 +414,6 @@ function mountAssistant(): void {
         reasoningEffort,
         conversation: conversation.slice(-MAX_CONVERSATION_MESSAGES),
         context,
-        screenshotDataUrl: captureActiveChart(),
       });
       thinking.remove();
       appendMessage('assistant', response.message);
@@ -486,7 +423,7 @@ function mountAssistant(): void {
         { role: 'assistant', content: response.message },
       ];
       conversation = nextConversation.slice(-MAX_CONVERSATION_MESSAGES);
-      setConnectionStatus('Codex connected', true);
+      setConnectionStatus('ChatGPT connected', true);
     } catch (error) {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
@@ -524,14 +461,17 @@ function mountAssistant(): void {
   });
 
   void client.health().then((health) => {
-    setConnectionStatus(health.codexAvailable ? 'Codex connected' : health.detail, health.codexAvailable);
+    setConnectionStatus(
+      health.assistantAvailable ? 'ChatGPT connected' : health.detail,
+      health.assistantAvailable,
+    );
   }).catch((error) => {
     setConnectionStatus(error instanceof Error ? error.message : String(error), false);
   });
   void loadModelOptions();
 
   currentContext();
-  appendMessage('assistant', 'Sẵn sàng. Chọn model và reasoning rồi hỏi trực tiếp; dùng /status để xem quota Codex.');
+  appendMessage('assistant', 'Sẵn sàng. LAM gửi structured chart context trực tiếp tới ChatGPT; dùng /status để xem bridge.');
 }
 
 if (document.readyState === 'loading') {

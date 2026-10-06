@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ASSISTANT_API_VERSION,
   isAllowedAssistantRequestHeaders,
+  isCompatibleAssistantHealth,
   sanitizeAssistantProxyHeaders,
 } from '../../examples/assistant/vite-plugin';
 
 describe('assistant Vite proxy', () => {
+  it('rejects a stale sidecar health payload from an older assistant protocol', () => {
+    expect(isCompatibleAssistantHealth({ ok: true })).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION - 1 })).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION })).toBe(true);
+  });
+
   it('accepts HTTPS same-origin requests when HTTP/2 supplies :authority instead of Host', () => {
     expect(isAllowedAssistantRequestHeaders({
       ':authority': 'localhost:3000',

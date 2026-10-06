@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isExcelHost, readSelectedRange, waitForOfficeReady } from '../../examples/excel-content-addin/excel-host';
-import { EXCEL_ASSISTANT_CONFIG } from '../../examples/excel-content-addin/assistant-config';
+import {
+  ASSISTANT_PROVIDERS,
+  EXCEL_ASSISTANT_CONFIG,
+} from '../../examples/excel-content-addin/assistant-config';
 import {
   JapanMarketController,
   type JapanMarketDatafeed,
@@ -13,7 +16,10 @@ import {
 } from '../../examples/excel-content-addin/japan-market-config';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
-import { formatCodexQuotaSummary } from '../../examples/excel-content-addin/assistant-controller';
+import {
+  ExcelAssistantController,
+  formatCodexQuotaSummary,
+} from '../../examples/excel-content-addin/assistant-controller';
 import { ExcelDisplayPreferencesStore } from '../../examples/excel-content-addin/display-preferences';
 import { HoverCandleController } from '../../examples/excel-content-addin/hover-candle-controller';
 import {
@@ -276,9 +282,131 @@ describe('Excel Japan market controller', () => {
 describe('Excel assistant configuration', () => {
   it('uses the same-origin assistant API and keeps conversation payloads bounded', () => {
     expect(EXCEL_ASSISTANT_CONFIG.apiBaseUrl).toBe('/assistant-api');
+    expect(EXCEL_ASSISTANT_CONFIG.defaultProvider).toBe('chatgpt');
+    expect(ASSISTANT_PROVIDERS).toEqual(['chatgpt', 'codex']);
     expect(EXCEL_ASSISTANT_CONFIG.maxConversationMessages).toBeGreaterThan(0);
     expect(EXCEL_ASSISTANT_CONFIG.maxConversationMessages).toBeLessThanOrEqual(10);
     expect(EXCEL_ASSISTANT_CONFIG.defaultReasoningEffort).toBe('medium');
+  });
+
+  it('does not lock Send or Provider while provider options are still loading', async () => {
+    class FakeElement extends EventTarget {
+      hidden = false;
+      disabled = false;
+      value = '';
+      textContent = '';
+      dataset: Record<string, string> = {};
+      scrollTop = 0;
+      scrollHeight = 0;
+      children: FakeElement[] = [];
+
+      setAttribute(): void {}
+      focus(): void {}
+      remove(): void {}
+      append(...nodes: FakeElement[]): void { this.children.push(...nodes); }
+      appendChild(node: FakeElement): FakeElement { this.children.push(node); return node; }
+      replaceChildren(...nodes: FakeElement[]): void { this.children = [...nodes]; }
+    }
+
+    const selectors = [
+      '#assistant-toggle', '#assistant-panel', '#assistant-quota', '#assistant-status',
+      '#assistant-context', '#assistant-messages', '#assistant-input', '#assistant-send',
+      '#assistant-cancel', '#assistant-close', '#assistant-new', '#assistant-settings-toggle',
+      '#assistant-settings', '#assistant-provider', '#assistant-model', '#assistant-reasoning',
+      '#assistant-form',
+    ];
+    const elements = new Map(selectors.map((selector) => [selector, new FakeElement()]));
+    elements.get('#assistant-panel')!.hidden = true;
+    elements.get('#assistant-settings')!.hidden = true;
+    elements.get('#assistant-cancel')!.hidden = true;
+
+    vi.stubGlobal('document', {
+      querySelector: (selector: string) => elements.get(selector) ?? null,
+      createElement: () => new FakeElement(),
+    });
+    vi.stubGlobal('window', {
+      setInterval: globalThis.setInterval.bind(globalThis),
+      clearInterval: globalThis.clearInterval.bind(globalThis),
+    });
+    const stored = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => stored.set(key, value),
+    });
+
+    const jsonResponse = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    const fetchMock = vi.fn((input: string | URL | Request, _options?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/health?provider=')) {
+        const provider = url.includes('provider=codex') ? 'codex' : 'chatgpt';
+        return jsonResponse({
+          ok: true,
+          apiVersion: 2,
+          provider,
+          assistantAvailable: false,
+          bridgeConnected: false,
+          codexAvailable: false,
+          detail: 'offline',
+        });
+      }
+      if (url.includes('/options?provider=chatgpt')) {
+        return jsonResponse({ models: [], reasoningEfforts: ['medium'] });
+      }
+      if (url.includes('/options?provider=codex')) {
+        return new Promise<Response>(() => undefined);
+      }
+      if (url.endsWith('/chat')) {
+        return jsonResponse({ message: 'ok' });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const context = {
+      version: 2 as const,
+      generatedAt: new Date(0).toISOString(),
+      symbol: '7203.T',
+      timeframe: '1d',
+      mode: 'candles',
+      replay: {},
+      historyRange: null,
+      visibleRange: null,
+      candleCount: 0,
+      candles: [],
+      indicators: [],
+      quote: null,
+      additionalTimeframes: [],
+    };
+    const controller = new ExcelAssistantController({
+      getContext: () => context,
+      resolveContext: async () => context,
+    });
+    await Promise.resolve();
+
+    const provider = elements.get('#assistant-provider')!;
+    provider.value = 'codex';
+    provider.dispatchEvent(new Event('change'));
+
+    expect(elements.get('#assistant-send')!.disabled).toBe(false);
+    expect(provider.disabled).toBe(false);
+
+    const input = elements.get('#assistant-input')!;
+    input.value = 'test';
+    input.dispatchEvent(Object.assign(new Event('keydown'), {
+      key: 'Enter',
+      shiftKey: false,
+      isComposing: false,
+    }));
+    await vi.waitFor(() => {
+      const chatCall = fetchMock.mock.calls.find(([request]) => String(request).endsWith('/chat'));
+      expect(chatCall).toBeDefined();
+      const options = chatCall?.[1] as RequestInit;
+      expect(JSON.parse(String(options.body))).toMatchObject({ provider: 'codex', message: 'test' });
+    });
+    controller.dispose();
   });
 });
 

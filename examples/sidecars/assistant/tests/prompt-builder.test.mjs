@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildPrompt } from '../prompt-builder.mjs'
 
-test('builds a symbol-aware prompt with bounded conversation', () => {
+test('builds a symbol-aware prompt without duplicating native ChatGPT history', () => {
   const conversation = Array.from({ length: 20 }, (_, index) => ({ role: 'user', content: `m${index}` }))
   const prompt = buildPrompt({
     message: 'What now?',
@@ -11,9 +11,25 @@ test('builds a symbol-aware prompt with bounded conversation', () => {
   })
   assert.match(prompt, /HPG 15m/)
   assert.doesNotMatch(prompt, /m0/)
-  assert.match(prompt, /m19/)
+  assert.doesNotMatch(prompt, /m19/)
   assert.match(prompt, /easy to understand/)
   assert.match(prompt, /do not invent/i)
+  assert.doesNotMatch(prompt, /screenshot/i)
+  assert.doesNotMatch(prompt, /Required response shape/)
+})
+
+test('includes bounded local history when Codex owns the conversation context', () => {
+  const conversation = Array.from({ length: 20 }, (_, index) => ({ role: 'user', content: `m${index}` }))
+  const prompt = buildPrompt({
+    message: 'What now?',
+    conversation,
+    includeConversation: true,
+    context: { symbol: 'HPG', timeframe: '15m', candles: [] }
+  })
+  assert.doesNotMatch(prompt, /m0/)
+  assert.match(prompt, /m19/)
+  assert.match(prompt, /Recent conversation JSON/)
+  assert.match(prompt, /Required response shape/)
 })
 
 test('includes requested extra timeframe data and missing-data errors', () => {
