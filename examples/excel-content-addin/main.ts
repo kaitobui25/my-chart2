@@ -9,6 +9,7 @@ import {
   type JapanTimeframe,
 } from './japan-market-config';
 import { JapanMarketController } from './japan-market-controller';
+import { ExcelOptionsController } from './options-controller';
 import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
 import { bindSymbolCombobox } from './symbol-combobox';
@@ -33,8 +34,10 @@ const indicatorTriggerLabel = requiredElement<HTMLElement>('#indicator-trigger-l
 const indicatorMenu = requiredElement<HTMLElement>('#indicator-menu');
 const chartTab = requiredElement<HTMLButtonElement>('#chart-tab');
 const watchlistTab = requiredElement<HTMLButtonElement>('#watchlist-tab');
+const optionsTab = requiredElement<HTMLButtonElement>('#options-tab');
 const chartViewElement = requiredElement<HTMLElement>('#chart-view');
 const watchlistViewElement = requiredElement<HTMLElement>('#watchlist-view');
+const optionsViewElement = requiredElement<HTMLElement>('#options-view');
 const watchlistInput = requiredElement<HTMLInputElement>('#watchlist-symbol-input');
 const watchlistOptions = requiredElement<HTMLDataListElement>('#watchlist-symbol-options');
 const watchlistAddButton = requiredElement<HTMLButtonElement>('#watchlist-add');
@@ -42,6 +45,11 @@ const watchlistAddButton = requiredElement<HTMLButtonElement>('#watchlist-add');
 const chart = new L2Chart(chartElement, excelStealthChartOptions);
 const indicators = new IndicatorController(chart);
 const market = new JapanMarketController(chart);
+const optionsController = new ExcelOptionsController({
+  chart,
+  surface: appShell,
+  candlesOnHoverOnly: requiredElement<HTMLInputElement>('#candles-on-hover-only'),
+});
 const watchlistStore = new WatchListStore(JAPAN_MARKET_CONFIG.defaultSymbols);
 let watchlist: WatchListController;
 let viewTabs: ViewTabsBinding;
@@ -81,8 +89,10 @@ watchlist = new WatchListController({
 viewTabs = bindViewTabs({
   chartTab,
   watchlistTab,
+  optionsTab,
   chartView: chartViewElement,
   watchlistView: watchlistViewElement,
+  optionsView: optionsViewElement,
   onChange: (view) => watchlist.setActive(view === 'watchlist'),
 });
 
@@ -151,6 +161,7 @@ window.addEventListener('beforeunload', () => {
   viewTabs.dispose();
   watchlist.dispose();
   assistant.dispose();
+  optionsController.dispose();
   indicators.dispose();
   market.dispose();
 });

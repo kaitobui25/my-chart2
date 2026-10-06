@@ -492,6 +492,17 @@ export class L2Chart {
     this.invalidate();
   }
 
+  /** Show/hide the main price-series paint without changing autoscale or data state. */
+  setPriceSeriesRenderVisible(visible: boolean): void {
+    if (this.mainSeries.renderVisible === visible) return;
+    this.mainSeries.renderVisible = visible;
+    this.invalidate();
+  }
+
+  getPriceSeriesRenderVisible(): boolean {
+    return this.mainSeries.renderVisible;
+  }
+
   /** Draw compact labels under selected price bars. */
   setBarLabels(labels: readonly BarLabel[], style: BarLabelStyle = {}): void {
     this.barLabels = new Map(labels.map(({ time, ...label }) => [time, label]));
@@ -2203,7 +2214,7 @@ export class L2Chart {
         ctx.rect(0, 0, this.timeScale.width, pane.height);
         ctx.clip();
         for (const s of pane.series) {
-          if (!s.visible) continue;
+          if (!s.visible || !s.renderVisible) continue;
           ctx.save();
           ctx.globalAlpha *= clamp(s.opacity, 0, 1);
           s.draw(rc);

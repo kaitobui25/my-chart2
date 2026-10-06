@@ -12,6 +12,7 @@
       <nav class="view-tabs" role="tablist" aria-label="Chế độ hiển thị">
         <button id="chart-tab" type="button" role="tab" aria-controls="chart-view" aria-selected="true">Chart</button>
         <button id="watchlist-tab" type="button" role="tab" aria-controls="watchlist-view" aria-selected="false">Watch List</button>
+        <button id="options-tab" type="button" role="tab" aria-controls="options-view" aria-selected="false">Option</button>
       </nav>
 
       <section class="view-stack">
@@ -113,6 +114,18 @@
           </div>
           <div id="watchlist-list" class="watchlist-list" role="list"></div>
           <div id="watchlist-empty" class="watchlist-empty" hidden>Chưa có mã trong Watch List.</div>
+        </section>
+
+        <section id="options-view" class="view-panel options-view" role="tabpanel" aria-labelledby="options-tab" hidden>
+          <div class="options-card">
+            <label class="option-toggle" for="candles-on-hover-only">
+              <span class="option-copy">
+                <strong>Chỉ hiện nến khi rê chuột</strong>
+                <small>Ẩn nến khi chuột rời add-in; dữ liệu, scale và indicator vẫn được giữ nguyên.</small>
+              </span>
+              <input id="candles-on-hover-only" type="checkbox" />
+            </label>
+          </div>
         </section>
       </section>
     </main>

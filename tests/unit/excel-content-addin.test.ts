@@ -14,6 +14,8 @@ import {
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import { formatCodexQuotaSummary } from '../../examples/excel-content-addin/assistant-controller';
+import { ExcelDisplayPreferencesStore } from '../../examples/excel-content-addin/display-preferences';
+import { HoverCandleController } from '../../examples/excel-content-addin/hover-candle-controller';
 import {
   candlesFromRange,
   inferCandleIntervalSeconds,
@@ -172,6 +174,40 @@ describe('Excel Japan market configuration', () => {
 
     controller.dispose();
     restored.dispose();
+  });
+});
+
+describe('Excel hover candle option', () => {
+  it('persists the hover-only candle preference', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const store = new ExcelDisplayPreferencesStore(storage);
+    expect(store.get().candlesOnHoverOnly).toBe(false);
+
+    store.update({ candlesOnHoverOnly: true });
+
+    expect(new ExcelDisplayPreferencesStore(storage).get().candlesOnHoverOnly).toBe(true);
+  });
+
+  it('shows candles only while the pointer is inside when enabled', () => {
+    const surface = Object.assign(new EventTarget(), {
+      matches: () => false,
+    }) as unknown as HTMLElement;
+    const setPriceSeriesRenderVisible = vi.fn();
+    const controller = new HoverCandleController({ setPriceSeriesRenderVisible }, surface, true);
+
+    expect(setPriceSeriesRenderVisible).toHaveBeenLastCalledWith(false);
+    surface.dispatchEvent(new Event('pointerenter'));
+    expect(setPriceSeriesRenderVisible).toHaveBeenLastCalledWith(true);
+    surface.dispatchEvent(new Event('pointerleave'));
+    expect(setPriceSeriesRenderVisible).toHaveBeenLastCalledWith(false);
+
+    controller.setEnabled(false);
+    expect(setPriceSeriesRenderVisible).toHaveBeenLastCalledWith(true);
+    controller.dispose();
   });
 });
 

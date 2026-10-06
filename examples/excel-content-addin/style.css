@@ -323,6 +323,54 @@ body {
   font-size: 11px;
 }
 
+.options-view {
+  padding: 10px;
+  background: #ffffff;
+  color: #60696e;
+  font-size: 11px;
+}
+
+.options-card {
+  max-width: 440px;
+  border: 1px solid #e6e8e9;
+  border-radius: 4px;
+  background: #fbfcfc;
+}
+
+.option-toggle {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.option-copy strong {
+  color: #566066;
+  font-size: 11px;
+}
+
+.option-copy small {
+  color: #90979b;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.option-toggle input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: #7f8d94;
+}
+
 .watchlist-toolbar {
   display: grid;
   grid-template-columns: 112px auto minmax(0, 1fr);

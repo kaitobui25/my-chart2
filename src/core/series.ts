@@ -34,6 +34,8 @@ export abstract class Series {
   /** Optional preformatted legend value for multi-value/custom series. */
   legendText: string | null = null;
   visible = true;
+  /** Skip paint while keeping the series active for autoscale and data semantics. */
+  renderVisible = true;
   /** Series opacity in the inclusive range 0..1. */
   opacity = 1;
   /** Registry id of the indicator that owns this series. */
