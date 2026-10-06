@@ -12,7 +12,7 @@ import { JapanMarketController } from './japan-market-controller';
 import { ExcelOptionsController } from './options-controller';
 import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
-import { bindSymbolCombobox } from './symbol-combobox';
+import { createSymbolCombobox } from './symbol-combobox';
 import { bindViewTabs, type ViewTabsBinding } from './view-tabs';
 import { WatchListController } from './watchlist-controller';
 import { WatchListStore } from './watchlist-store';
@@ -24,8 +24,10 @@ const chartPointerDot = requiredElement<HTMLElement>('#chart-pointer-dot');
 const appShell = requiredElement<HTMLElement>('.app-shell');
 const statusElement = requiredElement<HTMLElement>('#status');
 const loadButton = requiredElement<HTMLButtonElement>('#load-selection');
+const symbolControl = requiredElement<HTMLElement>('#symbol-control');
 const symbolInput = requiredElement<HTMLInputElement>('#symbol-input');
-const symbolOptions = requiredElement<HTMLDataListElement>('#symbol-options');
+const symbolMenu = requiredElement<HTMLElement>('#symbol-menu');
+const symbolTrigger = requiredElement<HTMLButtonElement>('#symbol-trigger');
 const timeframeSelect = requiredElement<HTMLSelectElement>('#timeframe-select');
 const indicatorControl = requiredElement<HTMLElement>('#indicator-control');
 const indicatorSelect = requiredElement<HTMLSelectElement>('#indicator-select');
@@ -38,8 +40,9 @@ const optionsTab = requiredElement<HTMLButtonElement>('#options-tab');
 const chartViewElement = requiredElement<HTMLElement>('#chart-view');
 const watchlistViewElement = requiredElement<HTMLElement>('#watchlist-view');
 const optionsViewElement = requiredElement<HTMLElement>('#options-view');
+const watchlistSymbolControl = requiredElement<HTMLElement>('#watchlist-symbol-control');
 const watchlistInput = requiredElement<HTMLInputElement>('#watchlist-symbol-input');
-const watchlistOptions = requiredElement<HTMLDataListElement>('#watchlist-symbol-options');
+const watchlistMenu = requiredElement<HTMLElement>('#watchlist-symbol-menu');
 const watchlistAddButton = requiredElement<HTMLButtonElement>('#watchlist-add');
 
 const chart = new L2Chart(chartElement, excelStealthChartOptions);
@@ -81,8 +84,9 @@ watchlist = new WatchListController({
   feed: market.getDatafeed(),
   store: watchlistStore,
   view: watchlistView,
+  symbolControl: watchlistSymbolControl,
   input: watchlistInput,
-  suggestions: watchlistOptions,
+  menu: watchlistMenu,
   addButton: watchlistAddButton,
 });
 
@@ -101,10 +105,12 @@ populateIndicators();
 symbolInput.value = JAPAN_MARKET_CONFIG.defaultSymbol;
 timeframeSelect.value = JAPAN_MARKET_CONFIG.defaultTimeframe;
 
-const unbindSymbol = bindSymbolCombobox({
+const symbolCombobox = createSymbolCombobox({
+  root: symbolControl,
   input: symbolInput,
-  list: symbolOptions,
-  initialSymbols: JAPAN_MARKET_CONFIG.defaultSymbols,
+  menu: symbolMenu,
+  trigger: symbolTrigger,
+  getSymbols: () => watchlistStore.list(),
   debounceMs: JAPAN_MARKET_CONFIG.symbolSearchDebounceMs,
   search: (query) => market.searchSymbols(query),
   onCommit: () => void reloadMarket(),
@@ -157,7 +163,7 @@ document.addEventListener('visibilitychange', () => {
   setChartHoverChrome(false);
 });
 window.addEventListener('beforeunload', () => {
-  unbindSymbol();
+  symbolCombobox.dispose();
   viewTabs.dispose();
   watchlist.dispose();
   assistant.dispose();

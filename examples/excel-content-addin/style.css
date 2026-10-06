@@ -91,6 +91,8 @@ body {
 }
 
 .market-strip {
+  position: relative;
+  z-index: 20;
   display: grid;
   grid-template-columns: 78px 52px 112px auto minmax(0, 1fr);
   align-items: center;
@@ -263,11 +265,6 @@ body {
   border-color: #d9dddf;
   background: #f8faf9;
   opacity: 1;
-}
-
-.symbol-control input {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
 .strip-actions {

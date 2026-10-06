@@ -10,8 +10,9 @@ export interface WatchListControllerOptions {
   feed: JapanMarketDatafeed;
   store: WatchListStore;
   view: WatchListView;
+  symbolControl: HTMLElement;
   input: HTMLInputElement;
-  suggestions: HTMLDataListElement;
+  menu: HTMLElement;
   addButton: HTMLButtonElement;
   pollMs?: number;
 }
@@ -27,9 +28,10 @@ export class WatchListController {
 
   constructor(private readonly options: WatchListControllerOptions) {
     this.combobox = createSymbolCombobox({
+      root: options.symbolControl,
       input: options.input,
-      list: options.suggestions,
-      initialSymbols: JAPAN_MARKET_CONFIG.defaultSymbols,
+      menu: options.menu,
+      getSymbols: () => JAPAN_MARKET_CONFIG.defaultSymbols,
       debounceMs: JAPAN_MARKET_CONFIG.symbolSearchDebounceMs,
       search: (query) => options.feed.searchSymbols(query, JAPAN_MARKET_CONFIG.symbolSearchLimit),
       onCommit: (symbol) => this.add(symbol),

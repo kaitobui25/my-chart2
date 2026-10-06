@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Symbol combobox fixture</title>
+    <style>
+      body { margin: 24px; font: 12px Arial, sans-serif; }
+      #symbol-control { width: 120px; }
+      #symbol-input { width: 100%; height: 24px; }
+    </style>
+  </head>
+  <body>
+    <div id="symbol-control" class="symbol-control symbol-combobox">
+      <input id="symbol-input" value="7203.T" aria-label="Ticker" />
+      <button id="symbol-trigger" class="symbol-combobox-trigger" type="button" aria-label="Open symbols">▾</button>
+      <div id="symbol-menu" class="symbol-combobox-menu" hidden></div>
+    </div>
+    <script type="module" src="./symbol-combobox-main.ts"></script>
+  </body>
+</html>

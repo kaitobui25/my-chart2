@@ -18,11 +18,11 @@
       <section class="view-stack">
         <section id="chart-view" class="view-panel chart-view" role="tabpanel" aria-labelledby="chart-tab">
           <header class="market-strip" aria-label="Điều khiển dữ liệu biểu đồ">
-            <label class="control symbol-control" title="Mã cổ phiếu Nhật">
-              <span class="visually-hidden">Mã cổ phiếu Nhật</span>
-              <input id="symbol-input" list="symbol-options" autocomplete="off" spellcheck="false" aria-label="Mã cổ phiếu Nhật" />
-              <datalist id="symbol-options"></datalist>
-            </label>
+            <div id="symbol-control" class="control symbol-control symbol-combobox" title="Mã cổ phiếu Nhật">
+              <input id="symbol-input" autocomplete="off" spellcheck="false" aria-label="Mã cổ phiếu Nhật" />
+              <button id="symbol-trigger" class="symbol-combobox-trigger" type="button" aria-label="Mở Watch List" title="Watch List">▾</button>
+              <div id="symbol-menu" class="symbol-combobox-menu" hidden></div>
+            </div>
             <label class="control timeframe-control" title="Khung thời gian">
               <span class="visually-hidden">Khung thời gian</span>
               <select id="timeframe-select" aria-label="Khung thời gian"></select>
@@ -104,11 +104,10 @@
 
         <section id="watchlist-view" class="view-panel watchlist-view" role="tabpanel" aria-labelledby="watchlist-tab" hidden>
           <header class="watchlist-toolbar">
-            <label class="watchlist-add-control">
-              <span class="visually-hidden">Thêm mã vào Watch List</span>
-              <input id="watchlist-symbol-input" list="watchlist-symbol-options" autocomplete="off" spellcheck="false" placeholder="Thêm mã TSE" aria-label="Thêm mã vào Watch List" />
-              <datalist id="watchlist-symbol-options"></datalist>
-            </label>
+            <div id="watchlist-symbol-control" class="watchlist-add-control symbol-combobox">
+              <input id="watchlist-symbol-input" autocomplete="off" spellcheck="false" placeholder="Thêm mã TSE" aria-label="Thêm mã vào Watch List" />
+              <div id="watchlist-symbol-menu" class="symbol-combobox-menu symbol-combobox-menu-wide" hidden></div>
+            </div>
             <button id="watchlist-add" type="button">Thêm</button>
             <span id="watchlist-status" aria-live="polite"></span>
           </header>
