@@ -13,6 +13,7 @@ import {
 } from '../../examples/excel-content-addin/japan-market-config';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
+import { formatCodexQuotaSummary } from '../../examples/excel-content-addin/assistant-controller';
 import {
   candlesFromRange,
   inferCandleIntervalSeconds,
@@ -114,6 +115,36 @@ describe('Excel Japan market configuration', () => {
     expect(builtinIndicators.length).toBeGreaterThan(5);
     expect(new Set(builtinIndicators.map((item) => item.id)).size).toBe(builtinIndicators.length);
     expect(builtinIndicators.every((item) => item.category !== 'custom')).toBe(true);
+  });
+
+  it('formats Codex five-hour and weekly remaining quota for the assistant header', () => {
+    expect(formatCodexQuotaSummary({
+      account: null,
+      requiresOpenaiAuth: true,
+      selected: { model: null, reasoningEffort: 'medium' },
+      rateLimits: {
+        primary: {
+          slot: 'primary',
+          usedPercent: 18.4,
+          remainingPercent: 81.6,
+          windowDurationMins: 300,
+          resetsAt: null,
+          limitId: null,
+        },
+        secondary: {
+          slot: 'secondary',
+          usedPercent: 36.2,
+          remainingPercent: 63.8,
+          windowDurationMins: 10080,
+          resetsAt: null,
+          limitId: null,
+        },
+        reachedType: null,
+        individualLimit: null,
+        spendControlReached: false,
+      },
+      resetCredits: null,
+    })).toBe('5h 82% · tuần 64%');
   });
 
   it('persists indicator favorites and sorts them before non-favorites', () => {

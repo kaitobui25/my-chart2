@@ -4,6 +4,8 @@ import type {
   AssistantChartContext,
   AssistantConversationMessage,
   CodexModelOption,
+  CodexRateLimitBucket,
+  CodexStatusResponse,
   ReasoningEffort,
 } from '../assistant/types';
 import {
@@ -17,6 +19,19 @@ interface StoredSettings {
   reasoningEffort?: ReasoningEffort;
 }
 
+const QUOTA_REFRESH_MS = 60_000;
+const FIVE_HOUR_WINDOW_MINUTES = 5 * 60;
+const WEEK_WINDOW_MINUTES = 7 * 24 * 60;
+
+export function formatCodexQuotaSummary(response: CodexStatusResponse): string {
+  const buckets = [response.rateLimits.primary, response.rateLimits.secondary].filter(
+    (bucket): bucket is CodexRateLimitBucket => bucket !== null,
+  );
+  const fiveHour = buckets.find((bucket) => bucket.windowDurationMins === FIVE_HOUR_WINDOW_MINUTES);
+  const week = buckets.find((bucket) => bucket.windowDurationMins === WEEK_WINDOW_MINUTES);
+  return `5h ${formatRemainingPercent(fiveHour)} · tuần ${formatRemainingPercent(week)}`;
+}
+
 export class ExcelAssistantController {
   private readonly client = new AssistantApiClient(EXCEL_ASSISTANT_CONFIG.apiBaseUrl);
   private readonly view = new AssistantPanelView();
@@ -28,6 +43,9 @@ export class ExcelAssistantController {
   private requestId: string | null = null;
   private busy = false;
   private cancelRequested = false;
+  private codexConnected = false;
+  private quotaRefreshInFlight = false;
+  private quotaRefreshTimer: number | null = null;
   private readonly cleanup: Array<() => void> = [];
 
   constructor(private readonly bridge: AssistantBridge) {
@@ -39,6 +57,7 @@ export class ExcelAssistantController {
   }
 
   dispose(): void {
+    this.stopQuotaRefresh();
     for (const dispose of this.cleanup.splice(0)) dispose();
     if (this.requestId) void this.client.cancel(this.requestId).catch(() => undefined);
   }
@@ -109,8 +128,44 @@ export class ExcelAssistantController {
         health.codexAvailable ? 'Sẵn sàng' : health.detail,
         health.codexAvailable,
       );
+      this.setCodexConnected(health.codexAvailable);
+      if (health.codexAvailable) void this.refreshQuota();
     } catch (error) {
       this.view.setConnectionStatus(errorMessage(error), false);
+      this.setCodexConnected(false);
+    }
+  }
+
+  private setCodexConnected(connected: boolean): void {
+    if (this.codexConnected === connected) return;
+    this.codexConnected = connected;
+    if (!connected) {
+      this.stopQuotaRefresh();
+      this.view.setQuota(null);
+      return;
+    }
+    void this.refreshQuota();
+    this.quotaRefreshTimer = window.setInterval(() => void this.refreshQuota(), QUOTA_REFRESH_MS);
+  }
+
+  private stopQuotaRefresh(): void {
+    if (this.quotaRefreshTimer !== null) window.clearInterval(this.quotaRefreshTimer);
+    this.quotaRefreshTimer = null;
+  }
+
+  private async refreshQuota(): Promise<void> {
+    if (!this.codexConnected || this.quotaRefreshInFlight) return;
+    this.quotaRefreshInFlight = true;
+    try {
+      const response = await this.client.status({
+        model: this.model || null,
+        reasoningEffort: this.reasoningEffort,
+      });
+      this.view.setQuota(formatCodexQuotaSummary(response));
+    } catch {
+      this.view.setQuota(null);
+    } finally {
+      this.quotaRefreshInFlight = false;
     }
   }
 
@@ -206,6 +261,8 @@ export class ExcelAssistantController {
       ];
       this.conversation = nextConversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages);
       this.view.setConnectionStatus('Sẵn sàng', true);
+      this.setCodexConnected(true);
+      void this.refreshQuota();
     } catch (error) {
       this.view.removeThinking();
       this.view.appendMessage(
@@ -301,4 +358,11 @@ function errorMessage(error: unknown): string {
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
   return typeof value === 'string' && ALL_REASONING_EFFORTS.includes(value as ReasoningEffort);
+}
+
+function formatRemainingPercent(bucket: CodexRateLimitBucket | undefined): string {
+  const remaining = bucket?.remainingPercent;
+  return remaining === null || remaining === undefined || !Number.isFinite(remaining)
+    ? '--'
+    : `${Math.round(remaining)}%`;
 }

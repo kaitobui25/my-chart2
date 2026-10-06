@@ -589,6 +589,28 @@ body {
   font-size: 12px;
 }
 
+.assistant-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.assistant-quota {
+  min-width: 0;
+  overflow: hidden;
+  color: #7d878c;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-quota[hidden] {
+  display: none;
+}
+
 #assistant-status {
   overflow: hidden;
   color: #8a9297;

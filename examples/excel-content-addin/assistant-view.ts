@@ -6,6 +6,7 @@ export type AssistantMessageRole = 'user' | 'assistant';
 export class AssistantPanelView {
   readonly toggle = requiredElement<HTMLButtonElement>('#assistant-toggle');
   readonly panel = requiredElement<HTMLElement>('#assistant-panel');
+  readonly quota = requiredElement<HTMLElement>('#assistant-quota');
   readonly status = requiredElement<HTMLElement>('#assistant-status');
   readonly context = requiredElement<HTMLElement>('#assistant-context');
   readonly messages = requiredElement<HTMLElement>('#assistant-messages');
@@ -56,6 +57,11 @@ export class AssistantPanelView {
   setConnectionStatus(message: string, connected: boolean): void {
     this.status.textContent = message;
     this.status.dataset.state = connected ? 'connected' : 'error';
+  }
+
+  setQuota(message: string | null): void {
+    this.quota.textContent = message ?? '';
+    this.quota.hidden = !message;
   }
 
   setContext(message: string): void {
