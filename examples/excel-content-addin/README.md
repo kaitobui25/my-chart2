@@ -37,6 +37,23 @@ The Excel shell reuses the shared assistant client/context contracts in `example
 
 Development `/assistant-api` traffic is same-origin proxied to the loopback assistant sidecar. **ChatGPT** uses the local LAMlongchart Chrome extension and the signed-in ChatGPT tab. **Codex** uses the locally installed Codex CLI signed in with ChatGPT. No OpenAI API key is embedded in the add-in. Do not expose the loopback sidecar directly to a network. A multi-user production deployment needs an authenticated per-user backend rather than sharing one host identity/quota.
 
+### How the AI gets chart data
+
+The assistant is currently **context-driven, not tool-driven**. For each user turn, LAMlongchart resolves the chart context first, then sends one fixed context payload to the selected AI provider:
+
+```text
+user message -> resolve chart context -> fetch requested extra timeframes -> AI prompt -> AI response
+```
+
+- The current chart timeframe is always the primary context.
+- Extra timeframe history is fetched only when the user's message names a concrete timeframe such as `15m`, `1h`, `daily`, or `weekly`.
+- A generic request such as "analyze multiple timeframes" does **not** currently mean "load every timeframe". If no concrete timeframe is detected, the AI receives only the current chart timeframe.
+- In **market** mode, the context bridge can fetch requested extra timeframes from the active market `Datafeed` without changing the visible chart timeframe.
+- In **sheet** mode, the assistant has no market `Datafeed`, so it cannot synthesize other timeframes beyond the worksheet data that was loaded.
+- ChatGPT and Codex do not currently receive a `getHistory`/`getTimeframe` tool. If the AI realizes after seeing the first context that it also needs `1h` or `1d`, it cannot fetch those candles itself during the same turn; it can only say that more data is needed.
+
+This means the current architecture is a one-pass data flow. A future agentic version could add either a planning pass (`AI requests 1h + 1d -> LAM fetches them -> AI answers`) or a real tool loop where the AI can request chart history on demand.
+
 ## Data layout
 
 Select a rectangular range with at least five columns in this order:

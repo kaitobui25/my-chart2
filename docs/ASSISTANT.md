@@ -27,6 +27,12 @@ ChatGPT's native conversation owns prior turns, so the sidecar sends the current
 
 When the user's question explicitly names another timeframe such as `15m`, `1h`, `daily`, or `weekly`, the context bridge loads that timeframe on demand for the same symbol. Requested history is anchored to the end of the visible chart range so replay or historical inspection does not leak later candles. Missing timeframe data is passed to the assistant as an explicit error instead of being guessed.
 
+## Data-access model
+
+The current assistant is one-pass and context-driven. LAMlongchart decides what chart data to load **before** the provider is called. The current timeframe is always included, and concrete timeframes explicitly named in the user's message are loaded into `additionalTimeframes` when a `Datafeed` is available.
+
+Generic language such as "multi-timeframe analysis" does not currently cause all timeframes to be loaded. ChatGPT and Codex also do not have a chart-data tool loop, so they cannot decide mid-response to call `getHistory()` for another timeframe. If the first context is insufficient, the provider can only explain what data is missing. A future implementation may add an AI planning pass or tool/function calling so the provider can request additional chart data on demand.
+
 ## Tests
 
 ```bash
