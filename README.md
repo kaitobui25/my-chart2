@@ -44,6 +44,7 @@ to replace every one of them.
 - Drawing primitives, object selection, styling, persistence hooks, undo, and redo
 - Parameterized indicator registry and a demo catalog of technical indicators
 - Smart Money Concepts overlay with BOS/CHoCH, swing points, order blocks, and fair value gaps
+- Smart Money Concepts V2 with equal highs/lows, previous-period levels (configurable UTC offset), premium/discount zones, and Fibonacci retracement
 - Session highlighting, bar replay, volume, and visible-range extrema in the demo
 - Multi-chart layouts and a complete workstation demo built on the same public core
 

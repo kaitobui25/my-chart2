@@ -1791,6 +1791,21 @@ class Tile implements ReplayParticipant {
     this.el.appendChild(chartShell);
     this.chart = new L2Chart(chartEl, { theme: this.resolvedTheme() });
     this.applyPricePrecision();
+    this.chart.setIndicatorCandleSource(async (timeframe, range) => {
+      const intervals: Record<string, string> = {
+        '1': '1m', '3': '3m', '5': '5m', '15': '15m', '30': '30m',
+        '60': '1h', '120': '2h', '240': '4h', D: '1d', W: '1w', M: '1M',
+      };
+      const interval = intervals[timeframe];
+      const provider = currentFeed();
+      if (!interval || !provider.feed || !intervalAllowedForProvider(activeProvider, interval)) {
+        throw new Error(`Provider cannot supply indicator timeframe ${timeframe}`);
+      }
+      // Include prior requested bars for security(...)[1]/[2] and D/W/M levels.
+      const from = range.from - 3 * intervalApproxSeconds(interval);
+      const limit = Math.max(historyPageSizeFor(interval), estimateIntervalBars(from, range.to, interval) + 3);
+      return provider.feed.getHistory(this.symbol, interval, limit, { from, to: range.to });
+    });
     this.chart.setMode(this.mode);
     this.applyTheme();
     this.chart.setSessionsVisible(initialPreferences.sessions);
@@ -4901,13 +4916,24 @@ function collectCandleColors(): CandleColors {
 function fillParamFields(def: IndicatorDef, values: Params): void {
   paramFields.innerHTML = '';
   const mergedValues = { ...defaultParams(def), ...indicatorStyleDefaults(def.id), ...values };
-  const inputTitle = document.createElement('div');
-  inputTitle.className = 'param-section-title';
-  inputTitle.innerHTML = '<strong>Thông số tính toán</strong><span>Thay đổi cách chỉ báo được tính</span>';
-  paramFields.appendChild(inputTitle);
+  const hasSections = (def.params ?? []).some((param) => param.section);
+  if (!hasSections) {
+    const inputTitle = document.createElement('div');
+    inputTitle.className = 'param-section-title';
+    inputTitle.innerHTML = '<strong>Thông số tính toán</strong><span>Thay đổi cách chỉ báo được tính</span>';
+    paramFields.appendChild(inputTitle);
+  }
+  let currentSection: string | undefined;
   for (const p of def.params ?? []) {
+    if (p.section && p.section !== currentSection) {
+      const sectionTitle = document.createElement('div');
+      sectionTitle.className = 'param-section-title param-group-title';
+      sectionTitle.textContent = p.section;
+      paramFields.appendChild(sectionTitle);
+      currentSection = p.section;
+    }
     const row = document.createElement('label');
-    row.className = 'param-row';
+    row.className = p.type === 'boolean' ? 'param-row param-toggle-row' : 'param-row';
     const name = document.createElement('span');
     name.textContent = p.label;
     let input: HTMLInputElement | HTMLSelectElement;
@@ -4919,6 +4945,14 @@ function fillParamFields(def: IndicatorDef, values: Params): void {
         o.textContent = opt.label;
         input.appendChild(o);
       }
+      input.value = String(mergedValues[p.key]);
+    } else if (p.type === 'boolean') {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = mergedValues[p.key] === true;
+    } else if (p.type === 'color') {
+      input = document.createElement('input');
+      input.type = 'color';
       input.value = String(mergedValues[p.key]);
     } else {
       input = document.createElement('input');
@@ -5023,6 +5057,10 @@ function collectParams(def: IndicatorDef): Params {
     const p = def.params?.find((d) => d.key === el.dataset.key);
     if (!p) continue;
     if (p.type === 'select') {
+      out[p.key] = el.value;
+    } else if (p.type === 'boolean' && el instanceof HTMLInputElement) {
+      out[p.key] = el.checked;
+    } else if (p.type === 'color') {
       out[p.key] = el.value;
     } else {
       let v = Number(el.value);

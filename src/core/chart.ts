@@ -48,6 +48,8 @@ import {
 } from './drawings';
 
 export interface ChartOptions {
+  /** Provider OHLC for indicators that request a different Pine timeframe. */
+  indicatorCandles?: (timeframe: string, range: { from: number; to: number }) => Promise<readonly Candle[]>;
   theme?: Partial<Theme>;
   candleRendering?: Partial<CandleRenderingOptions>;
   chrome?: Partial<ChartChromeOptions>;
@@ -306,7 +308,10 @@ export class L2Chart {
   };
   private detachFns: (() => void)[] = [];
 
+  private indicatorCandleSource: ChartOptions['indicatorCandles'];
+
   constructor(container: HTMLElement, options: ChartOptions = {}) {
+    this.indicatorCandleSource = options.indicatorCandles;
     this.theme = { ...darkTheme, ...options.theme };
     this.chrome = { ...DEFAULT_CHART_CHROME, ...options.chrome };
     this.idleCursor = options.cursor ?? 'crosshair';
@@ -460,6 +465,18 @@ export class L2Chart {
 
   getCandles(): readonly Candle[] {
     return this.candles;
+  }
+
+  getIndicatorCandles(timeframe: string): Promise<readonly Candle[]> | undefined {
+    const source = this.indicatorCandleSource;
+    const first = this.candles[0];
+    const last = this.candles[this.candles.length - 1];
+    if (!source || !first || !last) return undefined;
+    return source(timeframe, { from: first.time, to: last.time });
+  }
+
+  setIndicatorCandleSource(source: ChartOptions['indicatorCandles']): void {
+    this.indicatorCandleSource = source;
   }
 
   private priceSeriesCandles(): readonly Candle[] {

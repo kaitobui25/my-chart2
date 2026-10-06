@@ -11,8 +11,10 @@ export type Params = Record<string, ParamValue>;
 export interface ParamDef {
   key: string;
   label: string;
-  type: 'int' | 'float' | 'select';
+  type: 'int' | 'float' | 'select' | 'boolean' | 'color';
   default: ParamValue;
+  /** Optional heading used to group related controls in the settings dialog. */
+  section?: string;
   min?: number;
   max?: number;
   step?: number;
