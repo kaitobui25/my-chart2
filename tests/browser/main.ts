@@ -22,13 +22,14 @@ const candles: Candle[] = Array.from({ length: 120 }, (_, index) => {
   };
 });
 
-const chart = new L2Chart(container, { theme: lightTheme });
+const chart = new L2Chart(container, { theme: lightTheme, reserveAxisSpace: true });
 chart.setWatermark('SMOKE');
 chart.setData(candles);
 
 interface ChartTestState {
   barSpacing: number;
   rightIndex: number;
+  timeScaleWidth: number;
   candleCount: number;
   drawingCount: number;
   chartRootCount: number;
@@ -43,6 +44,7 @@ interface ChartTestApi {
   fitPriceScale(): void;
   updateLatest(close: number): void;
   appendCandle(): void;
+  setAxes(visible: boolean): void;
   setMode(mode: PriceSeriesMode): void;
   lastCloses(): { raw: number | null; displayed: number | null };
   setDrawing(): void;
@@ -73,6 +75,7 @@ window.chartTest = {
   state: () => ({
     barSpacing: chart.timeScale.barSpacing,
     rightIndex: chart.timeScale.rightIndex,
+    timeScaleWidth: chart.timeScale.width,
     candleCount: chart.getCandles().length,
     drawingCount: chart.getDrawings().length,
     chartRootCount: container.childElementCount,
@@ -123,6 +126,7 @@ window.chartTest = {
       volume: 2_500,
     });
   },
+  setAxes: (visible) => chart.setChrome({ priceAxis: visible, timeAxis: visible }),
   setMode: (mode) => chart.setMode(mode),
   lastCloses: () => {
     const current = chart.getCandles();

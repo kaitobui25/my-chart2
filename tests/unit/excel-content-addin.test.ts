@@ -22,6 +22,7 @@ import {
 } from '../../examples/excel-content-addin/assistant-controller';
 import { ExcelDisplayPreferencesStore } from '../../examples/excel-content-addin/display-preferences';
 import { HoverCandleController } from '../../examples/excel-content-addin/hover-candle-controller';
+import { excelStealthChartOptions } from '../../examples/excel-content-addin/stealth-preset';
 import {
   candlesFromRange,
   inferCandleIntervalSeconds,
@@ -184,6 +185,15 @@ describe('Excel Japan market configuration', () => {
 });
 
 describe('Excel hover candle option', () => {
+  it('reserves axis space so hover chrome does not resize the chart plot', () => {
+    expect(excelStealthChartOptions.reserveAxisSpace).toBe(true);
+    expect(excelStealthChartOptions.priceAxisWidth).toBe(52);
+    expect(excelStealthChartOptions.chrome).toMatchObject({
+      priceAxis: false,
+      timeAxis: false,
+    });
+  });
+
   it('persists the hover-only candle preference', () => {
     const values = new Map<string, string>();
     const storage = {

@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 interface ChartState {
   barSpacing: number;
   rightIndex: number;
+  timeScaleWidth: number;
   candleCount: number;
   drawingCount: number;
   chartRootCount: number;
@@ -45,6 +46,20 @@ test('renders on Canvas and supports wheel zoom and pointer pan', async ({ page 
   await expect.poll(
     () => page.evaluate(() => window.chartTest.state().rightIndex),
   ).not.toBe(beforePan);
+});
+
+test('keeps plot layout stable when reserved axes are shown or hidden', async ({ page }) => {
+  const before = await page.evaluate(() => window.chartTest.state());
+
+  await page.evaluate(() => window.chartTest.setAxes(false));
+  const hidden = await page.evaluate(() => window.chartTest.state());
+  expect(hidden.timeScaleWidth).toBe(before.timeScaleWidth);
+  expect(hidden.rightIndex).toBe(before.rightIndex);
+
+  await page.evaluate(() => window.chartTest.setAxes(true));
+  const shown = await page.evaluate(() => window.chartTest.state());
+  expect(shown.timeScaleWidth).toBe(before.timeScaleWidth);
+  expect(shown.rightIndex).toBe(before.rightIndex);
 });
 
 test('keeps manual vertical pan across data refresh and history prepend', async ({ page }) => {

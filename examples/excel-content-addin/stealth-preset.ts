@@ -31,6 +31,8 @@ export const excelStealthChartOptions: ChartOptions = {
   theme: excelStealthTheme,
   cursor: 'cell',
   priceAxisSide: 'left',
+  priceAxisWidth: 52,
+  reserveAxisSpace: true,
   crosshairLabelOpacity: 0.5,
   crosshairLabelFontSize: 8,
   candleRendering: {

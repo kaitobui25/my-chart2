@@ -56,6 +56,8 @@ export interface ChartOptions {
   cursor?: 'crosshair' | 'default' | 'cell';
   /** Side used for the vertical price axis. Defaults to right. */
   priceAxisSide?: 'left' | 'right';
+  /** Keep price/time axis space reserved while those chrome elements are hidden. */
+  reserveAxisSpace?: boolean;
   /** Opacity for the price/time value labels projected from the crosshair. */
   crosshairLabelOpacity?: number;
   /** Font size in pixels for the price/time value labels projected from the crosshair. */
@@ -230,6 +232,7 @@ export class L2Chart {
   private readonly crosshairLabelOpacity: number;
   private readonly crosshairLabelFontSize: number;
   private readonly priceAxisSide: 'left' | 'right';
+  private readonly reserveAxisSpace: boolean;
   private axisW: number;
   private readonly configuredAxisW: number | null;
   private readonly timeAxisH: number;
@@ -316,12 +319,13 @@ export class L2Chart {
     this.chrome = { ...DEFAULT_CHART_CHROME, ...options.chrome };
     this.idleCursor = options.cursor ?? 'crosshair';
     this.priceAxisSide = options.priceAxisSide ?? 'right';
+    this.reserveAxisSpace = options.reserveAxisSpace ?? false;
     this.crosshairLabelOpacity = clamp(options.crosshairLabelOpacity ?? 1, 0, 1);
     this.crosshairLabelFontSize = clamp(options.crosshairLabelFontSize ?? 12, 6, 24);
     this.intervalSec = options.intervalSec ?? 60;
     this.intervalExplicit = options.intervalSec !== undefined;
     this.configuredAxisW = options.priceAxisWidth ?? null;
-    this.axisW = this.chrome.priceAxis ? (this.configuredAxisW ?? 92) : 0;
+    this.axisW = (this.chrome.priceAxis || this.reserveAxisSpace) ? (this.configuredAxisW ?? 92) : 0;
     this.timeAxisH = options.timeAxisHeight ?? 28;
     this.sessionsVisible = this.chrome.sessionBands;
 
@@ -355,7 +359,8 @@ export class L2Chart {
       height: `${this.timeAxisH}px`,
       flex: 'none',
     } satisfies Partial<CSSStyleDeclaration>);
-    this.timeAxisEl.hidden = !this.chrome.timeAxis;
+    this.timeAxisEl.hidden = !this.reserveAxisSpace && !this.chrome.timeAxis;
+    this.timeAxisEl.style.visibility = this.chrome.timeAxis ? 'visible' : 'hidden';
     this.taCanvas = document.createElement('canvas');
     this.taOverlay = document.createElement('canvas');
     for (const c of [this.taCanvas, this.taOverlay]) {
@@ -601,11 +606,15 @@ export class L2Chart {
 
   setChrome(options: Partial<ChartChromeOptions>): void {
     const layoutChanged = (
-      (options.priceAxis !== undefined && options.priceAxis !== this.chrome.priceAxis)
-      || (options.timeAxis !== undefined && options.timeAxis !== this.chrome.timeAxis)
+      !this.reserveAxisSpace
+      && (
+        (options.priceAxis !== undefined && options.priceAxis !== this.chrome.priceAxis)
+        || (options.timeAxis !== undefined && options.timeAxis !== this.chrome.timeAxis)
+      )
     );
     Object.assign(this.chrome, options);
-    this.timeAxisEl.hidden = !this.chrome.timeAxis;
+    this.timeAxisEl.hidden = !this.reserveAxisSpace && !this.chrome.timeAxis;
+    this.timeAxisEl.style.visibility = this.chrome.timeAxis ? 'visible' : 'hidden';
     if (layoutChanged) this.layout();
     else this.invalidate();
   }
@@ -1258,7 +1267,7 @@ export class L2Chart {
   private layout(): void {
     const dpr = window.devicePixelRatio || 1;
     const rootW = this.root.getBoundingClientRect().width;
-    this.axisW = this.chrome.priceAxis
+    this.axisW = (this.chrome.priceAxis || this.reserveAxisSpace)
       ? (this.configuredAxisW ?? (rootW <= 720 ? 68 : rootW <= 960 ? 76 : 92))
       : 0;
     let width = rootW;
@@ -1271,7 +1280,12 @@ export class L2Chart {
       }
     }
     for (const c of [this.taCanvas, this.taOverlay]) {
-      width = this.sizeCanvas(c, rootW, this.chrome.timeAxis ? this.timeAxisH : 0, dpr).w;
+      width = this.sizeCanvas(
+        c,
+        rootW,
+        (this.chrome.timeAxis || this.reserveAxisSpace) ? this.timeAxisH : 0,
+        dpr,
+      ).w;
     }
     this.width = width;
     this.timeScale.setWidth(Math.max(0, this.width - this.axisW));
@@ -2449,6 +2463,7 @@ export class L2Chart {
     if (!this.chrome.priceAxis) return;
     const ctx = pane.ctx;
     const x0 = this.priceAxisSide === 'left' ? 0 : this.plotRight();
+    const labelX = this.priceAxisSide === 'left' ? x0 + this.axisW - 7 : x0 + 7;
     const plotLeft = this.plotLeft();
     const plotRight = this.plotRight();
     ctx.fillStyle = this.theme.axisBg;
@@ -2458,12 +2473,12 @@ export class L2Chart {
 
     ctx.font = FONT;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
+    ctx.textAlign = this.priceAxisSide === 'left' ? 'right' : 'left';
     ctx.fillStyle = this.theme.textDim;
     for (const p of pane.priceScale.ticks()) {
       const y = Math.round(pane.priceScale.yFor(p));
       if (y < 8 || y > pane.height - 8) continue;
-      ctx.fillText(pane.priceScale.formatLabel(p), x0 + 7, y);
+      ctx.fillText(pane.priceScale.formatLabel(p), labelX, y);
     }
 
     if (pane === this.panes[0] && this.candles.length > 0) {
@@ -2484,7 +2499,7 @@ export class L2Chart {
         this.roundRect(ctx, x0 + 2, y - 9, this.axisW - 5, 18, 3);
         ctx.fillStyle = '#ffffff';
         ctx.font = FONT_STRONG;
-        ctx.fillText(pane.priceScale.formatLabel(matchedPrice), x0 + 7, y);
+        ctx.fillText(pane.priceScale.formatLabel(matchedPrice), labelX, y);
         ctx.font = FONT;
         matchedLabelY = y;
       }
@@ -2497,6 +2512,7 @@ export class L2Chart {
     if (!quote || !(Number(quote.bid) > 0) || !(Number(quote.ask) > 0)) return;
     const ctx = pane.ctx;
     const x0 = this.priceAxisSide === 'left' ? 0 : this.plotRight();
+    const labelX = this.priceAxisSide === 'left' ? x0 + this.axisW - 7 : x0 + 7;
     const plotLeft = this.plotLeft();
     const plotRight = this.plotRight();
     const entries = [
@@ -2521,7 +2537,7 @@ export class L2Chart {
       ctx.fillStyle = entry.color;
       this.roundRect(ctx, x0 + 2, ly - 8, this.axisW - 5, 16, 3);
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(pane.priceScale.formatLabel(entry.price), x0 + 7, ly);
+      ctx.fillText(pane.priceScale.formatLabel(entry.price), labelX, ly);
     });
   }
 
@@ -2610,9 +2626,10 @@ export class L2Chart {
           ctx.globalAlpha = this.crosshairLabelOpacity;
           ctx.font = `500 ${this.crosshairLabelFontSize}px Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
           ctx.textBaseline = 'middle';
-          ctx.textAlign = 'left';
+          ctx.textAlign = this.priceAxisSide === 'left' ? 'right' : 'left';
           ctx.fillStyle = this.theme.crosshairLabelBg;
           const axisX = this.priceAxisSide === 'left' ? 0 : this.plotRight();
+          const labelX = this.priceAxisSide === 'left' ? axisX + this.axisW - 7 : axisX + 7;
           this.roundRect(
             ctx,
             axisX + 2,
@@ -2624,7 +2641,7 @@ export class L2Chart {
           ctx.fillStyle = this.theme.crosshairLabelText;
           ctx.fillText(
             pane.priceScale.formatLabel(price),
-            axisX + 7,
+            labelX,
             yy,
           );
           ctx.restore();
