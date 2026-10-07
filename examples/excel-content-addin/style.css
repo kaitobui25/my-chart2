@@ -370,6 +370,51 @@ body {
   text-transform: uppercase;
 }
 
+.param-group {
+  display: grid;
+  gap: 5px;
+}
+
+.param-group-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-bottom: 1px solid #eceeef;
+  padding: 4px 2px 5px;
+  background: transparent;
+  color: #7f888d;
+  font: 600 9px Calibri, "Segoe UI", sans-serif;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.param-group-toggle:hover,
+.param-group-toggle:focus-visible {
+  color: #596166;
+  outline: none;
+}
+
+.param-group-arrow {
+  width: 10px;
+  flex: 0 0 10px;
+  color: #9aa1a5;
+  font-size: 10px;
+  text-align: center;
+}
+
+.param-group-body {
+  display: grid;
+  gap: 3px;
+}
+
+.param-group-body[hidden] {
+  display: none;
+}
+
 .param-style-title {
   margin-top: 4px;
 }

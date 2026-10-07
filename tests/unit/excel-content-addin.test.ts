@@ -17,6 +17,7 @@ import {
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import { INDICATOR_STYLE_KEYS } from '../../examples/excel-content-addin/indicator-settings';
+import { IndicatorSectionStateStore } from '../../examples/excel-content-addin/indicator-section-state';
 import {
   ExcelAssistantController,
   formatCodexQuotaSummary,
@@ -223,6 +224,27 @@ describe('Excel Japan market configuration', () => {
     expect(Object.keys(controller.contextSnapshot()[0]!.params).some((key) => key.startsWith('__'))).toBe(false);
 
     controller.dispose();
+  });
+
+  it('keeps SMC settings sections collapsed by default and restores the user expansion state', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const first = new IndicatorSectionStateStore(storage);
+
+    expect(first.isExpanded('smart-money-concepts-v2', '🧱 Order Blocks')).toBe(false);
+    first.setExpanded('smart-money-concepts-v2', '🧱 Order Blocks', true);
+    first.setExpanded('smart-money-concepts-v3', '🏔️ Cấu trúc Swing', true);
+
+    const restored = new IndicatorSectionStateStore(storage);
+    expect(restored.isExpanded('smart-money-concepts-v2', '🧱 Order Blocks')).toBe(true);
+    expect(restored.isExpanded('smart-money-concepts-v3', '🏔️ Cấu trúc Swing')).toBe(true);
+    expect(restored.isExpanded('smart-money-concepts-v2', '📌 Cấu trúc Internal')).toBe(false);
+
+    restored.setExpanded('smart-money-concepts-v2', '🧱 Order Blocks', false);
+    expect(new IndicatorSectionStateStore(storage).isExpanded('smart-money-concepts-v2', '🧱 Order Blocks')).toBe(false);
   });
 });
 

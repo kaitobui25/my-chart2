@@ -5,6 +5,12 @@ import {
   INDICATOR_STYLE_KEYS,
   mergeIndicatorSettings,
 } from './indicator-settings';
+import { IndicatorSectionStateStore } from './indicator-section-state';
+
+const COLLAPSIBLE_SECTION_INDICATORS = new Set([
+  'smart-money-concepts-v2',
+  'smart-money-concepts-v3',
+]);
 
 export class IndicatorSettingsDialog {
   private readonly overlay = element<HTMLElement>('#param-overlay');
@@ -15,6 +21,7 @@ export class IndicatorSettingsDialog {
   private readonly okButton = element<HTMLButtonElement>('#param-ok');
   private readonly closeButton = element<HTMLButtonElement>('#param-close');
   private activeId = '';
+  private readonly sectionState = new IndicatorSectionStateStore();
 
   private readonly onReset = () => this.reset();
   private readonly onCancel = () => this.close();
@@ -89,14 +96,30 @@ export class IndicatorSettingsDialog {
       this.fields.appendChild(sectionTitle('Thông số tính toán', 'Thay đổi cách chỉ báo được tính'));
     }
 
+    const collapsibleSections = COLLAPSIBLE_SECTION_INDICATORS.has(definition.id);
     let currentSection: string | undefined;
+    let currentSectionBody: HTMLElement | null = null;
     for (const param of definition.params ?? []) {
       if (param.section && param.section !== currentSection) {
-        const heading = document.createElement('div');
-        heading.className = 'param-section-title param-group-title';
-        heading.textContent = param.section;
-        this.fields.appendChild(heading);
         currentSection = param.section;
+        if (collapsibleSections) {
+          const group = document.createElement('section');
+          group.className = 'param-group';
+          const body = document.createElement('div');
+          body.className = 'param-group-body';
+          const expanded = this.sectionState.isExpanded(definition.id, param.section);
+          body.hidden = !expanded;
+          const heading = this.createGroupToggle(definition.id, param.section, body, expanded);
+          group.append(heading, body);
+          this.fields.appendChild(group);
+          currentSectionBody = body;
+        } else {
+          const heading = document.createElement('div');
+          heading.className = 'param-section-title param-group-title';
+          heading.textContent = param.section;
+          this.fields.appendChild(heading);
+          currentSectionBody = null;
+        }
       }
 
       const row = document.createElement('label');
@@ -132,7 +155,7 @@ export class IndicatorSettingsDialog {
       }
       input.dataset.key = param.key;
       row.append(name, input);
-      this.fields.appendChild(row);
+      (currentSectionBody ?? this.fields).appendChild(row);
     }
 
     if (!definition.params?.length) {
@@ -197,6 +220,35 @@ export class IndicatorSettingsDialog {
         colors.appendChild(label);
       });
     this.fields.appendChild(colors);
+  }
+
+  private createGroupToggle(
+    indicatorId: string,
+    section: string,
+    body: HTMLElement,
+    expanded: boolean,
+  ): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'param-group-toggle';
+    button.setAttribute('aria-expanded', String(expanded));
+
+    const arrow = document.createElement('span');
+    arrow.className = 'param-group-arrow';
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = expanded ? '▾' : '▸';
+    const label = document.createElement('span');
+    label.textContent = section;
+    button.append(arrow, label);
+
+    button.addEventListener('click', () => {
+      const nextExpanded = body.hidden === true;
+      body.hidden = !nextExpanded;
+      button.setAttribute('aria-expanded', String(nextExpanded));
+      arrow.textContent = nextExpanded ? '▾' : '▸';
+      this.sectionState.setExpanded(indicatorId, section, nextExpanded);
+    });
+    return button;
   }
 
   private appendSelect(
