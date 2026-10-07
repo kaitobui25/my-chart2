@@ -3,6 +3,7 @@ import { ExcelAssistantController } from './assistant-controller';
 import { createExcelAssistantBridge, type ExcelAssistantSource } from './assistant-context';
 import { isExcelHost, readSelectedRange, waitForOfficeReady } from './excel-host';
 import { IndicatorController } from './indicator-controller';
+import { IndicatorSettingsDialog } from './indicator-settings-dialog';
 import {
   JAPAN_MARKET_CONFIG,
   JAPAN_TIMEFRAMES,
@@ -47,6 +48,10 @@ const watchlistAddButton = requiredElement<HTMLButtonElement>('#watchlist-add');
 
 const chart = new L2Chart(chartElement, excelStealthChartOptions);
 const indicators = new IndicatorController(chart);
+const indicatorSettings = new IndicatorSettingsDialog(indicators, () => {
+  assistant.refreshContext();
+  setPersistentStatus(statusMessage);
+});
 const market = new JapanMarketController(chart);
 const optionsController = new ExcelOptionsController({
   chart,
@@ -118,6 +123,16 @@ const symbolCombobox = createSymbolCombobox({
 });
 
 timeframeSelect.addEventListener('change', () => void reloadMarket());
+const offIndicatorSettings = chart.onIndicatorSettings((id) => indicatorSettings.open(id));
+const offIndicatorRemove = chart.onIndicatorRemove((id) => {
+  if (id !== indicators.getActiveId()) return;
+  indicators.select('');
+  indicatorSelect.value = '';
+  syncIndicatorTrigger();
+  renderIndicatorMenu();
+  assistant.refreshContext();
+  setPersistentStatus(statusMessage);
+});
 indicatorSelect.addEventListener('change', () => {
   try {
     indicators.select(indicatorSelect.value);
@@ -167,6 +182,9 @@ window.addEventListener('beforeunload', () => {
   viewTabs.dispose();
   watchlist.dispose();
   assistant.dispose();
+  offIndicatorSettings();
+  offIndicatorRemove();
+  indicatorSettings.dispose();
   optionsController.dispose();
   indicators.dispose();
   market.dispose();
@@ -264,6 +282,7 @@ function setChartHoverChrome(active: boolean): void {
   chart.setChrome({
     priceAxis: active,
     timeAxis: active,
+    legend: active,
     crosshair: active,
   });
 }
@@ -345,6 +364,21 @@ function createIndicatorRow(id: string, name: string, favorite: boolean): HTMLEl
   row.appendChild(selectButton);
 
   if (id) {
+    if (indicatorSelect.value === id) {
+      const settingsButton = document.createElement('button');
+      settingsButton.type = 'button';
+      settingsButton.className = 'indicator-menu-settings';
+      settingsButton.textContent = '⚙';
+      settingsButton.setAttribute('aria-label', `Cấu hình ${name}`);
+      settingsButton.title = 'Cấu hình';
+      settingsButton.addEventListener('click', () => {
+        setIndicatorMenuOpen(false);
+        indicatorSettings.open(id);
+      });
+      row.classList.add('has-settings');
+      row.appendChild(settingsButton);
+    }
+
     const favoriteButton = document.createElement('button');
     favoriteButton.type = 'button';
     favoriteButton.className = 'indicator-menu-favorite';

@@ -1,11 +1,15 @@
 import type { L2Chart } from '../../src/library';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import {
-  defaultParams,
   type IndicatorCategory,
   type IndicatorDef,
   type IndicatorInstance,
+  type Params,
 } from '../../src/indicators/registry';
+import {
+  indicatorAppearanceFromParams,
+  mergeIndicatorSettings,
+} from './indicator-settings';
 
 export interface IndicatorOption {
   id: string;
@@ -24,7 +28,7 @@ const FAVORITES_STORAGE_KEY = 'l2chart.excel.indicator-favorites.v1';
 export class IndicatorController {
   private active: IndicatorInstance | null = null;
   private activeId = '';
-  private activeParams: Record<string, unknown> = {};
+  private readonly paramsById = new Map<string, Params>();
   private readonly favoriteIds: Set<string>;
   private readonly byId = new Map<string, IndicatorDef>(
     builtinIndicators.map((definition) => [definition.id, definition]),
@@ -70,19 +74,49 @@ export class IndicatorController {
     this.active?.remove();
     this.active = null;
     this.activeId = '';
-    this.activeParams = {};
 
     if (!id) return;
     const definition = this.byId.get(id);
     if (!definition) throw new Error(`Unknown indicator: ${id}`);
-    const params = defaultParams(definition);
+    const params = this.getParams(id);
     this.active = this.chart.withIndicatorOwner(
       definition.id,
       () => definition.create(this.chart, params),
+      indicatorAppearanceFromParams(definition.id, params),
     );
     this.activeId = definition.id;
-    this.activeParams = { ...params };
     this.active.recompute();
+  }
+
+  getActiveId(): string {
+    return this.activeId;
+  }
+
+  getDefinition(id: string): IndicatorDef | undefined {
+    return this.byId.get(id);
+  }
+
+  getParams(id: string): Params {
+    const definition = this.byId.get(id);
+    if (!definition) throw new Error(`Unknown indicator: ${id}`);
+    return mergeIndicatorSettings(definition, this.paramsById.get(id) ?? {});
+  }
+
+  setParams(id: string, params: Params): void {
+    const definition = this.byId.get(id);
+    if (!definition) throw new Error(`Unknown indicator: ${id}`);
+    const mergedParams = mergeIndicatorSettings(definition, params);
+    this.paramsById.set(id, mergedParams);
+    if (id !== this.activeId) return;
+
+    this.active?.remove();
+    this.active = this.chart.withIndicatorOwner(
+      definition.id,
+      () => definition.create(this.chart, mergedParams),
+      indicatorAppearanceFromParams(definition.id, mergedParams),
+    );
+    this.active.recompute();
+    this.chart.invalidate();
   }
 
   recompute(): void {
@@ -90,7 +124,11 @@ export class IndicatorController {
   }
 
   contextSnapshot(): Array<{ id: string; params: Record<string, unknown> }> {
-    return this.activeId ? [{ id: this.activeId, params: { ...this.activeParams } }] : [];
+    if (!this.activeId) return [];
+    const params = Object.fromEntries(
+      Object.entries(this.getParams(this.activeId)).filter(([key]) => !key.startsWith('__')),
+    );
+    return [{ id: this.activeId, params }];
   }
 
   dispose(): void {
@@ -98,7 +136,6 @@ export class IndicatorController {
     this.active?.remove();
     this.active = null;
     this.activeId = '';
-    this.activeParams = {};
   }
 
   private loadFavorites(): Set<string> {

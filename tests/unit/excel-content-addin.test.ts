@@ -16,6 +16,7 @@ import {
 } from '../../examples/excel-content-addin/japan-market-config';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
+import { INDICATOR_STYLE_KEYS } from '../../examples/excel-content-addin/indicator-settings';
 import {
   ExcelAssistantController,
   formatCodexQuotaSummary,
@@ -181,6 +182,47 @@ describe('Excel Japan market configuration', () => {
 
     controller.dispose();
     restored.dispose();
+  });
+
+  it('recreates the active indicator with edited parameters and appearance', () => {
+    const firstInstance = { recompute: vi.fn(), remove: vi.fn() };
+    const secondInstance = { recompute: vi.fn(), remove: vi.fn() };
+    const instances = [firstInstance, secondInstance];
+    const chart = {
+      on: vi.fn(() => () => undefined),
+      withIndicatorOwner: vi.fn(() => instances.shift()),
+      invalidate: vi.fn(),
+    } as unknown as L2Chart;
+    const controller = new IndicatorController(chart, null);
+
+    controller.select('sma');
+    controller.setParams('sma', {
+      ...controller.getParams('sma'),
+      length: 42,
+      [INDICATOR_STYLE_KEYS.lineStyle]: 'dashed',
+      [INDICATOR_STYLE_KEYS.lineWidth]: 3,
+      [INDICATOR_STYLE_KEYS.opacity]: 40,
+      [INDICATOR_STYLE_KEYS.color1]: '#123456',
+    });
+
+    expect(firstInstance.remove).toHaveBeenCalledOnce();
+    expect(secondInstance.recompute).toHaveBeenCalledOnce();
+    expect(chart.invalidate).toHaveBeenCalledOnce();
+    expect(chart.withIndicatorOwner).toHaveBeenLastCalledWith(
+      'sma',
+      expect.any(Function),
+      expect.objectContaining({
+        lineStyle: 'dashed',
+        lineWidth: 3,
+        opacity: 0.4,
+        colors: expect.arrayContaining(['#123456']),
+      }),
+    );
+    expect(controller.getParams('sma').length).toBe(42);
+    expect(controller.contextSnapshot()).toEqual([{ id: 'sma', params: expect.objectContaining({ length: 42 }) }]);
+    expect(Object.keys(controller.contextSnapshot()[0]!.params).some((key) => key.startsWith('__'))).toBe(false);
+
+    controller.dispose();
   });
 });
 

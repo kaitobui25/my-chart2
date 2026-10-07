@@ -134,6 +134,21 @@
         </section>
       </section>
     </main>
+    <div id="param-overlay" hidden>
+      <section id="param-box" role="dialog" aria-modal="true" aria-labelledby="param-title">
+        <header id="param-head">
+          <strong id="param-title"></strong>
+          <button id="param-close" type="button" aria-label="Đóng">×</button>
+        </header>
+        <div id="param-fields"></div>
+        <footer id="param-actions">
+          <button id="param-reset" type="button">Mặc định</button>
+          <span></span>
+          <button id="param-cancel" type="button">Hủy</button>
+          <button id="param-ok" type="button">OK</button>
+        </footer>
+      </section>
+    </div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>
