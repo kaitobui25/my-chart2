@@ -14,6 +14,7 @@ import {
   JAPAN_MARKET_CONFIG,
   JAPAN_TIMEFRAMES,
 } from '../../examples/excel-content-addin/japan-market-config';
+import { MarketSelectionStore } from '../../examples/excel-content-addin/market-selection-store';
 import { builtinIndicators } from '../../src/indicators/builtin/all';
 import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import { INDICATOR_STYLE_KEYS } from '../../examples/excel-content-addin/indicator-settings';
@@ -120,6 +121,38 @@ describe('Excel Japan market configuration', () => {
     const minute = historyRangeForTimeframe('1m', now);
     expect(daily.to).toBe(now);
     expect(daily.from).toBeLessThan(minute.from);
+  });
+
+  it('persists the last successful market symbol and timeframe', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const first = new MarketSelectionStore(storage);
+
+    expect(first.get()).toEqual({
+      symbol: JAPAN_MARKET_CONFIG.defaultSymbol,
+      timeframe: JAPAN_MARKET_CONFIG.defaultTimeframe,
+    });
+    first.update({ symbol: '6758', timeframe: '4h' });
+
+    expect(new MarketSelectionStore(storage).get()).toEqual({
+      symbol: '6758.T',
+      timeframe: '4h',
+    });
+  });
+
+  it('falls back to default market selection when persisted state is invalid', () => {
+    const storage = {
+      getItem: () => '{"symbol":"INVALID","timeframe":"2h"}',
+      setItem: vi.fn(),
+    };
+
+    expect(new MarketSelectionStore(storage).get()).toEqual({
+      symbol: JAPAN_MARKET_CONFIG.defaultSymbol,
+      timeframe: JAPAN_MARKET_CONFIG.defaultTimeframe,
+    });
   });
 
   it('exposes only pure built-in OHLCV indicators to the Excel picker source', () => {
@@ -234,6 +267,84 @@ describe('Excel Japan market configuration', () => {
     expect(secondInstance.remove).toHaveBeenCalledOnce();
     expect(controller.isActive('ema')).toBe(false);
 
+    controller.dispose();
+  });
+
+  it('restores active indicators and their settings after reload', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const createChart = () => ({
+      on: vi.fn(() => () => undefined),
+      withIndicatorOwner: vi.fn(() => ({ recompute: vi.fn(), remove: vi.fn() })),
+      invalidate: vi.fn(),
+    }) as unknown as L2Chart;
+
+    const first = new IndicatorController(createChart(), storage);
+    first.activate('sma');
+    first.activate('ema');
+    first.setParams('sma', {
+      ...first.getParams('sma'),
+      length: 55,
+      [INDICATOR_STYLE_KEYS.lineStyle]: 'dotted',
+      [INDICATOR_STYLE_KEYS.lineWidth]: 2.5,
+      [INDICATOR_STYLE_KEYS.opacity]: 65,
+      [INDICATOR_STYLE_KEYS.color1]: '#abcdef',
+    });
+
+    const restoredChart = createChart();
+    const restored = new IndicatorController(restoredChart, storage);
+
+    expect(restored.getActiveIds()).toEqual(['sma', 'ema']);
+    expect(restored.getParams('sma')).toMatchObject({
+      length: 55,
+      [INDICATOR_STYLE_KEYS.lineStyle]: 'dotted',
+      [INDICATOR_STYLE_KEYS.lineWidth]: 2.5,
+      [INDICATOR_STYLE_KEYS.opacity]: 65,
+      [INDICATOR_STYLE_KEYS.color1]: '#abcdef',
+    });
+    expect(restoredChart.withIndicatorOwner).toHaveBeenCalledTimes(2);
+    expect(restoredChart.withIndicatorOwner).toHaveBeenCalledWith(
+      'sma',
+      expect.any(Function),
+      expect.objectContaining({
+        lineStyle: 'dotted',
+        lineWidth: 2.5,
+        opacity: 0.65,
+        colors: expect.arrayContaining(['#abcdef']),
+      }),
+    );
+
+    restored.deactivate('ema');
+    const afterDeactivate = new IndicatorController(createChart(), storage);
+    expect(afterDeactivate.getActiveIds()).toEqual(['sma']);
+    expect(afterDeactivate.getParams('sma').length).toBe(55);
+
+    first.dispose();
+    restored.dispose();
+    afterDeactivate.dispose();
+  });
+
+  it('ignores malformed persisted indicator state', () => {
+    const storage = {
+      getItem: (key: string) => key.includes('indicator-state')
+        ? '{"activeIds":["missing",42],"paramsById":{"sma":{"length":21,"bad":null}}}'
+        : null,
+      setItem: vi.fn(),
+    };
+    const chart = {
+      on: vi.fn(() => () => undefined),
+      withIndicatorOwner: vi.fn(() => ({ recompute: vi.fn(), remove: vi.fn() })),
+    } as unknown as L2Chart;
+
+    const controller = new IndicatorController(chart, storage);
+
+    expect(controller.getActiveIds()).toEqual([]);
+    expect(controller.getParams('sma').length).toBe(21);
+    expect(controller.getParams('sma')).not.toHaveProperty('bad');
+    expect(chart.withIndicatorOwner).not.toHaveBeenCalled();
     controller.dispose();
   });
 

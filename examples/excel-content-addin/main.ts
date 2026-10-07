@@ -10,6 +10,7 @@ import {
   type JapanTimeframe,
 } from './japan-market-config';
 import { JapanMarketController } from './japan-market-controller';
+import { MarketSelectionStore } from './market-selection-store';
 import { ExcelOptionsController } from './options-controller';
 import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
@@ -52,6 +53,7 @@ const indicatorSettings = new IndicatorSettingsDialog(indicators, () => {
   setPersistentStatus(statusMessage);
 });
 const market = new JapanMarketController(chart);
+const marketSelectionStore = new MarketSelectionStore();
 const optionsController = new ExcelOptionsController({
   chart,
   surface: appShell,
@@ -106,8 +108,9 @@ viewTabs = bindViewTabs({
 
 populateTimeframes();
 populateIndicators();
-symbolInput.value = JAPAN_MARKET_CONFIG.defaultSymbol;
-timeframeSelect.value = JAPAN_MARKET_CONFIG.defaultTimeframe;
+const marketSelection = marketSelectionStore.get();
+symbolInput.value = marketSelection.symbol;
+timeframeSelect.value = marketSelection.timeframe;
 
 const symbolCombobox = createSymbolCombobox({
   root: symbolControl,
@@ -191,6 +194,8 @@ async function reloadMarket(): Promise<void> {
     const result = await market.load(symbolInput.value, timeframe);
     if (!result || loadId !== marketLoadId) return;
     symbolInput.value = result.symbol;
+    timeframeSelect.value = result.timeframe;
+    marketSelectionStore.update({ symbol: result.symbol, timeframe: result.timeframe });
     activeSource = 'market';
     assistant.refreshContext();
     watchlist.setActiveSymbol(result.symbol);
