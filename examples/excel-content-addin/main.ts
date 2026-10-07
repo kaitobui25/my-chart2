@@ -31,7 +31,6 @@ const symbolMenu = requiredElement<HTMLElement>('#symbol-menu');
 const symbolTrigger = requiredElement<HTMLButtonElement>('#symbol-trigger');
 const timeframeSelect = requiredElement<HTMLSelectElement>('#timeframe-select');
 const indicatorControl = requiredElement<HTMLElement>('#indicator-control');
-const indicatorSelect = requiredElement<HTMLSelectElement>('#indicator-select');
 const indicatorTrigger = requiredElement<HTMLButtonElement>('#indicator-trigger');
 const indicatorTriggerLabel = requiredElement<HTMLElement>('#indicator-trigger-label');
 const indicatorMenu = requiredElement<HTMLElement>('#indicator-menu');
@@ -125,24 +124,9 @@ const symbolCombobox = createSymbolCombobox({
 timeframeSelect.addEventListener('change', () => void reloadMarket());
 const offIndicatorSettings = chart.onIndicatorSettings((id) => indicatorSettings.open(id));
 const offIndicatorRemove = chart.onIndicatorRemove((id) => {
-  if (id !== indicators.getActiveId()) return;
-  indicators.select('');
-  indicatorSelect.value = '';
-  syncIndicatorTrigger();
-  renderIndicatorMenu();
-  assistant.refreshContext();
-  setPersistentStatus(statusMessage);
-});
-indicatorSelect.addEventListener('change', () => {
-  try {
-    indicators.select(indicatorSelect.value);
-    syncIndicatorTrigger();
-    renderIndicatorMenu();
-    assistant.refreshContext();
-    setPersistentStatus(statusMessage);
-  } catch (error) {
-    setPersistentStatus(error instanceof Error ? error.message : 'Không thể bật indicator.', true);
-  }
+  if (!indicators.isActive(id)) return;
+  indicators.deactivate(id);
+  refreshActiveIndicators();
 });
 indicatorTrigger.addEventListener('click', () => {
   setIndicatorMenuOpen(Boolean(indicatorMenu.hidden));
@@ -288,19 +272,7 @@ function setChartHoverChrome(active: boolean): void {
 }
 
 function populateIndicators(): void {
-  const selectedId = indicatorSelect.value;
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = 'Indicator';
   const options = indicators.options();
-  const optionElements = options.map((item) => {
-    const option = document.createElement('option');
-    option.value = item.id;
-    option.textContent = item.name;
-    return option;
-  });
-  indicatorSelect.replaceChildren(none, ...optionElements);
-  indicatorSelect.value = selectedId;
   syncIndicatorTrigger();
   renderIndicatorMenu(options);
 }
@@ -315,8 +287,9 @@ function renderIndicatorMenu(options = indicators.options()): void {
   const regular = options.filter((item) => !item.favorite);
   const fragment = document.createDocumentFragment();
 
-  const clearRow = createIndicatorRow('', 'Không dùng indicator', false);
-  fragment.appendChild(clearRow);
+  if (indicators.getActiveIds().length > 0) {
+    fragment.appendChild(createClearIndicatorsRow());
+  }
 
   if (favorites.length > 0) {
     fragment.appendChild(createIndicatorGroupLabel('Yêu thích'));
@@ -345,26 +318,28 @@ function createIndicatorGroupLabel(label: string): HTMLElement {
 }
 
 function createIndicatorRow(id: string, name: string, favorite: boolean): HTMLElement {
+  const active = indicators.isActive(id);
   const row = document.createElement('div');
   row.className = 'indicator-menu-row';
-  row.dataset.selected = String(indicatorSelect.value === id);
+  row.dataset.selected = String(active);
 
   const selectButton = document.createElement('button');
   selectButton.type = 'button';
   selectButton.className = 'indicator-menu-select';
-  selectButton.setAttribute('role', 'menuitemradio');
-  selectButton.setAttribute('aria-checked', String(indicatorSelect.value === id));
+  selectButton.setAttribute('aria-pressed', String(active));
   selectButton.textContent = name;
   selectButton.addEventListener('click', () => {
-    indicatorSelect.value = id;
-    indicatorSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    setIndicatorMenuOpen(false);
-    indicatorTrigger.focus();
+    try {
+      indicators.toggle(id);
+      refreshActiveIndicators();
+    } catch (error) {
+      setPersistentStatus(error instanceof Error ? error.message : 'Không thể cập nhật indicator.', true);
+    }
   });
   row.appendChild(selectButton);
 
   if (id) {
-    if (indicatorSelect.value === id) {
+    if (active) {
       const settingsButton = document.createElement('button');
       settingsButton.type = 'button';
       settingsButton.className = 'indicator-menu-settings';
@@ -403,10 +378,39 @@ function createIndicatorRow(id: string, name: string, favorite: boolean): HTMLEl
   return row;
 }
 
+function createClearIndicatorsRow(): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'indicator-menu-row indicator-menu-clear-row';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'indicator-menu-select';
+  button.textContent = 'Xóa tất cả indicator';
+  button.addEventListener('click', () => {
+    indicators.clear();
+    refreshActiveIndicators();
+  });
+  row.appendChild(button);
+  return row;
+}
+
+function refreshActiveIndicators(): void {
+  syncIndicatorTrigger();
+  renderIndicatorMenu();
+  assistant.refreshContext();
+  setPersistentStatus(statusMessage);
+}
+
 function syncIndicatorTrigger(): void {
-  const selected = indicators.options().find((item) => item.id === indicatorSelect.value);
-  indicatorTriggerLabel.textContent = selected?.name ?? 'Indicator';
-  indicatorTrigger.title = selected?.name ?? 'Indicator';
+  const activeIds = indicators.getActiveIds();
+  const activeNames = activeIds
+    .map((id) => indicators.getDefinition(id)?.name)
+    .filter((name): name is string => Boolean(name));
+  indicatorTriggerLabel.textContent = activeNames.length === 1
+    ? activeNames[0]
+    : activeNames.length > 1
+      ? `Indicator (${activeNames.length})`
+      : 'Indicator';
+  indicatorTrigger.title = activeNames.length > 0 ? activeNames.join(', ') : 'Indicator';
 }
 
 function setIndicatorMenuOpen(open: boolean): void {

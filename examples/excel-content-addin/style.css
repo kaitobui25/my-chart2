@@ -217,6 +217,13 @@ body {
   background: #f8faf9;
 }
 
+.indicator-menu-clear-row {
+  margin-bottom: 3px;
+  border-bottom: 1px solid #eef0f1;
+  border-radius: 0;
+  padding-bottom: 3px;
+}
+
 .indicator-menu-select,
 .indicator-menu-settings,
 .indicator-menu-favorite {

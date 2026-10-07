@@ -185,10 +185,11 @@ describe('Excel Japan market configuration', () => {
     restored.dispose();
   });
 
-  it('recreates the active indicator with edited parameters and appearance', () => {
+  it('keeps multiple indicators active and recreates only the edited indicator', () => {
     const firstInstance = { recompute: vi.fn(), remove: vi.fn() };
     const secondInstance = { recompute: vi.fn(), remove: vi.fn() };
-    const instances = [firstInstance, secondInstance];
+    const thirdInstance = { recompute: vi.fn(), remove: vi.fn() };
+    const instances = [firstInstance, secondInstance, thirdInstance];
     const chart = {
       on: vi.fn(() => () => undefined),
       withIndicatorOwner: vi.fn(() => instances.shift()),
@@ -196,7 +197,8 @@ describe('Excel Japan market configuration', () => {
     } as unknown as L2Chart;
     const controller = new IndicatorController(chart, null);
 
-    controller.select('sma');
+    controller.activate('sma');
+    controller.activate('ema');
     controller.setParams('sma', {
       ...controller.getParams('sma'),
       length: 42,
@@ -207,7 +209,8 @@ describe('Excel Japan market configuration', () => {
     });
 
     expect(firstInstance.remove).toHaveBeenCalledOnce();
-    expect(secondInstance.recompute).toHaveBeenCalledOnce();
+    expect(secondInstance.remove).not.toHaveBeenCalled();
+    expect(thirdInstance.recompute).toHaveBeenCalledOnce();
     expect(chart.invalidate).toHaveBeenCalledOnce();
     expect(chart.withIndicatorOwner).toHaveBeenLastCalledWith(
       'sma',
@@ -220,8 +223,16 @@ describe('Excel Japan market configuration', () => {
       }),
     );
     expect(controller.getParams('sma').length).toBe(42);
-    expect(controller.contextSnapshot()).toEqual([{ id: 'sma', params: expect.objectContaining({ length: 42 }) }]);
+    expect(controller.getActiveIds()).toEqual(['sma', 'ema']);
+    expect(controller.contextSnapshot()).toEqual([
+      { id: 'sma', params: expect.objectContaining({ length: 42 }) },
+      { id: 'ema', params: expect.any(Object) },
+    ]);
     expect(Object.keys(controller.contextSnapshot()[0]!.params).some((key) => key.startsWith('__'))).toBe(false);
+
+    expect(controller.toggle('ema')).toBe(false);
+    expect(secondInstance.remove).toHaveBeenCalledOnce();
+    expect(controller.isActive('ema')).toBe(false);
 
     controller.dispose();
   });
