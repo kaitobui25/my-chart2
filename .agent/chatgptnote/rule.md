@@ -1,0 +1,5 @@
+- ghi chú để sau này khỏi quên.
+- ngắn gọn, dễ hiểu
+- chỉ có hiệu lực tại thời điểm AI agent ghi nó ra file. (sau này code thay đổi, thì các ghi chú có thể đã lỗi thời, nếu AI không cập nhật cho nó)
+- tiền tố file 01_[title_ngan_gon].md
+- không cần phải ghi lại tất cả các câu hỏi một, có thể tổng hợp những câu hỏi trùng nội dung, và câu trả lời trùng nội dung cũng tổng hợp nếu có.
