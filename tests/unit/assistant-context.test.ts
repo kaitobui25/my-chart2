@@ -83,6 +83,24 @@ describe('assistant chart context', () => {
     expect(context?.additionalTimeframes.map((item) => item.timeframe)).toEqual(['30m']);
   });
 
+  it('does not prefetch named timeframes on follow-up chats; the AI can request them through tools', async () => {
+    const getHistory = vi.fn(async () => makeCandles(20));
+    const feed: Datafeed = { name: 'test', getHistory, subscribe: () => () => undefined };
+    const bridge = createAssistantBridge({
+      getPrimarySource: () => makeSource(),
+      getDatafeed: () => feed,
+    });
+    const context = await bridge.resolveContext('so sánh với 1h', { includeAdditionalTimeframes: false });
+    expect(context?.symbol).toBe('7203.T');
+    expect(context?.additionalTimeframes).toEqual([]);
+    expect(getHistory).not.toHaveBeenCalled();
+    const result = await bridge.queryData({
+      tool: 'get_candles', timeframe: '1h', id: '', limit: 10, paramsJson: '{}',
+    }, context!);
+    expect(result.ok).toBe(true);
+    expect(getHistory).toHaveBeenCalled();
+  });
+
   it('reads the newest candles from a wide requested range even when the cache returns from the range start', async () => {
     const primary = makeSource();
     const anchor = primary.candles[50].time;

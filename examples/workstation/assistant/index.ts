@@ -402,7 +402,9 @@ function mountAssistant(): void {
     setBusy(true);
     const thinking = appendThinking();
     try {
-      const context = await window.__L2CHART_ASSISTANT__?.resolveContext(message) ?? baseContext;
+      const context = await window.__L2CHART_ASSISTANT__?.resolveContext(message, {
+        includeAdditionalTimeframes: conversation.length === 0,
+      }) ?? baseContext;
       if (context.additionalTimeframes.length > 0) {
         const extras = context.additionalTimeframes.map((item) => (
           item.error ? `${item.timeframe} lỗi` : `${item.timeframe} ${item.candleCount} nến`

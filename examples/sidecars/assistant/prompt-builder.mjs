@@ -4,6 +4,7 @@ const RULES = [
   'Use the supplied structured chart context as the source of truth for symbol, timeframe, prices, candles, volume, indicators, replay state, and requested extra timeframes.',
   'The primary candles are limited to the chart area the user is currently viewing, with only a small nearby buffer.',
   'The initial context adds extra timeframes when the user explicitly asks; you may request more through the listed chart tools when analysis requires them. If a requested timeframe contains an error or no candles, say that the data is unavailable.',
+  'After the first question, candles are not automatically included in new questions. Request fresh candles or indicators through the chart tools when necessary; earlier candle data may be stale.',
   'Do not invent prices, volume, indicator values, news, fundamentals, unseen candles, or missing data.',
   'If the data is not enough to answer, say what is missing instead of guessing.',
   'Do not add a trade plan, prediction, or advice unless the user explicitly asks for it.',
@@ -37,6 +38,23 @@ function compactContext(context) {
   }
 }
 
+function chartMetadata(context) {
+  const source = context && typeof context === 'object' ? context : {}
+  return {
+    version: source.version,
+    generatedAt: source.generatedAt,
+    symbol: source.symbol,
+    timeframe: source.timeframe,
+    mode: source.mode,
+    replay: source.replay,
+    historyRange: source.historyRange,
+    visibleRange: source.visibleRange,
+    candleCount: source.candleCount,
+    indicators: Array.isArray(source.indicators) ? source.indicators : [],
+    quote: source.quote ?? null
+  }
+}
+
 function timeframeSummary(context) {
   const rows = []
   if (context && typeof context === 'object') {
@@ -47,24 +65,36 @@ function timeframeSummary(context) {
         const count = Number(item?.candleCount) || 0
         rows.push(item?.error
           ? `${timeframe}: unavailable (${item.error})`
-          : `${timeframe}: ${count} structured candles available`)
+          : count === 0
+            ? `${timeframe}: unavailable (no candles)`
+            : `${timeframe}: ${count} structured candles available`)
       }
     }
   }
   return rows.length > 0 ? rows.join('\n') : 'No chart data available.'
 }
 
-export function buildPrompt({ message, context, toolResults = [], structuredResponse = false, continuation = false }) {
+export function buildPrompt({ message, context, toolResults = [], structuredResponse = false, mode = 'full' }) {
   const responseShape = '{"message":"short, clear answer or empty when requesting data","requests":[]}'
-  if (continuation) {
+  if (mode === 'toolContinuation') {
     return [
-      'Continue the pending chart question in this Codex session using the newly supplied results.',
+      'Continue answering the pending chart question in this conversation using the newly supplied results.',
       'Do not repeat an earlier request if its result is already available.',
       'Results of prior chart data requests (use these as verified data):',
-      JSON.stringify(toolResults.slice(0, 6)),
+      JSON.stringify(toolResults.slice(0, 2)),
       'Reply in the language of the original question. Do not invent missing data.',
-      'Required response shape:',
-      responseShape
+      ...(structuredResponse ? ['Required response shape:', responseShape] : [])
+    ].join('\n')
+  }
+  if (mode === 'followUp') {
+    return [
+      `Current chart: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
+      'No candle OHLCV data is attached to this turn. Use earlier data only if it still matches the current chart and question.',
+      'If fresh candles or indicator values are needed, request get_candles or get_indicator using the chart tool format established in this conversation. Do not guess missing data.',
+      `User question: ${String(message ?? '').trim()}`,
+      'Current chart metadata JSON (no candles):',
+      JSON.stringify(chartMetadata(context)),
+      ...(structuredResponse ? ['Required response shape:', responseShape] : [])
     ].join('\n')
   }
   const prompt = [

@@ -219,9 +219,14 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
     return source ? buildPrimaryContext(source) : null;
   };
 
-  const resolveContext = async (message: string): Promise<AssistantChartContext | null> => {
+  const resolveContext = async (
+    message: string,
+    { includeAdditionalTimeframes = true }: { includeAdditionalTimeframes?: boolean } = {},
+  ): Promise<AssistantChartContext | null> => {
     const context = getContext();
     if (!context) return null;
+    // On subsequent chats the AI decides whether to fetch other timeframes.
+    if (!includeAdditionalTimeframes) return context;
 
     const requested = extractRequestedTimeframes(message, context.timeframe);
     if (requested.length === 0) return context;

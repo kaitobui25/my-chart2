@@ -2,12 +2,15 @@ import http from 'node:http'
 import { mkdir } from 'node:fs/promises'
 import { HOST, MAX_BODY_BYTES, PORT, REQUEST_TIMEOUT_MS, RUNTIME_ROOT } from './config.mjs'
 import { buildPrompt } from './prompt-builder.mjs'
+import { selectPromptMode } from './prompt-mode.mjs'
 import { parseNativeResponse } from './response-schema.mjs'
 import { ChatGptExtensionBridge, validExtensionId } from './chatgpt-bridge.mjs'
 import { ChatGptProvider } from './chatgpt-provider.mjs'
 import { CodexProvider, codexAvailable, getCodexOptions, getCodexStatus } from './codex-provider.mjs'
 
 const ASSISTANT_API_VERSION = 2
+// Captured once: a running Node process does not reload changed prompt modules.
+const startedAt = Date.now()
 await mkdir(RUNTIME_ROOT, { recursive: true })
 const activeRequests = new Map()
 let extensionSourceVersion = null
@@ -122,24 +125,25 @@ async function handleChat(request, response) {
   if (typeof body.message !== 'string' || !body.message.trim()) return sendJson(response, 400, { error: 'Message is required.', code: 'INVALID_MESSAGE' })
   if (!body.context || typeof body.context !== 'object') return sendJson(response, 400, { error: 'Chart context is required.', code: 'INVALID_CONTEXT' })
   if (activeRequests.has(body.requestId)) return sendJson(response, 409, { error: 'requestId is already active.', code: 'DUPLICATE_REQUEST' })
-  if (
-    provider === 'chatgpt'
-    &&
-    Array.isArray(body.conversation)
-    && body.conversation.length === 0
-    && chatGptProvider.hasBoundConversation(body.clientSessionId)
-  ) {
-    // The native thread owns history. An empty local transcript after a workstation reload
-    // means the browser client no longer owns the old native thread, so start fresh lazily.
+  const toolResults = Array.isArray(body.toolResults) ? body.toolResults : []
+  const hasConversation = provider === 'chatgpt'
+    ? chatGptProvider.hasBoundConversation(body.clientSessionId)
+    : Boolean(await codexProvider.sessionFor(body.clientSessionId))
+  const { mode, resetNativeConversation } = selectPromptMode({
+    provider,
+    hasConversation,
+    conversation: body.conversation,
+    toolResults
+  })
+  if (resetNativeConversation) {
     chatGptProvider.resetLocalConversation(body.clientSessionId)
   }
-
   const prompt = buildPrompt({
     message: body.message,
     structuredResponse: provider === 'codex',
-    continuation: provider === 'codex' && Array.isArray(body.toolResults) && body.toolResults.length > 0,
+    mode,
     context: body.context,
-    toolResults: Array.isArray(body.toolResults) ? body.toolResults : []
+    toolResults
   })
 
   const active = { cancelled: false, cancel: null }
@@ -229,6 +233,7 @@ const server = http.createServer(async (request, response) => {
       const provider = assistantProvider(url.searchParams.get('provider'))
       return sendJson(response, 200, {
         ...providerHealth(provider),
+        startedAt,
         extensionSourceVersion
       })
     }

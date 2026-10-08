@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin, ViteDevServer } from 'vite';
 
@@ -12,9 +12,11 @@ const SIDECAR_TARGET = `http://${SIDECAR_HOST}:${SIDECAR_PORT}`;
 export const ASSISTANT_API_VERSION = 2;
 const SIDECAR_SCRIPT = fileURLToPath(new URL('../sidecars/assistant/server.mjs', import.meta.url));
 const SIDECAR_CWD = resolve(dirname(SIDECAR_SCRIPT), '../../..');
+const SIDECAR_DIR = dirname(SIDECAR_SCRIPT);
 
 let sidecarChild: ChildProcess | null = null;
-let sidecarStarting: Promise<boolean> | null = null;
+let sidecarStarting: Promise<SidecarState> | null = null;
+type SidecarState = 'ready' | 'stale' | 'offline';
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -78,24 +80,40 @@ function forwardedHeaders(req: IncomingMessage): Record<string, string> {
   return sanitizeAssistantProxyHeaders(req.headers);
 }
 
-export function isCompatibleAssistantHealth(payload: unknown): boolean {
-  if (payload === null || typeof payload !== 'object') return false;
-  const value = payload as { ok?: unknown; apiVersion?: unknown };
-  return value.ok === true && value.apiVersion === ASSISTANT_API_VERSION;
+function lastSidecarSourceChange(): number {
+  return Math.max(0, ...readdirSync(SIDECAR_DIR)
+    .filter((name) => name.endsWith('.mjs'))
+    .map((name) => statSync(join(SIDECAR_DIR, name)).mtimeMs));
 }
 
-async function serviceIsHealthy(): Promise<boolean> {
+export function isCompatibleAssistantHealth(
+  payload: unknown,
+  lastSourceChange = lastSidecarSourceChange(),
+): boolean {
+  if (payload === null || typeof payload !== 'object') return false;
+  const value = payload as { ok?: unknown; apiVersion?: unknown; startedAt?: unknown };
+  return value.ok === true
+    && value.apiVersion === ASSISTANT_API_VERSION
+    && typeof value.startedAt === 'number'
+    && Number.isFinite(value.startedAt)
+    && value.startedAt + 500 >= lastSourceChange;
+}
+
+async function sidecarHealthState(): Promise<SidecarState> {
   try {
     const response = await fetch(`${SIDECAR_TARGET}/health`, { signal: AbortSignal.timeout(900) });
-    return response.ok && isCompatibleAssistantHealth(await response.json());
+    if (!response.ok) return 'offline';
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object' || !('ok' in payload) || payload.ok !== true) return 'offline';
+    return isCompatibleAssistantHealth(payload) ? 'ready' : 'stale';
   } catch {
-    return false;
+    return 'offline';
   }
 }
 
 async function waitForHealth(attempts = 40): Promise<boolean> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (await serviceIsHealthy()) return true;
+    if (await sidecarHealthState() === 'ready') return true;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   return false;
@@ -139,11 +157,17 @@ async function stopManagedSidecar(): Promise<void> {
   if (sidecarChild === child) sidecarChild = null;
 }
 
-async function ensureSidecar(server?: ViteDevServer): Promise<boolean> {
-  if (await serviceIsHealthy()) return true;
-  if (sidecarChild) await stopManagedSidecar();
+async function ensureSidecar(server?: ViteDevServer): Promise<SidecarState> {
+  if (sidecarStarting) return sidecarStarting;
+  const state = await sidecarHealthState();
+  if (state === 'ready') return 'ready';
+  // Do not terminate an externally started sidecar (it may serve another chart client).
+  if (state === 'stale' && !sidecarChild) return 'stale';
   if (!sidecarStarting) {
-    sidecarStarting = startSidecar(server).finally(() => {
+    sidecarStarting = (async (): Promise<SidecarState> => {
+      if (sidecarChild) await stopManagedSidecar();
+      return await startSidecar(server) ? 'ready' : 'offline';
+    })().finally(() => {
       sidecarStarting = null;
     });
   }
@@ -159,8 +183,14 @@ function installProxy(
       sendJson(res, 403, { error: 'Cross-site requests are not allowed', code: 'FORBIDDEN' });
       return;
     }
-    if (!(await ensureSidecar(server))) {
-      sendJson(res, 503, { error: 'AI sidecar failed to start.', code: 'SIDECAR_OFFLINE' });
+    const state = await ensureSidecar(server);
+    if (state !== 'ready') {
+      sendJson(res, 503, state === 'stale'
+        ? {
+            error: 'Assistant sidecar on port 8788 is running outdated code. Stop that sidecar process; the Excel dev server will start a fresh one.',
+            code: 'SIDECAR_STALE',
+          }
+        : { error: 'AI sidecar failed to start.', code: 'SIDECAR_OFFLINE' });
       return;
     }
 

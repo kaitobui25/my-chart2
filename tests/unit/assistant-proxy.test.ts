@@ -9,9 +9,12 @@ import {
 
 describe('assistant Vite proxy', () => {
   it('rejects a stale sidecar health payload from an older assistant protocol', () => {
-    expect(isCompatibleAssistantHealth({ ok: true })).toBe(false);
-    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION - 1 })).toBe(false);
-    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION })).toBe(true);
+    const lastChangedAt = 1_000;
+    expect(isCompatibleAssistantHealth({ ok: true }, lastChangedAt)).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION - 1, startedAt: 2_000 }, lastChangedAt)).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION }, lastChangedAt)).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION, startedAt: 100 }, lastChangedAt)).toBe(false);
+    expect(isCompatibleAssistantHealth({ ok: true, apiVersion: ASSISTANT_API_VERSION, startedAt: 2_000 }, lastChangedAt)).toBe(true);
   });
 
   it('accepts HTTPS same-origin requests when HTTP/2 supplies :authority instead of Host', () => {

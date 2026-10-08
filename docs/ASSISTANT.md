@@ -21,17 +21,17 @@ The workstation assistant is provider-neutral at the chart layer. Phase 1A conne
 - `examples/workstation/assistant/context.ts` owns chart-context slicing, requested-timeframe detection, and on-demand timeframe loading.
 - The stable `lamlong-chart` exports remain unchanged.
 
-The assistant sends candles around the currently visible chart range with a small nearby buffer capped at 240 candles. It also sends active indicator parameters, replay state, the latest quote when available, and requested additional timeframes. Phase 1A sends structured data only; it does not capture or upload a chart PNG.
+On the first question of a native conversation, the assistant sends candles around the currently visible chart range (up to 240 candles), active indicator parameters, replay state, the latest quote when available, and explicitly requested additional timeframes. Phase 1A sends structured data only; it does not capture or upload a chart PNG.
 
-ChatGPT's native conversation owns prior turns, so the sidecar sends the current user question plus the current structured chart context without duplicating the visible transcript. Codex is stateless between CLI executions, so the sidecar includes the bounded local transcript when Codex is selected.
+ChatGPT and Codex both resume their native conversation sessions. The first question in a session sends the chart assistant rules and data-tool instructions. Later questions send only the new user question and chart metadata (symbol, timeframe, visible range, replay, quote, etc.); they never automatically attach candle arrays or additional-timeframe candle data. The AI decides if it needs fresh data and requests it using `get_candles`/`get_indicator`. New Chat starts with the full prompt again.
 
-When the user's question explicitly names another timeframe such as `15m`, `1h`, `daily`, or `weekly`, the context bridge loads that timeframe on demand for the same symbol. Requested history is anchored to the end of the visible chart range so replay or historical inspection does not leak later candles. Missing timeframe data is passed to the assistant as an explicit error instead of being guessed.
+On the first question, explicit mentions of another timeframe such as `15m`, `1h`, `daily`, or `weekly` cause the context bridge to preload that timeframe. Follow-up questions do not preload it. Requested history is anchored to the end of the visible chart range so replay or historical inspection does not leak later candles. Missing timeframe data is reported as an explicit error instead of being guessed.
 
 ## Data-access model
 
-The current assistant is one-pass and context-driven. LAMlongchart decides what chart data to load **before** the provider is called. The current timeframe is always included, and concrete timeframes explicitly named in the user's message are loaded into `additionalTimeframes` when a `Datafeed` is available.
+LAMlongchart retains local chart context for every question so read-only tool calls can be verified and anchored to the visible chart. The model receives candle arrays automatically **only for the first question of the native conversation**. Explicitly named extra timeframes are preloaded only for that first question; for later questions the AI requests data when needed.
 
-Generic language such as "multi-timeframe analysis" does not currently cause all timeframes to be loaded. ChatGPT and Codex also do not have a chart-data tool loop, so they cannot decide mid-response to call `getHistory()` for another timeframe. If the first context is insufficient, the provider can only explain what data is missing. A future implementation may add an AI planning pass or tool/function calling so the provider can request additional chart data on demand.
+Generic language such as "multi-timeframe analysis" does not automatically load every timeframe. If more data is needed, ChatGPT or Codex may request `get_candles` or `get_indicator`; the chart bridge runs those read-only queries and sends back only the new results in the same native conversation. Each model response may request up to two queries, for at most three data rounds. Missing data is reported as an error rather than guessed. Tool-result continuations omit the earlier question and candle snapshot because they are already in the native conversation.
 
 ## Tests
 

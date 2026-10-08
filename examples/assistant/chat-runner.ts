@@ -24,7 +24,7 @@ export async function runAssistantTurn(options: {
   setRequestId(id: string | null): void;
   cancelled(): boolean;
 }): Promise<string> {
-  const results: AssistantDataResult[] = [];
+  let latestResults: AssistantDataResult[] = [];
   const queried = new Map<string, Promise<AssistantDataResult>>();
   for (let round = 0; round <= MAX_DATA_ROUNDS; round += 1) {
     if (options.cancelled()) throw new Error('Request cancelled.');
@@ -38,7 +38,7 @@ export async function runAssistantTurn(options: {
       reasoningEffort: options.reasoningEffort,
       conversation: options.conversation,
       context: options.context,
-      ...(results.length ? { toolResults: results } : {}),
+      ...(latestResults.length ? { toolResults: latestResults } : {}),
     };
     const reply = await options.client.chat(payload);
     if (options.cancelled()) throw new Error('Request cancelled.');
@@ -65,7 +65,7 @@ export async function runAssistantTurn(options: {
       queried.set(key, task);
       return task;
     }));
-    results.push(...next);
+    latestResults = next;
   }
   throw new Error('AI did not produce an answer.');
 }

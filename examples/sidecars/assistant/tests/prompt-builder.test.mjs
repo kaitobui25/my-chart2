@@ -36,11 +36,11 @@ test('Codex data follow-up does not repeat the original question or chart contex
   const prompt = buildPrompt({
     message: 'What is RSI?',
     context: { symbol: 'FPT', timeframe: '1d', candles: [{ close: 123 }] },
-    continuation: true,
+    mode: 'toolContinuation',
     structuredResponse: true,
     toolResults: [{ request: { tool: 'get_indicator', id: 'rsi' }, ok: true, values: [55] }]
   })
-  assert.match(prompt, /Continue the pending chart question/)
+  assert.match(prompt, /Continue answering the pending chart question/)
   assert.match(prompt, /"values":\[55\]/)
   assert.doesNotMatch(prompt, /What is RSI\? /)
   assert.doesNotMatch(prompt, /"candles"/)
@@ -82,4 +82,61 @@ test('puts available requested timeframes before the user question', () => {
   const questionIndex = prompt.indexOf('User question: xem được nến 15 phút ko')
   assert.ok(summaryIndex >= 0)
   assert.ok(questionIndex > summaryIndex)
+})
+
+test('follow-up omits setup rules and all candle snapshots but keeps fresh chart metadata', () => {
+  const context = {
+    symbol: '7203.T', timeframe: '15m', mode: 'candles',
+    replay: { phase: 'paused' }, visibleRange: { from: 101, to: 202 },
+    candleCount: 1, candles: [{ time: 202, open: 1, high: 2, low: 1, close: 2 }],
+    additionalTimeframes: [{ timeframe: '1h', candleCount: 1, candles: [{ time: 201, open: 8, high: 9, low: 7, close: 8 }] }]
+  }
+  const prompt = buildPrompt({ message: 'Thế 1h thì sao?', mode: 'followUp', context })
+  assert.match(prompt, /Current chart: 7203\.T 15m/)
+  assert.match(prompt, /User question: Thế 1h thì sao/)
+  assert.match(prompt, /request get_candles or get_indicator/)
+  assert.match(prompt, /"phase":"paused"/)
+  assert.match(prompt, /"visibleRange":\{"from":101,"to":202\}/)
+  assert.match(prompt, /"candleCount":1/)
+  assert.doesNotMatch(prompt, /"candles":/)
+  assert.doesNotMatch(prompt, /"additionalTimeframes":/)
+  assert.doesNotMatch(prompt, /"open":1|"open":8/)
+  assert.doesNotMatch(prompt, /structured candles available/)
+  assert.doesNotMatch(prompt, /Answer only what the user asked/)
+  assert.doesNotMatch(prompt, /Read-only chart data tools/)
+  assert.ok(prompt.length < buildPrompt({ message: 'Thế 1h thì sao?', context }).length)
+})
+
+test('ChatGPT tool continuation only includes new tool results and no chart snapshot', () => {
+  const prompt = buildPrompt({
+    message: 'What is the trend?', mode: 'toolContinuation',
+    context: { symbol: '7203.T', timeframe: '5m', candles: [{ close: 2910 }] },
+    toolResults: [{ request: { timeframe: '1h' }, ok: true, data: { candles: [{ close: 2900 }] } }]
+  })
+  assert.match(prompt, /"close":2900/)
+  assert.doesNotMatch(prompt, /"close":2910/)
+  assert.doesNotMatch(prompt, /What is the trend/)
+  assert.doesNotMatch(prompt, /Chart context JSON/)
+  assert.doesNotMatch(prompt, /Required response shape/)
+})
+
+test('full prompt includes tool data if the native conversation could not be resumed', () => {
+  const prompt = buildPrompt({
+    message: 'Compare 5m and 1h',
+    context: { symbol: '7203.T', timeframe: '5m', candleCount: 1, candles: [{ close: 2910 }] },
+    toolResults: [{ ok: true, data: { timeframe: '1h', candles: [{ close: 2900 }] } }]
+  })
+  assert.match(prompt, /User question: Compare 5m and 1h/)
+  assert.match(prompt, /"close":2910/)
+  assert.match(prompt, /"close":2900/)
+})
+
+test('full prompt reports zero extra candles unavailable, while follow-up never claims extra candle data was attached', () => {
+  const context = { symbol: '7203.T', timeframe: '5m', candles: [], additionalTimeframes: [{ timeframe: '1d', candleCount: 0, candles: [] }] }
+  const prompt = buildPrompt({
+    message: 'Can you see 1d?', context
+  })
+  assert.match(prompt, /1d: unavailable \(no candles\)/)
+  const followUp = buildPrompt({ message: 'Can you see 1d?', mode: 'followUp', context })
+  assert.doesNotMatch(followUp, /1d: unavailable|structured candles available|additionalTimeframes/)
 })

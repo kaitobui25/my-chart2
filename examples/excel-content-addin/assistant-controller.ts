@@ -338,6 +338,7 @@ export class ExcelAssistantController {
       return;
     }
 
+    const isFirstLocalTurn = this.conversation.length === 0;
     this.view.appendMessage('user', message);
     this.history.append(this.provider, 'user', message);
     if (this.provider === 'codex') {
@@ -348,7 +349,9 @@ export class ExcelAssistantController {
     this.setBusy(true, false);
     this.view.showThinking();
     try {
-      const context = await this.bridge.resolveContext(message) ?? baseContext;
+      const context = await this.bridge.resolveContext(message, {
+        includeAdditionalTimeframes: isFirstLocalTurn,
+      }) ?? baseContext;
       if (this.cancelRequested) throw new Error('Request cancelled.');
       this.renderContext(context);
       const answer = await runAssistantTurn({

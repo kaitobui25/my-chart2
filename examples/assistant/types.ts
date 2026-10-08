@@ -164,7 +164,7 @@ export interface AssistantNewConversationResponse {
 
 export interface AssistantBridge {
   getContext(): AssistantChartContext | null;
-  resolveContext(message: string): Promise<AssistantChartContext | null>;
+  resolveContext(message: string, options?: { includeAdditionalTimeframes?: boolean }): Promise<AssistantChartContext | null>;
   queryData?(request: AssistantDataRequest, anchor: AssistantChartContext): Promise<AssistantDataResult>;
 }
 

@@ -90,6 +90,34 @@ describe('AI read-only chart data requests', () => {
     ]);
   });
 
+  it('sends only the latest data results in successive tool rounds', async () => {
+    const replies = [
+      { message: '', requests: [request('get_candles', '1h')] },
+      { message: '', requests: [request('get_indicator', '1d')] },
+      { message: 'Finished.' },
+    ];
+    const chat = vi.fn(async (_payload: ChatRequest) => replies.shift()!);
+    const queryData = vi.fn(async (item: AssistantDataRequest) => ({ request: item, ok: true, data: { timeframe: item.timeframe } }));
+    const context = {
+      version: 2 as const, generatedAt: '', symbol: '7203.T', timeframe: '5m',
+      mode: 'candles', replay: {}, historyRange: null, visibleRange: null,
+      candleCount: 0, candles: [], indicators: [], quote: null, additionalTimeframes: [],
+    };
+    const answer = await runAssistantTurn({
+      client: { chat } as unknown as AssistantApiClient,
+      bridge: { getContext: () => null, resolveContext: async () => null, queryData },
+      context, message: 'Compare 1h and 1d', conversation: [], provider: 'chatgpt',
+      model: null, reasoningEffort: 'medium',
+      setRequestId: () => undefined, cancelled: () => false,
+    });
+    expect(answer).toBe('Finished.');
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(chat.mock.calls[0][0].toolResults).toBeUndefined();
+    expect(chat.mock.calls[1][0].toolResults?.map(result => result.request.timeframe)).toEqual(['1h']);
+    expect(chat.mock.calls[2][0].toolResults?.map(result => result.request.timeframe)).toEqual(['1d']);
+    expect(queryData).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects an invalid request without exposing arbitrary files or URLs', async () => {
     const data = candles(100);
     const bridge = createAssistantBridge({
