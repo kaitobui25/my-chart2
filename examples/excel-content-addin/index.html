@@ -65,6 +65,9 @@
                     <span id="assistant-status" class="assistant-status" data-state="pending" role="status" aria-label="Đang kết nối…" title="Đang kết nối…"></span>
                   </div>
                   <div class="assistant-head-actions">
+                    <button id="assistant-history-toggle" type="button" aria-label="Lịch sử trò chuyện" title="Lịch sử trò chuyện" aria-controls="assistant-history" aria-expanded="false">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+                    </button>
                     <button id="assistant-settings-toggle" type="button" aria-label="Tùy chọn" title="Tùy chọn" aria-controls="assistant-settings" aria-expanded="false">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="white"/><circle cx="16" cy="17" r="2" fill="white"/></svg>
                     </button>
@@ -95,6 +98,15 @@
                   <select id="assistant-reasoning" aria-label="Mức suy luận"></select>
                 </label>
               </div>
+              <section id="assistant-history" class="assistant-history" aria-label="Lịch sử trò chuyện" hidden>
+                <div class="assistant-history-toolbar">
+                  <button id="assistant-history-back" type="button" hidden>← Danh sách</button>
+                  <strong id="assistant-history-heading">Lịch sử</strong>
+                  <button id="assistant-history-close" type="button">Trở lại chat</button>
+                </div>
+                <div id="assistant-history-items" class="assistant-history-items"></div>
+                <small class="assistant-history-note">Lưu trên thiết bị này · Chỉ xem, không thay đổi phiên AI</small>
+              </section>
               <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
               <form id="assistant-form" class="assistant-form">
                 <textarea id="assistant-input" rows="2" placeholder="Hỏi về chart đang xem…" aria-label="Tin nhắn cho trợ lý"></textarea>

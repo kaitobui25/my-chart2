@@ -896,6 +896,10 @@ body {
 
 .assistant-panel[hidden],
 .assistant-settings[hidden],
+.assistant-history[hidden],
+.assistant-messages[hidden],
+.assistant-form[hidden],
+.assistant-history-toolbar button[hidden],
 .assistant-actions button[hidden] {
   display: none !important;
 }
@@ -1011,6 +1015,117 @@ body {
   border-color: #d9dddf;
   background: #f8faf9;
   opacity: 1;
+}
+
+#assistant-history-toggle[aria-expanded='true'] {
+  border-color: #d9dddf;
+  background: #f8faf9;
+  opacity: 1;
+}
+
+.assistant-history {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.assistant-history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 27px;
+}
+
+.assistant-history-toolbar strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.assistant-history-toolbar button {
+  flex: none;
+  border: 1px solid #e1e5e6;
+  border-radius: 3px;
+  background: #fff;
+  padding: 4px 6px;
+  color: #697176;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.assistant-history-toolbar button:hover,
+.assistant-history-toolbar button:focus-visible {
+  background: #f5f7f6;
+  outline: 1px solid #d4dadc;
+}
+
+.assistant-history-items {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.assistant-history-entry {
+  display: grid;
+  flex: none;
+  min-width: 0;
+  gap: 3px;
+  border: 1px solid #e5e8e9;
+  border-radius: 4px;
+  background: #fff;
+  padding: 9px;
+  color: #596166;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-history-entry:hover,
+.assistant-history-entry:focus-visible {
+  border-color: #cad5d0;
+  background: #f7f9f8;
+  outline: none;
+}
+
+.assistant-history-entry strong,
+.assistant-history-entry span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-history-entry strong { font-size: 11px; }
+.assistant-history-entry small { color: #7d888d; font-size: 9px; }
+.assistant-history-entry span { color: #939ca0; font-size: 10px; }
+
+.assistant-history-items > .assistant-message { flex: none; }
+
+.assistant-history-note,
+.assistant-history-empty {
+  color: #98a0a4;
+  font-size: 9px;
+}
+
+.assistant-history-note {
+  flex: none;
+  text-align: center;
+}
+
+.assistant-history-empty {
+  margin: auto;
+  text-align: center;
 }
 
 .assistant-settings {

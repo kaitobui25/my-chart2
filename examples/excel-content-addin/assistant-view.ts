@@ -1,4 +1,5 @@
 import type { AssistantProvider, CodexModelOption, ReasoningEffort } from '../assistant/types';
+import type { AssistantHistoryEntry } from './assistant-chat-history';
 import { ALL_REASONING_EFFORTS, REASONING_LABELS } from './assistant-config';
 
 export type AssistantMessageRole = 'user' | 'assistant';
@@ -17,6 +18,13 @@ export class AssistantPanelView {
   readonly fresh = requiredElement<HTMLButtonElement>('#assistant-new');
   readonly settingsToggle = requiredElement<HTMLButtonElement>('#assistant-settings-toggle');
   readonly settings = requiredElement<HTMLElement>('#assistant-settings');
+  readonly historyToggle = requiredElement<HTMLButtonElement>('#assistant-history-toggle');
+  readonly historyPanel = requiredElement<HTMLElement>('#assistant-history');
+  readonly historyBack = requiredElement<HTMLButtonElement>('#assistant-history-back');
+  readonly historyClose = requiredElement<HTMLButtonElement>('#assistant-history-close');
+  readonly historyHeading = requiredElement<HTMLElement>('#assistant-history-heading');
+  readonly historyItems = requiredElement<HTMLElement>('#assistant-history-items');
+  readonly form = requiredElement<HTMLFormElement>('#assistant-form');
   readonly provider = requiredElement<HTMLSelectElement>('#assistant-provider');
   readonly model = requiredElement<HTMLSelectElement>('#assistant-model');
   readonly reasoning = requiredElement<HTMLSelectElement>('#assistant-reasoning');
@@ -38,6 +46,7 @@ export class AssistantPanelView {
   }
 
   hide(): void {
+    this.closeHistory();
     this.panel.hidden = true;
     this.toggle.setAttribute('aria-expanded', 'false');
     this.settings.hidden = true;
@@ -51,6 +60,7 @@ export class AssistantPanelView {
   }
 
   toggleSettings(): void {
+    if (this.isHistoryOpen) this.closeHistory();
     this.settings.hidden = !this.settings.hidden;
     this.settingsToggle.setAttribute('aria-expanded', String(!this.settings.hidden));
   }
@@ -59,6 +69,62 @@ export class AssistantPanelView {
     this.status.setAttribute('aria-label', message);
     this.status.title = message;
     this.status.dataset.state = pending ? 'pending' : connected ? 'connected' : 'error';
+  }
+
+  get isHistoryOpen(): boolean {
+    return !this.historyPanel.hidden;
+  }
+
+  openHistory(): void {
+    this.historyPanel.hidden = false;
+    this.messages.hidden = true;
+    this.form.hidden = true;
+    this.settings.hidden = true;
+    this.settingsToggle.setAttribute('aria-expanded', 'false');
+    this.historyToggle.setAttribute('aria-expanded', 'true');
+  }
+
+  closeHistory(): void {
+    this.historyPanel.hidden = true;
+    this.messages.hidden = false;
+    this.form.hidden = false;
+    this.historyToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  renderHistoryList(entries: AssistantHistoryEntry[], activeIds: Partial<Record<AssistantProvider, string>>,
+    onSelect: (id: string) => void): void {
+    this.historyHeading.textContent = 'Lịch sử';
+    this.historyBack.hidden = true;
+    const nodes: HTMLElement[] = [];
+    for (const entry of entries) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'assistant-history-entry';
+      const title = document.createElement('strong');
+      title.textContent = entry.messages.find(item => item.role === 'user')?.content ?? '';
+      const details = document.createElement('small');
+      const provider = entry.provider === 'codex' ? 'Codex' : 'ChatGPT';
+      details.textContent = `${provider} · ${new Date(entry.updatedAt).toLocaleString('vi-VN')}${activeIds[entry.provider] === entry.id ? ' · Hiện tại' : ''}`;
+      const preview = document.createElement('span');
+      preview.textContent = entry.messages[entry.messages.length - 1]?.content ?? '';
+      button.append(title, details, preview);
+      button.addEventListener('click', () => onSelect(entry.id));
+      nodes.push(button);
+    }
+    if (!nodes.length) {
+      const empty = document.createElement('p');
+      empty.className = 'assistant-history-empty';
+      empty.textContent = 'Chưa có cuộc trò chuyện nào được lưu.';
+      nodes.push(empty);
+    }
+    this.historyItems.replaceChildren(...nodes);
+  }
+
+  renderHistoryDetail(entry: AssistantHistoryEntry): void {
+    this.historyHeading.textContent = entry.provider === 'codex' ? 'Codex' : 'ChatGPT';
+    this.historyBack.hidden = false;
+    this.historyItems.replaceChildren(...entry.messages.map(message => createMessage(message.role, message.content)));
+    this.historyItems.scrollTop = 0;
   }
 
   setQuota(message: string | null): void {
@@ -78,6 +144,7 @@ export class AssistantPanelView {
     this.provider.disabled = busy;
     this.model.disabled = busy;
     this.reasoning.disabled = busy;
+    this.historyToggle.disabled = busy;
   }
 
   setModels(
@@ -121,16 +188,7 @@ export class AssistantPanelView {
   }
 
   appendMessage(role: AssistantMessageRole, text: string, markUnread = true): void {
-    const item = document.createElement('article');
-    item.className = `assistant-message assistant-message-${role}`;
-    const label = document.createElement('small');
-    label.className = 'assistant-role';
-    label.textContent = role === 'user' ? 'Bạn' : 'Trợ lý';
-    const body = document.createElement('div');
-    body.className = 'assistant-message-text';
-    body.textContent = text;
-    item.append(label, body);
-    this.messages.appendChild(item);
+    this.messages.appendChild(createMessage(role, text));
     this.scrollToLatest();
     if (markUnread && !this.isOpen && role === 'assistant') this.setUnread(true);
   }
@@ -181,6 +239,19 @@ export class AssistantPanelView {
   private scrollToLatest(): void {
     this.messages.scrollTop = this.messages.scrollHeight;
   }
+}
+
+function createMessage(role: AssistantMessageRole, text: string): HTMLElement {
+  const item = document.createElement('article');
+  item.className = `assistant-message assistant-message-${role}`;
+  const label = document.createElement('small');
+  label.className = 'assistant-role';
+  label.textContent = role === 'user' ? 'Bạn' : 'Trợ lý';
+  const body = document.createElement('div');
+  body.className = 'assistant-message-text';
+  body.textContent = text;
+  item.append(label, body);
+  return item;
 }
 
 function requiredElement<T extends Element>(selector: string): T {

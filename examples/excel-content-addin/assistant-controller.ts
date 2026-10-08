@@ -16,6 +16,7 @@ import {
   EXCEL_ASSISTANT_CONFIG,
 } from './assistant-config';
 import { AssistantPanelView } from './assistant-view';
+import { AssistantChatHistory } from './assistant-chat-history';
 
 interface StoredSettings {
   provider?: AssistantProvider;
@@ -41,6 +42,7 @@ export function formatCodexQuotaSummary(response: CodexStatusResponse): string {
 export class ExcelAssistantController {
   private readonly client = new AssistantApiClient(EXCEL_ASSISTANT_CONFIG.apiBaseUrl);
   private readonly view = new AssistantPanelView();
+  private readonly history = new AssistantChatHistory();
   private conversation: AssistantConversationMessage[] = [];
   private codexThreadId: string | null = null;
   private modelOptions: CodexModelOption[] = [];
@@ -62,6 +64,7 @@ export class ExcelAssistantController {
     this.view.provider.value = this.provider;
     this.bindEvents();
     if (this.provider === 'codex') this.restoreCodexTranscript();
+    if (this.provider === 'codex' && this.conversation.length) this.history.seed('codex', this.conversation);
     for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
     this.refreshContext();
     void this.initializeConnection();
@@ -89,6 +92,15 @@ export class ExcelAssistantController {
       }
     });
     this.listen(this.view.close, 'click', () => this.view.hide());
+    this.listen(this.view.historyToggle, 'click', () => {
+      if (this.view.isHistoryOpen) this.view.closeHistory();
+      else {
+        this.showHistoryList();
+        this.view.openHistory();
+      }
+    });
+    this.listen(this.view.historyBack, 'click', () => this.showHistoryList());
+    this.listen(this.view.historyClose, 'click', () => this.view.closeHistory());
     this.listen(this.view.settingsToggle, 'click', () => this.view.toggleSettings());
     this.listen(this.view.fresh, 'click', () => {
       void this.newConversation();
@@ -107,7 +119,8 @@ export class ExcelAssistantController {
       if (keyboard.key === 'Escape' && !keyboard.isComposing && this.view.isOpen) {
         keyboard.preventDefault();
         keyboard.stopPropagation();
-        this.view.hide();
+        if (this.view.isHistoryOpen) this.view.closeHistory();
+        else this.view.hide();
       }
     });
     this.listen(this.view.input, 'keydown', (event) => {
@@ -117,8 +130,7 @@ export class ExcelAssistantController {
         void this.submit(this.view.input.value);
       }
     });
-    const form = requiredElement<HTMLFormElement>('#assistant-form');
-    this.listen(form, 'submit', (event) => {
+    this.listen(this.view.form, 'submit', (event) => {
       event.preventDefault();
       void this.submit(this.view.input.value);
     });
@@ -242,7 +254,10 @@ export class ExcelAssistantController {
     this.modelOptions = [];
     this.defaultReasoningEfforts = [...ALL_REASONING_EFFORTS];
     this.conversation = [];
-    if (this.provider === 'codex') this.restoreCodexTranscript();
+    if (this.provider === 'codex') {
+      this.restoreCodexTranscript();
+      if (this.conversation.length) this.history.seed('codex', this.conversation);
+    }
     this.stopQuotaRefresh();
     this.view.setQuota(null);
     this.view.setModels([], '', this.provider);
@@ -288,15 +303,13 @@ export class ExcelAssistantController {
         this.applyModelSelection(this.model, false);
       }
       this.conversation = [];
+      this.history.newChat(this.provider);
       if (this.provider === 'codex') {
         this.codexThreadId = null;
         this.clearCodexTranscript();
       }
+      this.view.closeHistory();
       this.view.clearMessages();
-      this.view.appendMessage(
-        'assistant',
-        `Cuộc trò chuyện ${providerLabel(this.provider)} mới. Context vẫn theo chart hiện tại.`,
-      );
       this.refreshContext();
       this.view.setConnectionStatus(`${providerLabel(this.provider)} sẵn sàng`, true);
       this.setAssistantConnected(true);
@@ -326,6 +339,7 @@ export class ExcelAssistantController {
     }
 
     this.view.appendMessage('user', message);
+    this.history.append(this.provider, 'user', message);
     if (this.provider === 'codex') {
       this.conversation = [...this.conversation, { role: 'user' as const, content: message }].slice(-MAX_VISIBLE_MESSAGES);
       this.persistCodexTranscript();
@@ -357,9 +371,11 @@ export class ExcelAssistantController {
       this.view.removeThinking();
       if (this.cancelRequested) {
         this.view.appendMessage('assistant', 'Đã dừng chờ phản hồi.');
+        this.history.append(this.provider, 'assistant', 'Đã dừng chờ phản hồi.');
         return;
       }
       this.view.appendMessage('assistant', answer);
+      this.history.append(this.provider, 'assistant', answer);
       const nextConversation: AssistantConversationMessage[] = [
         ...this.conversation,
         ...(this.provider === 'codex' ? [] : [{ role: 'user' as const, content: message }]),
@@ -378,6 +394,7 @@ export class ExcelAssistantController {
         'assistant',
         this.cancelRequested ? 'Đã dừng chờ phản hồi.' : `Lỗi: ${errorMessage(error)}`,
       );
+      this.history.append(this.provider, 'assistant', this.cancelRequested ? 'Đã dừng chờ phản hồi.' : `Lỗi: ${errorMessage(error)}`);
       if (this.provider === 'codex') {
         this.conversation = [...this.conversation, {
           role: 'assistant' as const,
@@ -438,6 +455,16 @@ export class ExcelAssistantController {
   private setBusy(value: boolean, cancellable = false): void {
     this.busy = value;
     this.view.setBusy(value, cancellable);
+  }
+
+  private showHistoryList(): void {
+    this.view.renderHistoryList(this.history.list(), {
+      chatgpt: this.history.activeId('chatgpt'),
+      codex: this.history.activeId('codex'),
+    }, id => {
+      const entry = this.history.get(id);
+      if (entry) this.view.renderHistoryDetail(entry);
+    });
   }
 
   private renderContext(context: AssistantChartContext): void {
@@ -511,6 +538,7 @@ export class ExcelAssistantController {
   private syncCodexThread(remoteId: string | null): void {
     if (this.codexThreadId && this.codexThreadId !== remoteId && this.busy) return;
     if (this.codexThreadId && this.codexThreadId !== remoteId && !this.busy) {
+      this.history.newChat('codex');
       this.conversation = [];
       this.view.clearMessages();
       this.view.appendMessage('assistant', 'Phiên Codex trên máy đã thay đổi. Hãy bắt đầu cuộc trò chuyện mới.', false);
@@ -518,12 +546,6 @@ export class ExcelAssistantController {
     this.codexThreadId = remoteId;
     this.persistCodexTranscript();
   }
-}
-
-function requiredElement<T extends Element>(selector: string): T {
-  const element = document.querySelector<T>(selector);
-  if (!element) throw new Error(`Missing Excel assistant element: ${selector}`);
-  return element;
 }
 
 function errorMessage(error: unknown): string {

@@ -509,12 +509,14 @@ describe('Excel assistant configuration', () => {
       '#assistant-context', '#assistant-messages', '#assistant-input', '#assistant-send',
       '#assistant-cancel', '#assistant-close', '#assistant-new', '#assistant-settings-toggle',
       '#assistant-settings', '#assistant-provider', '#assistant-model', '#assistant-reasoning',
-      '#assistant-form',
+      '#assistant-form', '#assistant-history-toggle', '#assistant-history', '#assistant-history-back',
+      '#assistant-history-close', '#assistant-history-heading', '#assistant-history-items',
     ];
     const elements = new Map(selectors.map((selector) => [selector, new FakeElement()]));
     elements.get('#assistant-panel')!.hidden = true;
     elements.get('#assistant-settings')!.hidden = true;
     elements.get('#assistant-cancel')!.hidden = true;
+    elements.get('#assistant-history')!.hidden = true;
 
     vi.stubGlobal('document', {
       querySelector: (selector: string) => elements.get(selector) ?? null,
@@ -613,6 +615,18 @@ describe('Excel assistant configuration', () => {
     await vi.waitFor(() => {
       expect(tabStored.get('l2chart.excel.assistant.codex-transcript.v1')).toContain('"content":"ok"');
     });
+    const historyButton = elements.get('#assistant-history-toggle')!;
+    historyButton.dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history')!.hidden).toBe(false);
+    expect(elements.get('#assistant-form')!.hidden).toBe(true);
+    expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
+    elements.get('#assistant-history-items')!.children[0].dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history-items')!.children.length).toBe(2);
+    elements.get('#assistant-history-back')!.dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
+    elements.get('#assistant-history-close')!.dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history')!.hidden).toBe(true);
+    expect(elements.get('#assistant-form')!.hidden).toBe(false);
     controller.dispose();
 
     // Same tab restores the transcript without replaying it into the Codex prompt.
@@ -622,6 +636,16 @@ describe('Excel assistant configuration', () => {
       resolveContext: async () => context,
     });
     expect(elements.get('#assistant-messages')!.children.length).toBe(2);
+    elements.get('#assistant-new')!.dispatchEvent(new Event('click'));
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([request]) => String(request).endsWith('/new'))).toBe(true);
+      expect(elements.get('#assistant-messages')!.children.length).toBe(0);
+    });
+    historyButton.dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
+    elements.get('#assistant-history-items')!.children[0].dispatchEvent(new Event('click'));
+    expect(elements.get('#assistant-history-items')!.children.length).toBe(2);
+    elements.get('#assistant-history-close')!.dispatchEvent(new Event('click'));
     restored.dispose();
 
     // A different browser session must not display an unrelated transcript.
