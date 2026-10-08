@@ -63,6 +63,62 @@ deterministic offline sample, so no account or credentials are required.
 The demo is an example application, not a required runtime dependency of the
 library.
 
+## AI Chart chat (Workstation and Excel Add-in)
+
+The example applications include an AI chart assistant with **ChatGPT Bridge**
+and **Codex CLI** providers. In the Workstation or Excel Add-in, open **AI**,
+choose the provider in **Options**, and ask about the chart currently displayed.
+The local assistant sidecar handles requests through `/assistant-api` (default
+sidecar port `8788`). This is an application integration, **not** part of the
+provider-neutral `lamlong-chart` library API.
+
+### New: on-demand chart data queries
+
+The assistant can now request additional **read-only** chart data before giving
+its final answer. The same workflow is used by Codex and ChatGPT Bridge:
+
+1. The app sends the user's question and a bounded snapshot of the current chart.
+2. If more data is needed, the AI can request up to two queries per round:
+   - `get_candles`: OHLCV candles from the current or another supported timeframe.
+   - `get_indicator`: calculated indicator values, effective parameters and a
+     description of the formula/method used.
+3. The app executes the queries using its **existing Datafeed and indicator
+   calculations**, returns structured results, and the AI continues answering.
+   Queries are limited to **120 output candles/points each** and **three rounds**
+   per user message; repeated identical requests within that turn are reused.
+
+Supported query timeframes: `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`,
+`1d`, `1w`, `1M`, plus `current` for the selected timeframe. Availability
+depends on the connected data provider. The **Excel sheet** source has no
+additional-timeframe Datafeed; use market data to query other intervals.
+
+Numerical indicator queries currently cover **SMA, EMA, RSI, MACD, Bollinger
+Bands and the supported TA Suite definitions**. Results are candle-timestamped
+and use the existing indicator math rather than asking the AI to calculate or
+guess values. Unsupported indicators (including SMC/externally sourced
+indicators without a calculation adapter) return an explicit error; they are
+**not** silently fabricated. Queries use the chart's visible/replay time anchor
+to avoid reading future candles, and return missing-data errors where needed.
+
+Example prompts:
+
+> Use `get_indicator` to get RSI(14) for the latest five daily candles, then
+> report the latest value and the calculation method.
+
+> Use `get_candles` to fetch the latest five weekly candles and compare their
+> closes with the daily chart.
+
+> Fetch MACD(12,26,9) on `1w` and report the latest MACD, Signal and Histogram.
+
+The AI can only call the two chart-data operations exposed above. This does
+**not** give it general filesystem access, arbitrary URL fetching, web search,
+or access to every indicator on the chart. For the relevant implementation see
+[`examples/assistant/candle-query.ts`](examples/assistant/candle-query.ts),
+[`examples/assistant/indicator-query.ts`](examples/assistant/indicator-query.ts),
+[`examples/assistant/chat-runner.ts`](examples/assistant/chat-runner.ts),
+[`examples/sidecars/assistant/prompt-builder.mjs`](examples/sidecars/assistant/prompt-builder.mjs),
+and [`examples/sidecars/assistant/server.mjs`](examples/sidecars/assistant/server.mjs).
+
 ## Use as a library
 
 The public npm install command will be available after the first package release:
