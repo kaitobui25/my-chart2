@@ -62,11 +62,7 @@ export class ExcelAssistantController {
     this.view.provider.value = this.provider;
     this.bindEvents();
     if (this.provider === 'codex') this.restoreCodexTranscript();
-    if (this.conversation.length) {
-      for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
-    } else {
-      this.view.appendMessage('assistant', 'Sẵn sàng. Hỏi trực tiếp về vùng chart đang xem.', false);
-    }
+    for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
     this.refreshContext();
     void this.initializeConnection();
   }
@@ -254,10 +250,8 @@ export class ExcelAssistantController {
     this.view.clearMessages();
     if (this.conversation.length) {
       for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
-    } else {
-      this.view.appendMessage('assistant', `Đã chuyển sang ${providerLabel(this.provider)}. Context vẫn theo chart hiện tại.`);
     }
-    this.view.setConnectionStatus(`Đang kết nối ${providerLabel(this.provider)}…`, false);
+    this.view.setConnectionStatus(`Đang kết nối ${providerLabel(this.provider)}…`, false, true);
     this.persistSettings();
     void this.checkHealth();
     void this.loadModels();

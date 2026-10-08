@@ -55,9 +55,10 @@ export class AssistantPanelView {
     this.settingsToggle.setAttribute('aria-expanded', String(!this.settings.hidden));
   }
 
-  setConnectionStatus(message: string, connected: boolean): void {
-    this.status.textContent = message;
-    this.status.dataset.state = connected ? 'connected' : 'error';
+  setConnectionStatus(message: string, connected: boolean, pending = false): void {
+    this.status.setAttribute('aria-label', message);
+    this.status.title = message;
+    this.status.dataset.state = pending ? 'pending' : connected ? 'connected' : 'error';
   }
 
   setQuota(message: string | null): void {

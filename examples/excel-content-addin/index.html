@@ -59,17 +59,26 @@
             </div>
             <aside id="assistant-panel" class="assistant-panel" aria-label="Trợ lý phân tích" hidden>
               <header class="assistant-head">
-                <div class="assistant-head-copy">
-                  <div class="assistant-title-line">
+                <div class="assistant-head-bar">
+                  <div class="assistant-identity">
                     <strong>Trợ lý</strong>
-                    <small id="assistant-quota" class="assistant-quota" hidden></small>
+                    <span id="assistant-status" class="assistant-status" data-state="pending" role="status" aria-label="Đang kết nối…" title="Đang kết nối…"></span>
                   </div>
-                  <span id="assistant-status">Đang kết nối…</span>
+                  <div class="assistant-head-actions">
+                    <button id="assistant-settings-toggle" type="button" aria-label="Tùy chọn" title="Tùy chọn" aria-controls="assistant-settings" aria-expanded="false">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="white"/><circle cx="16" cy="17" r="2" fill="white"/></svg>
+                    </button>
+                    <button id="assistant-new" type="button" aria-label="Cuộc trò chuyện mới" title="Cuộc trò chuyện mới">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    </button>
+                    <button id="assistant-close" type="button" aria-label="Đóng trợ lý" title="Đóng trợ lý">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                    </button>
+                  </div>
                 </div>
-                <div class="assistant-head-actions">
-                  <button id="assistant-settings-toggle" type="button" aria-controls="assistant-settings" aria-expanded="false">Tùy chọn</button>
-                  <button id="assistant-new" type="button">Mới</button>
-                  <button id="assistant-close" type="button" aria-label="Đóng trợ lý">×</button>
+                <div class="assistant-meta">
+                  <span id="assistant-context" class="assistant-context">Chưa có dữ liệu chart</span>
+                  <small id="assistant-quota" class="assistant-quota" hidden></small>
                 </div>
               </header>
               <div id="assistant-settings" class="assistant-settings" hidden>
@@ -86,7 +95,6 @@
                   <select id="assistant-reasoning" aria-label="Mức suy luận"></select>
                 </label>
               </div>
-              <div id="assistant-context" class="assistant-context">Chưa có dữ liệu chart</div>
               <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
               <form id="assistant-form" class="assistant-form">
                 <textarea id="assistant-input" rows="2" placeholder="Hỏi về chart đang xem…" aria-label="Tin nhắn cho trợ lý"></textarea>

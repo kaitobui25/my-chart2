@@ -586,6 +586,7 @@ describe('Excel assistant configuration', () => {
       getContext: () => context,
       resolveContext: async () => context,
     });
+    expect(elements.get('#assistant-messages')!.children.length).toBe(0);
     await Promise.resolve();
 
     const provider = elements.get('#assistant-provider')!;
@@ -630,7 +631,7 @@ describe('Excel assistant configuration', () => {
       getContext: () => context,
       resolveContext: async () => context,
     });
-    expect(elements.get('#assistant-messages')!.children.length).toBe(1);
+    expect(elements.get('#assistant-messages')!.children.length).toBe(0);
     isolated.dispose();
   });
 });
