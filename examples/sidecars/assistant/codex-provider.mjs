@@ -1,10 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { spawn } from 'node:child_process'
-import os from 'node:os'
-import path from 'node:path'
+import { mkdir } from 'node:fs/promises'
 import { withCodexAppServer } from './codex-app-server-client.mjs'
-import { commandExists, spawnCommand } from './command-utils.mjs'
-import { ASSISTANT_RESPONSE_SCHEMA, parseResponse } from './response-schema.mjs'
+import { commandExists } from './command-utils.mjs'
+import { CodexSessionStore, CODEX_SESSION_ID } from './codex-session-store.mjs'
+import { runCodexExec } from './codex-exec-runner.mjs'
 
 export const CODEX_REASONING_EFFORTS = ['low', 'medium', 'high', 'xhigh']
 const REASONING_EFFORT_SET = new Set(CODEX_REASONING_EFFORTS)
@@ -111,15 +109,6 @@ function unavailableError() {
   return error
 }
 
-function terminate(child) {
-  if (!child || child.killed) return
-  if (process.platform === 'win32' && child.pid) {
-    spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
-    return
-  }
-  child.kill('SIGTERM')
-}
-
 export async function getCodexOptions({ runtimeRoot }) {
   if (!codexAvailable()) throw unavailableError()
   const now = Date.now()
@@ -146,60 +135,70 @@ export async function getCodexStatus({ runtimeRoot, model, reasoningEffort }) {
   })
 }
 
-export async function runCodex({ runtimeRoot, model, reasoningEffort, prompt, screenshotDataUrl, onStart }) {
-  if (!codexAvailable()) throw unavailableError()
-
-  await mkdir(runtimeRoot, { recursive: true })
-  const requestDir = await mkdtemp(path.join(os.tmpdir(), 'l2chart-codex-'))
-  const schemaPath = path.join(requestDir, 'response-schema.json')
-  const outputPath = path.join(requestDir, 'response.json')
-  const imagePath = path.join(requestDir, 'chart.png')
-  await writeFile(schemaPath, JSON.stringify(ASSISTANT_RESPONSE_SCHEMA), 'utf8')
-
-  const args = [
-    'exec',
-    '--skip-git-repo-check',
-    '--sandbox', 'read-only',
-    '--color', 'never',
-    '-C', runtimeRoot,
-    '--output-schema', schemaPath,
-    '--output-last-message', outputPath
-  ]
-  const selectedModel = normalizeModel(model)
-  if (selectedModel) args.push('--model', selectedModel)
-  args.push('--config', `model_reasoning_effort="${normalizeEffort(reasoningEffort)}"`)
-
-  if (typeof screenshotDataUrl === 'string' && screenshotDataUrl.startsWith('data:image/png;base64,')) {
-    const base64 = screenshotDataUrl.slice('data:image/png;base64,'.length)
-    await writeFile(imagePath, Buffer.from(base64, 'base64'))
-    args.push('--image', imagePath)
+/** The client ID is stable in the browser; Codex's thread ID is durable on disk. */
+export class CodexProvider {
+  constructor({ runtimeRoot, store = new CodexSessionStore(runtimeRoot), runner = runCodexExec, available = codexAvailable }) {
+    this.runtimeRoot = runtimeRoot
+    this.store = store
+    this.runner = runner
+    this.available = available
+    this.busy = new Set()
   }
-  args.push('-')
 
-  let child
-  try {
-    await new Promise((resolve, reject) => {
-      child = spawnCommand('codex', args, {
-        cwd: runtimeRoot,
-        windowsHide: true,
-        stdio: ['pipe', 'ignore', 'pipe']
+  validate(clientSessionId) {
+    if (!CODEX_SESSION_ID.test(clientSessionId ?? '')) {
+      const error = new Error('Valid clientSessionId is required for Codex.')
+      error.status = 400
+      error.code = 'INVALID_CLIENT_SESSION'
+      throw error
+    }
+    if (this.busy.has(clientSessionId)) {
+      const error = new Error('This Codex conversation already has an active request.')
+      error.status = 409
+      error.code = 'CODEX_SESSION_BUSY'
+      throw error
+    }
+    this.busy.add(clientSessionId)
+  }
+
+  async sessionFor(clientSessionId) {
+    if (!CODEX_SESSION_ID.test(clientSessionId ?? '')) return null
+    return this.store.get(clientSessionId)
+  }
+
+  async newConversation({ clientSessionId }) {
+    this.validate(clientSessionId)
+    try {
+      await this.store.update(clientSessionId, null)
+      return { sessionId: clientSessionId, conversationId: null, selection: null }
+    } finally {
+      this.busy.delete(clientSessionId)
+    }
+  }
+
+  async runChat({ clientSessionId, model, reasoningEffort, prompt, screenshotDataUrl, onStart }) {
+    if (!this.available()) throw unavailableError()
+    this.validate(clientSessionId)
+    try {
+      const sessionId = await this.store.get(clientSessionId)
+      const result = await this.runner({
+        runtimeRoot: this.runtimeRoot,
+        sessionId,
+        model: normalizeModel(model),
+        reasoningEffort: normalizeEffort(reasoningEffort),
+        prompt,
+        screenshotDataUrl,
+        onStart
       })
-      onStart?.({ child, cancel: () => terminate(child) })
-      let stderr = ''
-      child.stderr.on('data', chunk => { stderr += String(chunk) })
-      child.on('error', reject)
-      child.on('exit', code => {
-        if (code === 0) resolve()
-        else {
-          const error = new Error(stderr.trim() || `Codex exited with code ${code}.`)
-          error.code = 'CODEX_FAILED'
-          reject(error)
-        }
-      })
-      child.stdin.end(prompt)
-    })
-    return parseResponse(await readFile(outputPath, 'utf8'))
-  } finally {
-    await rm(requestDir, { recursive: true, force: true })
+      if (!CODEX_SESSION_ID.test(result.sessionId ?? '') || (sessionId && result.sessionId !== sessionId)) {
+        const error = new Error('Codex returned a mismatched session ID.')
+        error.code = 'CODEX_SESSION_INVALID'
+        throw error
+      }
+      if (!sessionId) await this.store.update(clientSessionId, result.sessionId)
+      return result.response
+    } finally {
+      this.busy.delete(clientSessionId)
+    }
   }
 }

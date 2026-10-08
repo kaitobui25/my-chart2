@@ -18,17 +18,32 @@ test('builds a symbol-aware prompt without duplicating native ChatGPT history', 
   assert.doesNotMatch(prompt, /Required response shape/)
 })
 
-test('includes bounded local history when Codex owns the conversation context', () => {
+test('native Codex session uses structured output without duplicating local conversation', () => {
   const conversation = Array.from({ length: 20 }, (_, index) => ({ role: 'user', content: `m${index}` }))
   const prompt = buildPrompt({
     message: 'What now?',
     conversation,
-    includeConversation: true,
+    structuredResponse: true,
     context: { symbol: 'HPG', timeframe: '15m', candles: [] }
   })
   assert.doesNotMatch(prompt, /m0/)
-  assert.match(prompt, /m19/)
-  assert.match(prompt, /Recent conversation JSON/)
+  assert.doesNotMatch(prompt, /m19/)
+  assert.doesNotMatch(prompt, /Recent conversation JSON/)
+  assert.match(prompt, /Required response shape/)
+})
+
+test('Codex data follow-up does not repeat the original question or chart context', () => {
+  const prompt = buildPrompt({
+    message: 'What is RSI?',
+    context: { symbol: 'FPT', timeframe: '1d', candles: [{ close: 123 }] },
+    continuation: true,
+    structuredResponse: true,
+    toolResults: [{ request: { tool: 'get_indicator', id: 'rsi' }, ok: true, values: [55] }]
+  })
+  assert.match(prompt, /Continue the pending chart question/)
+  assert.match(prompt, /"values":\[55\]/)
+  assert.doesNotMatch(prompt, /What is RSI\? /)
+  assert.doesNotMatch(prompt, /"candles"/)
   assert.match(prompt, /Required response shape/)
 })
 

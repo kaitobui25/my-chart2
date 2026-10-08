@@ -26,6 +26,8 @@ interface StoredSettings {
 const QUOTA_REFRESH_MS = 60_000;
 const FIVE_HOUR_WINDOW_MINUTES = 5 * 60;
 const WEEK_WINDOW_MINUTES = 7 * 24 * 60;
+const CODEX_TRANSCRIPT_KEY = 'l2chart.excel.assistant.codex-transcript.v1';
+const MAX_VISIBLE_MESSAGES = 100;
 
 export function formatCodexQuotaSummary(response: CodexStatusResponse): string {
   const buckets = [response.rateLimits.primary, response.rateLimits.secondary].filter(
@@ -40,6 +42,7 @@ export class ExcelAssistantController {
   private readonly client = new AssistantApiClient(EXCEL_ASSISTANT_CONFIG.apiBaseUrl);
   private readonly view = new AssistantPanelView();
   private conversation: AssistantConversationMessage[] = [];
+  private codexThreadId: string | null = null;
   private modelOptions: CodexModelOption[] = [];
   private defaultReasoningEfforts: ReasoningEffort[] = [...ALL_REASONING_EFFORTS];
   private provider: AssistantProvider = EXCEL_ASSISTANT_CONFIG.defaultProvider;
@@ -58,7 +61,12 @@ export class ExcelAssistantController {
     this.restoreSettings();
     this.view.provider.value = this.provider;
     this.bindEvents();
-    this.view.appendMessage('assistant', 'Sẵn sàng. Hỏi trực tiếp về vùng chart đang xem.', false);
+    if (this.provider === 'codex') this.restoreCodexTranscript();
+    if (this.conversation.length) {
+      for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
+    } else {
+      this.view.appendMessage('assistant', 'Sẵn sàng. Hỏi trực tiếp về vùng chart đang xem.', false);
+    }
     this.refreshContext();
     void this.initializeConnection();
   }
@@ -192,6 +200,7 @@ export class ExcelAssistantController {
         this.view.setQuota(null);
         return;
       }
+      if (response.conversationId !== undefined) this.syncCodexThread(response.conversationId);
       this.view.setQuota(formatCodexQuotaSummary(response));
     } catch {
       this.view.setQuota(null);
@@ -237,12 +246,17 @@ export class ExcelAssistantController {
     this.modelOptions = [];
     this.defaultReasoningEfforts = [...ALL_REASONING_EFFORTS];
     this.conversation = [];
+    if (this.provider === 'codex') this.restoreCodexTranscript();
     this.stopQuotaRefresh();
     this.view.setQuota(null);
     this.view.setModels([], '', this.provider);
     this.view.renderReasoningOptions(this.defaultReasoningEfforts, this.reasoningEffort);
     this.view.clearMessages();
-    this.view.appendMessage('assistant', `Đã chuyển sang ${providerLabel(this.provider)}. Context vẫn theo chart hiện tại.`);
+    if (this.conversation.length) {
+      for (const item of this.conversation) this.view.appendMessage(item.role, item.content, false);
+    } else {
+      this.view.appendMessage('assistant', `Đã chuyển sang ${providerLabel(this.provider)}. Context vẫn theo chart hiện tại.`);
+    }
     this.view.setConnectionStatus(`Đang kết nối ${providerLabel(this.provider)}…`, false);
     this.persistSettings();
     void this.checkHealth();
@@ -280,6 +294,10 @@ export class ExcelAssistantController {
         this.applyModelSelection(this.model, false);
       }
       this.conversation = [];
+      if (this.provider === 'codex') {
+        this.codexThreadId = null;
+        this.clearCodexTranscript();
+      }
       this.view.clearMessages();
       this.view.appendMessage(
         'assistant',
@@ -314,6 +332,10 @@ export class ExcelAssistantController {
     }
 
     this.view.appendMessage('user', message);
+    if (this.provider === 'codex') {
+      this.conversation = [...this.conversation, { role: 'user' as const, content: message }].slice(-MAX_VISIBLE_MESSAGES);
+      this.persistCodexTranscript();
+    }
     this.cancelRequested = false;
     this.setBusy(true, false);
     this.view.showThinking();
@@ -329,7 +351,9 @@ export class ExcelAssistantController {
         message,
         model: this.model || null,
         reasoningEffort: this.reasoningEffort,
-        conversation: this.conversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages),
+        conversation: this.provider === 'codex'
+          ? []
+          : this.conversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages),
         setRequestId: (id) => {
           this.requestId = id;
           this.setBusy(true, id !== null);
@@ -344,10 +368,13 @@ export class ExcelAssistantController {
       this.view.appendMessage('assistant', answer);
       const nextConversation: AssistantConversationMessage[] = [
         ...this.conversation,
-        { role: 'user', content: message },
+        ...(this.provider === 'codex' ? [] : [{ role: 'user' as const, content: message }]),
         { role: 'assistant', content: answer },
       ];
-      this.conversation = nextConversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages);
+      this.conversation = nextConversation.slice(-(this.provider === 'codex'
+        ? MAX_VISIBLE_MESSAGES
+        : EXCEL_ASSISTANT_CONFIG.maxConversationMessages));
+      if (this.provider === 'codex') this.persistCodexTranscript();
       this.view.setConnectionStatus(`${providerLabel(this.provider)} sẵn sàng`, true);
       this.setAssistantConnected(true);
       void this.refreshQuota();
@@ -357,6 +384,13 @@ export class ExcelAssistantController {
         'assistant',
         this.cancelRequested ? 'Đã dừng chờ phản hồi.' : `Lỗi: ${errorMessage(error)}`,
       );
+      if (this.provider === 'codex') {
+        this.conversation = [...this.conversation, {
+          role: 'assistant' as const,
+          content: this.cancelRequested ? 'Đã dừng chờ phản hồi.' : `Lỗi: ${errorMessage(error)}`,
+        }].slice(-MAX_VISIBLE_MESSAGES);
+        this.persistCodexTranscript();
+      }
       if (!this.cancelRequested) this.view.setConnectionStatus(errorMessage(error), false);
     } finally {
       this.requestId = null;
@@ -446,6 +480,49 @@ export class ExcelAssistantController {
     } catch {
       // Storage is optional; the assistant remains usable without persistence.
     }
+  }
+
+  private restoreCodexTranscript(): void {
+    try {
+      const stored: unknown = JSON.parse(sessionStorage.getItem(CODEX_TRANSCRIPT_KEY) ?? 'null');
+      if (!stored || typeof stored !== 'object' || !('clientSessionId' in stored)
+        || stored.clientSessionId !== this.client.sessionId || !('messages' in stored)
+        || !Array.isArray(stored.messages)) return;
+      this.conversation = stored.messages.filter((item): item is AssistantConversationMessage =>
+        item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string'
+      ).slice(-MAX_VISIBLE_MESSAGES);
+      this.codexThreadId = 'threadId' in stored && typeof stored.threadId === 'string'
+        ? stored.threadId : null;
+    } catch {
+      this.conversation = [];
+    }
+  }
+
+  private persistCodexTranscript(): void {
+    try {
+      sessionStorage.setItem(CODEX_TRANSCRIPT_KEY, JSON.stringify({
+        clientSessionId: this.client.sessionId,
+        threadId: this.codexThreadId,
+        messages: this.conversation,
+      }));
+    } catch {
+      // Codex session history is held by the CLI; browser display storage is optional.
+    }
+  }
+
+  private clearCodexTranscript(): void {
+    try { sessionStorage.removeItem(CODEX_TRANSCRIPT_KEY); } catch { /* optional */ }
+  }
+
+  private syncCodexThread(remoteId: string | null): void {
+    if (this.codexThreadId && this.codexThreadId !== remoteId && this.busy) return;
+    if (this.codexThreadId && this.codexThreadId !== remoteId && !this.busy) {
+      this.conversation = [];
+      this.view.clearMessages();
+      this.view.appendMessage('assistant', 'Phiên Codex trên máy đã thay đổi. Hãy bắt đầu cuộc trò chuyện mới.', false);
+    }
+    this.codexThreadId = remoteId;
+    this.persistCodexTranscript();
   }
 }
 

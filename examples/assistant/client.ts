@@ -63,6 +63,10 @@ export class AssistantApiClient {
     this.clientSessionId = UUID_PATTERN.test(clientSessionId) ? clientSessionId : newClientSessionId();
   }
 
+  get sessionId(): string {
+    return this.clientSessionId;
+  }
+
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let response: Response;
     try {

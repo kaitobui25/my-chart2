@@ -485,7 +485,7 @@ describe('Excel assistant configuration', () => {
     expect(EXCEL_ASSISTANT_CONFIG.defaultReasoningEffort).toBe('medium');
   });
 
-  it('does not lock Send or Provider while provider options are still loading', async () => {
+  it('allows switching to a preserved Codex session without waiting for model options', async () => {
     class FakeElement extends EventTarget {
       hidden = false;
       disabled = false;
@@ -528,6 +528,12 @@ describe('Excel assistant configuration', () => {
     vi.stubGlobal('localStorage', {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => stored.set(key, value),
+    });
+    const tabStored = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => tabStored.get(key) ?? null,
+      setItem: (key: string, value: string) => { tabStored.set(key, value); },
+      removeItem: (key: string) => { tabStored.delete(key); },
     });
 
     const jsonResponse = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), {
@@ -588,6 +594,7 @@ describe('Excel assistant configuration', () => {
 
     expect(elements.get('#assistant-send')!.disabled).toBe(false);
     expect(provider.disabled).toBe(false);
+    expect(fetchMock.mock.calls.some(([request]) => String(request).endsWith('/new'))).toBe(false);
 
     const input = elements.get('#assistant-input')!;
     input.value = 'test';
@@ -600,9 +607,31 @@ describe('Excel assistant configuration', () => {
       const chatCall = fetchMock.mock.calls.find(([request]) => String(request).endsWith('/chat'));
       expect(chatCall).toBeDefined();
       const options = chatCall?.[1] as RequestInit;
-      expect(JSON.parse(String(options.body))).toMatchObject({ provider: 'codex', message: 'test' });
+      expect(JSON.parse(String(options.body))).toMatchObject({ provider: 'codex', message: 'test', conversation: [] });
+    });
+    await vi.waitFor(() => {
+      expect(tabStored.get('l2chart.excel.assistant.codex-transcript.v1')).toContain('"content":"ok"');
     });
     controller.dispose();
+
+    // Same tab restores the transcript without replaying it into the Codex prompt.
+    elements.get('#assistant-messages')!.replaceChildren();
+    const restored = new ExcelAssistantController({
+      getContext: () => context,
+      resolveContext: async () => context,
+    });
+    expect(elements.get('#assistant-messages')!.children.length).toBe(2);
+    restored.dispose();
+
+    // A different browser session must not display an unrelated transcript.
+    tabStored.set('l2chart.assistant.clientSessionId.v1', '33333333-3333-4333-8333-333333333333');
+    elements.get('#assistant-messages')!.replaceChildren();
+    const isolated = new ExcelAssistantController({
+      getContext: () => context,
+      resolveContext: async () => context,
+    });
+    expect(elements.get('#assistant-messages')!.children.length).toBe(1);
+    isolated.dispose();
   });
 });
 

@@ -5,7 +5,7 @@ import { buildPrompt } from './prompt-builder.mjs'
 import { parseNativeResponse } from './response-schema.mjs'
 import { ChatGptExtensionBridge, validExtensionId } from './chatgpt-bridge.mjs'
 import { ChatGptProvider } from './chatgpt-provider.mjs'
-import { codexAvailable, getCodexOptions, getCodexStatus, runCodex } from './codex-provider.mjs'
+import { CodexProvider, codexAvailable, getCodexOptions, getCodexStatus } from './codex-provider.mjs'
 
 const ASSISTANT_API_VERSION = 2
 await mkdir(RUNTIME_ROOT, { recursive: true })
@@ -13,6 +13,7 @@ const activeRequests = new Map()
 let extensionSourceVersion = null
 const chatGptBridge = new ChatGptExtensionBridge()
 const chatGptProvider = new ChatGptProvider(chatGptBridge, { commandTimeoutMs: REQUEST_TIMEOUT_MS })
+const codexProvider = new CodexProvider({ runtimeRoot: RUNTIME_ROOT })
 
 function assistantProvider(value) {
   if (value == null || value === '') return 'codex'
@@ -135,22 +136,31 @@ async function handleChat(request, response) {
 
   const prompt = buildPrompt({
     message: body.message,
-    conversation: body.conversation,
-    includeConversation: provider === 'codex',
+    structuredResponse: provider === 'codex',
+    continuation: provider === 'codex' && Array.isArray(body.toolResults) && body.toolResults.length > 0,
     context: body.context,
     toolResults: Array.isArray(body.toolResults) ? body.toolResults : []
   })
 
+  const active = { cancelled: false, cancel: null }
+  activeRequests.set(body.requestId, () => {
+    active.cancelled = true
+    active.cancel?.()
+  })
+  const onStart = ({ cancel }) => {
+    active.cancel = cancel
+    if (active.cancelled) cancel()
+  }
   let timeout
   try {
     const providerRequest = provider === 'codex'
-      ? runCodex({
-          runtimeRoot: RUNTIME_ROOT,
+      ? codexProvider.runChat({
+          clientSessionId: body.clientSessionId,
           model: body.model,
           reasoningEffort: body.reasoningEffort,
           prompt,
           screenshotDataUrl: body.screenshotDataUrl,
-          onStart: ({ cancel }) => activeRequests.set(body.requestId, cancel)
+          onStart
         })
       : chatGptProvider.runChat({
           clientSessionId: body.clientSessionId,
@@ -158,7 +168,7 @@ async function handleChat(request, response) {
           model: body.model,
           reasoningEffort: body.reasoningEffort,
           prompt,
-          onStart: ({ cancel }) => activeRequests.set(body.requestId, cancel)
+          onStart
         })
     const result = await Promise.race([
       providerRequest,
@@ -240,6 +250,7 @@ const server = http.createServer(async (request, response) => {
               reasoningEffort: body.reasoningEffort
             }),
             provider,
+            conversationId: await codexProvider.sessionFor(body.clientSessionId),
             bridgeConnected: false,
             detail: 'Codex CLI is ready.'
           }
@@ -254,11 +265,7 @@ const server = http.createServer(async (request, response) => {
       const body = await readJson(request)
       const provider = assistantProvider(body.provider)
       if (provider === 'codex') {
-        return sendJson(response, 200, {
-          sessionId: body.clientSessionId,
-          conversationId: null,
-          selection: null
-        })
+        return sendJson(response, 200, await codexProvider.newConversation({ clientSessionId: body.clientSessionId }))
       }
       return sendJson(response, 200, await chatGptProvider.newConversation({
         clientSessionId: body.clientSessionId,

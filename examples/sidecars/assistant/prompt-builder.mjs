@@ -10,16 +10,6 @@ const RULES = [
   'Reply in the language used by the user.',
 ];
 
-function compactConversation(conversation) {
-  return Array.isArray(conversation)
-    ? conversation.slice(-10).flatMap(item => {
-        if (!['user', 'assistant'].includes(item?.role) || typeof item?.content !== 'string') return []
-        const content = item.content.trim().slice(0, 4000)
-        return content ? [{ role: item.role, content }] : []
-      })
-    : []
-}
-
 function compactContext(context) {
   const source = context && typeof context === 'object' ? context : {}
   return {
@@ -64,7 +54,19 @@ function timeframeSummary(context) {
   return rows.length > 0 ? rows.join('\n') : 'No chart data available.'
 }
 
-export function buildPrompt({ message, conversation, context, toolResults = [], includeConversation = false }) {
+export function buildPrompt({ message, context, toolResults = [], structuredResponse = false, continuation = false }) {
+  const responseShape = '{"message":"short, clear answer or empty when requesting data","requests":[]}'
+  if (continuation) {
+    return [
+      'Continue the pending chart question in this Codex session using the newly supplied results.',
+      'Do not repeat an earlier request if its result is already available.',
+      'Results of prior chart data requests (use these as verified data):',
+      JSON.stringify(toolResults.slice(0, 6)),
+      'Reply in the language of the original question. Do not invent missing data.',
+      'Required response shape:',
+      responseShape
+    ].join('\n')
+  }
   const prompt = [
     `You are a chart assistant embedded in L2Chart. Current instrument: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
     ...RULES.map(rule => `- ${rule}`),
@@ -86,14 +88,11 @@ export function buildPrompt({ message, conversation, context, toolResults = [], 
   if (toolResults.length) {
     prompt.push('', 'Results of prior chart data requests (use these as verified data):', JSON.stringify(toolResults.slice(0, 6)))
   }
-  if (includeConversation) {
+  if (structuredResponse) {
     prompt.push(
       '',
-      'Recent conversation JSON:',
-      JSON.stringify(compactConversation(conversation)),
-      '',
       'Required response shape:',
-      '{"message":"short, clear answer or empty when requesting data","requests":[]}'
+      responseShape
     )
   }
   prompt.push(
