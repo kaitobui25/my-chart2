@@ -1,4 +1,5 @@
 import type { L2Chart } from '../core/chart';
+import type { Candle } from '../core/types';
 
 /** Registry shared by bundled and local indicator modules. */
 
@@ -38,6 +39,10 @@ export interface IndicatorDef {
   category: IndicatorCategory;
   /** Parameters exposed by generated settings controls. */
   params?: ParamDef[];
+  /** Description of the calculation exposed to data consumers. */
+  formula?: string;
+  /** Pure, candle-aligned output series; null represents warm-up bars. */
+  calculate?: (candles: readonly Candle[], params: Params) => Record<string, (number | null)[]>;
   /**
    * Create chart series and return their lifecycle object.
    * `params` contains every declared key merged with its default value.

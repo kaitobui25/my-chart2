@@ -7,11 +7,16 @@ const def: IndicatorDef = {
   name: 'Bollinger Bands',
   category: 'overlay',
   order: 12,
+  formula: 'Middle = SMA(length, source); upper/lower = middle +/- mult times population standard deviation of source.',
   params: [
     { key: 'length', label: 'Length', type: 'int', default: 20, min: 1, max: 5000 },
     { key: 'mult', label: 'StdDev', type: 'float', default: 2, min: 0.1, max: 50, step: 0.5 },
     SOURCE_PARAM,
   ],
+  calculate: (candles, params) => {
+    const result = bollinger(candles, Number(params.length), Number(params.mult), String(params.source) as Source);
+    return { upper: result.upper, middle: result.middle, lower: result.lower };
+  },
   create(chart, params) {
     const length = Number(params.length);
     const mult = Number(params.mult);

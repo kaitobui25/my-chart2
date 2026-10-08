@@ -6,10 +6,12 @@ const def: IndicatorDef = {
   name: 'SMA',
   category: 'overlay',
   order: 10,
+  formula: 'SMA = arithmetic mean of the selected source over the last length candles.',
   params: [
     { key: 'length', label: 'Length', type: 'int', default: 20, min: 1, max: 5000 },
     SOURCE_PARAM,
   ],
+  calculate: (candles, params) => ({ SMA: sma(candles, Number(params.length), String(params.source) as Source) }),
   create(chart, params) {
     const length = Number(params.length);
     const source = String(params.source) as Source;

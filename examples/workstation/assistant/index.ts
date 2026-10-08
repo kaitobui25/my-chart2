@@ -1,5 +1,6 @@
 import './style.css';
 import { AssistantApiClient } from './client';
+import { runAssistantTurn } from '../../assistant/chat-runner';
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
@@ -81,6 +82,7 @@ function mountAssistant(): void {
     : 'medium';
   let model = saved.model?.trim() ?? '';
   let requestId: string | null = null;
+  let cancelRequested = false;
   let busy = false;
   let modelsLoading = true;
   let modelOptions: AssistantModelOption[] = [];
@@ -396,7 +398,7 @@ function mountAssistant(): void {
 
     appendMessage('user', message);
     input.value = '';
-    requestId = crypto.randomUUID();
+    cancelRequested = false;
     setBusy(true);
     const thinking = appendThinking();
     try {
@@ -407,20 +409,27 @@ function mountAssistant(): void {
         )).join(', ');
         contextBadge.textContent = `${context.symbol} · ${context.timeframe} · ${context.candleCount} nến · + ${extras}`;
       }
-      const response = await client.chat({
-        requestId,
+      const answer = await runAssistantTurn({
+        client,
+        bridge: window.__L2CHART_ASSISTANT__!,
+        context,
+        provider: 'chatgpt',
         message,
         model: model || null,
         reasoningEffort,
         conversation: conversation.slice(-MAX_CONVERSATION_MESSAGES),
-        context,
+        setRequestId: (id) => {
+          requestId = id;
+          setBusy(true);
+        },
+        cancelled: () => cancelRequested,
       });
       thinking.remove();
-      appendMessage('assistant', response.message);
+      appendMessage('assistant', answer);
       const nextConversation: AssistantConversationMessage[] = [
         ...conversation,
         { role: 'user', content: message },
-        { role: 'assistant', content: response.message },
+        { role: 'assistant', content: answer },
       ];
       conversation = nextConversation.slice(-MAX_CONVERSATION_MESSAGES);
       setConnectionStatus('ChatGPT connected', true);
@@ -432,6 +441,7 @@ function mountAssistant(): void {
     } finally {
       thinking.remove();
       requestId = null;
+      cancelRequested = false;
       setBusy(false);
       input.focus({ preventScroll: true });
     }
@@ -448,7 +458,10 @@ function mountAssistant(): void {
     }
   });
   cancel.addEventListener('click', () => {
-    if (requestId) void client.cancel(requestId).catch(() => undefined);
+    if (requestId) {
+      cancelRequested = true;
+      void client.cancel(requestId).catch(() => undefined);
+    }
   });
 
   const observer = new MutationObserver(() => {

@@ -3,7 +3,7 @@ const RULES = [
   'Be honest, short, and easy to understand. Explain simply, like you are explaining to a child.',
   'Use the supplied structured chart context as the source of truth for symbol, timeframe, prices, candles, volume, indicators, replay state, and requested extra timeframes.',
   'The primary candles are limited to the chart area the user is currently viewing, with only a small nearby buffer.',
-  'Additional timeframes are included only when the user request explicitly asks for them. If a requested timeframe contains an error or no candles, say that the data is unavailable.',
+  'The initial context adds extra timeframes when the user explicitly asks; you may request more through the listed chart tools when analysis requires them. If a requested timeframe contains an error or no candles, say that the data is unavailable.',
   'Do not invent prices, volume, indicator values, news, fundamentals, unseen candles, or missing data.',
   'If the data is not enough to answer, say what is missing instead of guessing.',
   'Do not add a trade plan, prediction, or advice unless the user explicitly asks for it.',
@@ -64,7 +64,7 @@ function timeframeSummary(context) {
   return rows.length > 0 ? rows.join('\n') : 'No chart data available.'
 }
 
-export function buildPrompt({ message, conversation, context, includeConversation = false }) {
+export function buildPrompt({ message, conversation, context, toolResults = [], includeConversation = false }) {
   const prompt = [
     `You are a chart assistant embedded in L2Chart. Current instrument: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
     ...RULES.map(rule => `- ${rule}`),
@@ -73,8 +73,19 @@ export function buildPrompt({ message, conversation, context, includeConversatio
     timeframeSummary(context),
     'When answering whether a timeframe is available, trust this summary and the structured candles, not the primary timeframe label.',
     '',
+    'Read-only chart data tools: get_candles(timeframe, limit) and get_indicator(timeframe, id, limit, paramsJson).',
+    'Call these only if the current context and supplied tool results cannot answer the question.',
+    'To request data, output ONLY a JSON object with message:"" and requests:[{tool,timeframe,id,limit,paramsJson}].',
+    'Use timeframe "current" for the chart timeframe; valid alternatives: 1m,3m,5m,15m,30m,1h,2h,4h,1d,1w,1M.',
+    'For get_candles set id:"" and paramsJson:"{}". For get_indicator use an indicator id such as rsi, ema, sma, macd, bollinger; paramsJson is a JSON object encoded as a string (for example {"length":14}).',
+    'Limit must be 1-120; no more than two requests per response. Do not request external files or URLs.',
+    'If data has already been provided, answer directly instead of requesting it again.',
+    '',
     `User question: ${String(message ?? '').trim()}`,
   ]
+  if (toolResults.length) {
+    prompt.push('', 'Results of prior chart data requests (use these as verified data):', JSON.stringify(toolResults.slice(0, 6)))
+  }
   if (includeConversation) {
     prompt.push(
       '',
@@ -82,7 +93,7 @@ export function buildPrompt({ message, conversation, context, includeConversatio
       JSON.stringify(compactConversation(conversation)),
       '',
       'Required response shape:',
-      '{"message":"short, clear answer"}'
+      '{"message":"short, clear answer or empty when requesting data","requests":[]}'
     )
   }
   prompt.push(

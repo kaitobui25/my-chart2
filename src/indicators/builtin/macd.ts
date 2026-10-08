@@ -6,11 +6,16 @@ const def: IndicatorDef = {
   name: 'MACD',
   category: 'oscillator',
   order: 21,
+  formula: 'MACD = EMA(fast, close) - EMA(slow, close); signal = EMA(signal, MACD); histogram = MACD - signal.',
   params: [
     { key: 'fast', label: 'Fast Length', type: 'int', default: 12, min: 1, max: 500 },
     { key: 'slow', label: 'Slow Length', type: 'int', default: 26, min: 1, max: 500 },
     { key: 'signal', label: 'Signal', type: 'int', default: 9, min: 1, max: 500 },
   ],
+  calculate: (candles, params) => {
+    const result = macd(candles, Number(params.fast), Number(params.slow), Number(params.signal));
+    return { macd: result.macd, signal: result.signal, histogram: result.histogram };
+  },
   create(chart, params) {
     const fast = Number(params.fast);
     const slow = Number(params.slow);

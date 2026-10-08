@@ -149,6 +149,52 @@ interface IndicatorSpec {
   histogram?: boolean;
 }
 
+/** Explanations follow the same calculations used by the chart series. */
+const formulas: Record<string, string> = {
+  wma: 'Weighted moving average of source over length, using linearly increasing weights for newer candles.',
+  dema: 'DEMA = 2 * EMA(source, length) - EMA(EMA(source, length), length).',
+  tema: 'TEMA = 3 * EMA(source) - 3 * EMA(EMA(source)) + EMA(EMA(EMA(source))), all using length.',
+  trima: 'TRIMA = SMA(SMA(source, ceil((length + 1)/2)), floor((length + 1)/2)).',
+  kama: 'Adaptive moving average seeded by SMA(length), with smoothing set by the price efficiency ratio and 2/3 and 2/31 EMA constants.',
+  midpoint: 'Midpoint = (highest source + lowest source) / 2 over length candles.',
+  midprice: 'Midprice = (highest high + lowest low) / 2 over length candles.',
+  psar: 'Parabolic SAR: trailing trend stop adjusted by an acceleration factor starting at step and capped at max.',
+  hma: 'HMA = WMA(2 * WMA(source, floor(length/2)) - WMA(source, length), round(sqrt(length))).',
+  vwap: 'Cumulative sum of typical price ((high + low + close)/3) times volume divided by cumulative volume.',
+  vwma: 'VWMA = rolling sum(source * volume) / rolling sum(volume) over length candles.',
+  adx: 'ADX = Wilder-smoothed DX; +DI and -DI derive from smoothed directional movements divided by smoothed true range.',
+  aroon: 'Aroon Up/Down = 100 * (length - candles since highest high/lowest low) / length.',
+  'aroon-osc': 'Aroon Oscillator = Aroon Up - Aroon Down.',
+  bop: 'Balance of Power = (close - open) / (high - low), or 0 when range is zero.',
+  cci: 'CCI = (typical price - SMA(typical price)) / (0.015 * mean absolute deviation), using length.',
+  cmo: 'CMO = 100 * (sum of gains - sum of losses) / (sum of gains + sum of losses) over length.',
+  dx: 'DX = 100 * abs(+DI - -DI) / (+DI + -DI), with Wilder-smoothed directional movements over length.',
+  mfi: 'Money Flow Index = 100 - 100/(1 + positive money flow / negative money flow), over length.',
+  momentum: 'Momentum = source - source from length candles earlier.',
+  ppo: 'PPO = 100 * (EMA(source, fast) - EMA(source, slow)) / EMA(source, slow).',
+  roc: 'Rate of Change = 100 * (source / source from length candles earlier - 1).',
+  stochastic: '%K = 100 * (close - lowest low) / (highest high - lowest low) over length; %D = SMA(%K, smooth).',
+  'stoch-rsi': '%K = 100 * (RSI - lowest RSI) / (highest RSI - lowest RSI) over length; %D = SMA(%K, smooth).',
+  trix: 'TRIX = 100 * (triple-smoothed EMA(source, length) / previous triple EMA - 1).',
+  'ultimate-osc': 'Ultimate Oscillator = 100 * (4 * BP/TR over 7 + 2 * BP/TR over 14 + BP/TR over 28) / 7.',
+  'williams-r': 'Williams %R = -100 * (highest high - close) / (highest high - lowest low) over length.',
+  'awesome-osc': 'Awesome Oscillator = SMA(median price, 5) - SMA(median price, 34).',
+  'force-index': 'Force Index = EMA((close - previous close) * volume, length).',
+  obv: 'On Balance Volume = cumulative volume added on up closes and subtracted on down closes.',
+  adl: 'Accumulation/Distribution Line = cumulative volume * (2 * close - low - high) / (high - low).',
+  adosc: 'Chaikin Oscillator = EMA(Accumulation/Distribution Line, fast) - EMA(Accumulation/Distribution Line, slow).',
+  cmf: 'Chaikin Money Flow = rolling sum(money flow multiplier * volume) / rolling sum(volume) over length.',
+  atr: 'Average True Range = Wilder-smoothed true range over length candles.',
+  natr: 'Normalized ATR = 100 * ATR(length) / close.',
+  'true-range': 'True Range = max(high - low, abs(high - previous close), abs(low - previous close)).',
+  keltner: 'Keltner Channels = EMA(typical price, length) +/- mult * ATR(length).',
+  donchian: 'Donchian Channels = highest high and lowest low over length; middle is their average.',
+  stddev: 'Standard Deviation = square root of the population variance of source over length.',
+  variance: 'Variance = mean squared difference of source from its SMA over length.',
+  'linear-regression': 'Linear Regression = rolling mean(source) + least-squares slope * (length - 1)/2.',
+  zscore: 'Z-score = (source - rolling mean(source, length)) / rolling population standard deviation.',
+};
+
 function makeDef(spec: IndicatorSpec, order: number): IndicatorDef {
   return {
     id: spec.id,
@@ -156,6 +202,8 @@ function makeDef(spec: IndicatorSpec, order: number): IndicatorDef {
     category: spec.category,
     params: spec.params,
     order,
+    formula: formulas[spec.id],
+    calculate: spec.compute,
     create(chart, params) {
       const pane = spec.category === 'overlay' ? undefined : chart.addPane(1);
       const initial = spec.compute(chart.getCandles(), params);

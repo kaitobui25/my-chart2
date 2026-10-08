@@ -1,4 +1,5 @@
 import { AssistantApiClient } from '../assistant/client';
+import { runAssistantTurn } from '../assistant/chat-runner';
 import type {
   AssistantBridge,
   AssistantChartContext,
@@ -320,27 +321,31 @@ export class ExcelAssistantController {
       const context = await this.bridge.resolveContext(message) ?? baseContext;
       if (this.cancelRequested) throw new Error('Request cancelled.');
       this.renderContext(context);
-      this.requestId = crypto.randomUUID();
-      this.setBusy(true, true);
-      const response = await this.client.chat({
-        requestId: this.requestId,
+      const answer = await runAssistantTurn({
+        client: this.client,
+        bridge: this.bridge,
+        context,
         provider: this.provider,
         message,
         model: this.model || null,
         reasoningEffort: this.reasoningEffort,
         conversation: this.conversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages),
-        context,
+        setRequestId: (id) => {
+          this.requestId = id;
+          this.setBusy(true, id !== null);
+        },
+        cancelled: () => this.cancelRequested,
       });
       this.view.removeThinking();
       if (this.cancelRequested) {
         this.view.appendMessage('assistant', 'Đã dừng chờ phản hồi.');
         return;
       }
-      this.view.appendMessage('assistant', response.message);
+      this.view.appendMessage('assistant', answer);
       const nextConversation: AssistantConversationMessage[] = [
         ...this.conversation,
         { role: 'user', content: message },
-        { role: 'assistant', content: response.message },
+        { role: 'assistant', content: answer },
       ];
       this.conversation = nextConversation.slice(-EXCEL_ASSISTANT_CONFIG.maxConversationMessages);
       this.view.setConnectionStatus(`${providerLabel(this.provider)} sẵn sàng`, true);

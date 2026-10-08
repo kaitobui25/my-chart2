@@ -61,8 +61,25 @@ export interface AssistantConversationMessage {
   content: string;
 }
 
+/** The model may ask the chart for one or more read-only data queries. */
+export interface AssistantDataRequest {
+  tool: 'get_candles' | 'get_indicator';
+  timeframe: string;
+  id: string;
+  limit: number;
+  paramsJson: string;
+}
+
+export interface AssistantDataResult {
+  request: AssistantDataRequest;
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+}
+
 export interface AssistantResponse {
   message: string;
+  requests?: AssistantDataRequest[];
 }
 
 export interface AssistantModelOption {
@@ -148,6 +165,7 @@ export interface AssistantNewConversationResponse {
 export interface AssistantBridge {
   getContext(): AssistantChartContext | null;
   resolveContext(message: string): Promise<AssistantChartContext | null>;
+  queryData?(request: AssistantDataRequest, anchor: AssistantChartContext): Promise<AssistantDataResult>;
 }
 
 declare global {

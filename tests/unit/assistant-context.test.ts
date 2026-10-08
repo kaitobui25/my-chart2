@@ -45,6 +45,7 @@ describe('assistant chart context', () => {
   });
 
   it('detects only timeframes explicitly named by the user', () => {
+    expect(extractRequestedTimeframes('Xem khung 1M', '1d')).toEqual(['1M']);
     expect(extractRequestedTimeframes('So sánh 5 phút với 15m và daily', '5m'))
       .toEqual(['15m', '1d']);
     expect(extractRequestedTimeframes('mày xem được khung 30 của chart này ko', '1d'))

@@ -1,6 +1,7 @@
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
+  AssistantDataResult,
   AssistantHealthResponse,
   AssistantNewConversationResponse,
   AssistantOptionsResponse,
@@ -29,6 +30,7 @@ export interface ChatRequest {
   reasoningEffort: ReasoningEffort;
   conversation: AssistantConversationMessage[];
   context: AssistantChartContext;
+  toolResults?: AssistantDataResult[];
 }
 
 const CLIENT_SESSION_STORAGE_KEY = 'l2chart.assistant.clientSessionId.v1';

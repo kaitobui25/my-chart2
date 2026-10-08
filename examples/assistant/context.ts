@@ -2,9 +2,13 @@ import type { Candle, Datafeed } from '../../src/index';
 import type {
   AssistantCandle,
   AssistantChartContext,
+  AssistantDataRequest,
+  AssistantDataResult,
   AssistantQuote,
   AssistantTimeframeContext,
 } from './types';
+import { ASSISTANT_TIMEFRAMES, loadAssistantCandles } from './candle-query';
+import { queryIndicator } from './indicator-query';
 
 const MAX_PRIMARY_CANDLES = 240;
 const PRIMARY_CONTEXT_BUFFER = 12;
@@ -85,7 +89,7 @@ export function extractRequestedTimeframes(message: string, currentTimeframe: st
     pattern.lastIndex = 0;
     let match = pattern.exec(message);
     while (match) {
-      matches.push({ index: match.index, timeframe });
+      matches.push({ index: match.index, timeframe: match[0] === '1M' ? '1M' : timeframe });
       match = pattern.exec(message);
     }
   }
@@ -243,5 +247,67 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
     return context;
   };
 
-  return Object.freeze({ getContext, resolveContext });
+  const queryData = async (
+    request: AssistantDataRequest,
+    anchor: AssistantChartContext,
+  ): Promise<AssistantDataResult> => {
+    try {
+      const source = dependencies.getPrimarySource();
+      if (!source || source.symbol !== anchor.symbol || source.timeframe !== anchor.timeframe) {
+        throw new Error('Chart changed while AI was requesting data. Please ask again.');
+      }
+      const timeframe = request.timeframe === 'current' || !request.timeframe
+        ? anchor.timeframe : request.timeframe;
+      if (timeframe !== 'sheet' && !ASSISTANT_TIMEFRAMES.has(timeframe)) {
+        throw new Error(`Unsupported timeframe: ${timeframe}`);
+      }
+      const limit = Number.isInteger(request.limit) && request.limit > 0
+        ? Math.min(120, request.limit) : 30;
+      const until = anchor.visibleRange?.to
+        ?? anchor.candles[anchor.candles.length - 1]?.time;
+      if (!Number.isFinite(until)) throw new Error('No chart timestamp available.');
+      let params: Record<string, unknown> = {};
+      if (request.tool === 'get_indicator' && request.paramsJson) {
+        if (request.paramsJson.length > 1000) throw new Error('Indicator params too large.');
+        const parsed: unknown = JSON.parse(request.paramsJson);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('Indicator params must be a JSON object.');
+        }
+        params = parsed as Record<string, unknown>;
+      }
+      const calculationCount = request.tool === 'get_indicator'
+        ? Math.min(2000, Math.max(500, limit + 3 * Math.max(
+          50, ...Object.entries(params)
+            .filter(([key]) => ['length', 'fast', 'slow', 'signal'].includes(key))
+            .map(([, value]) => Number(value) || 0),
+        )))
+        : limit;
+      const candles = timeframe === anchor.timeframe
+        ? (request.tool === 'get_candles'
+            ? source.candles.filter(candle => candle.time <= until).slice(-limit)
+            : source.candles.filter(candle => candle.time <= until))
+        : await (async () => {
+            const feed = dependencies.getDatafeed();
+            if (!feed) throw new Error('No datafeed for additional timeframes.');
+            return loadAssistantCandles(feed, anchor.symbol, timeframe, until, calculationCount);
+          })();
+      if (!candles.length) throw new Error(`No candles available for ${timeframe}.`);
+      if (request.tool === 'get_candles') {
+        return {
+          request, ok: true,
+          data: {
+            symbol: anchor.symbol, timeframe, until,
+            candles: candles.map(toAssistantCandle),
+          },
+        };
+      }
+      if (request.tool !== 'get_indicator') throw new Error('Unknown data request.');
+      const data = queryIndicator({ id: request.id, params, candles, limit });
+      return { request, ok: true, data: { symbol: anchor.symbol, timeframe, until, ...data } };
+    } catch (error) {
+      return { request, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+
+  return Object.freeze({ getContext, resolveContext, queryData });
 }

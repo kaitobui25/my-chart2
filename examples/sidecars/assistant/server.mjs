@@ -2,6 +2,7 @@ import http from 'node:http'
 import { mkdir } from 'node:fs/promises'
 import { HOST, MAX_BODY_BYTES, PORT, REQUEST_TIMEOUT_MS, RUNTIME_ROOT } from './config.mjs'
 import { buildPrompt } from './prompt-builder.mjs'
+import { parseNativeResponse } from './response-schema.mjs'
 import { ChatGptExtensionBridge, validExtensionId } from './chatgpt-bridge.mjs'
 import { ChatGptProvider } from './chatgpt-provider.mjs'
 import { codexAvailable, getCodexOptions, getCodexStatus, runCodex } from './codex-provider.mjs'
@@ -108,6 +109,12 @@ function validRequestId(value) {
 }
 
 async function handleChat(request, response) {
+  // Reject browser form POSTs to the directly reachable local sidecar.
+  // The Vite proxy and native chart client both submit JSON.
+  if (request.headers['sec-fetch-site'] === 'cross-site'
+    || !/^application\/json(?:\s*;|\s*$)/i.test(String(request.headers['content-type'] ?? ''))) {
+    return sendJson(response, 403, { error: 'Chart requests must be same-origin JSON.', code: 'FORBIDDEN' })
+  }
   const body = await readJson(request)
   const provider = assistantProvider(body.provider)
   if (!validRequestId(body.requestId)) return sendJson(response, 400, { error: 'Valid requestId is required.', code: 'INVALID_REQUEST_ID' })
@@ -130,7 +137,8 @@ async function handleChat(request, response) {
     message: body.message,
     conversation: body.conversation,
     includeConversation: provider === 'codex',
-    context: body.context
+    context: body.context,
+    toolResults: Array.isArray(body.toolResults) ? body.toolResults : []
   })
 
   let timeout
@@ -164,7 +172,7 @@ async function handleChat(request, response) {
         }, REQUEST_TIMEOUT_MS)
       })
     ])
-    return sendJson(response, 200, result)
+    return sendJson(response, 200, provider === 'chatgpt' ? parseNativeResponse(result.message) : result)
   } finally {
     clearTimeout(timeout)
     activeRequests.delete(body.requestId)
