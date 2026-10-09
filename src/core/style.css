@@ -10,8 +10,8 @@
   font-family: var(--sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
 }
 
-.l2chart-legend-main {
-  padding-right: 32px;
+.l2chart-legend.l2chart-legend-main {
+  padding-right: 58px;
 }
 
 .l2chart-legend-main.l2chart-legend-collapsed {
@@ -55,6 +55,10 @@
 .l2chart-legend-toggle svg {
   width: 15px;
   height: 15px;
+}
+
+.l2chart-legend-toggle.l2chart-legend-price-visibility {
+  right: 31px;
 }
 
 .l2chart-legend-row[data-indicator-row] {

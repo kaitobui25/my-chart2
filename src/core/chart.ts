@@ -1119,9 +1119,16 @@ export class L2Chart {
     pane.legendEl = document.createElement('div');
     pane.legendEl.className = this.panes.length === 0 ? 'l2chart-legend l2chart-legend-main' : 'l2chart-legend';
     pane.legendEl.addEventListener('pointerdown', (event) => {
-      if ((event.target as HTMLElement).closest('[data-legend-toggle],[data-indicator-action],[data-indicator-row]')) event.stopPropagation();
+      if ((event.target as HTMLElement).closest('[data-price-visibility],[data-legend-toggle],[data-indicator-action],[data-indicator-row]')) event.stopPropagation();
     });
     pane.legendEl.addEventListener('click', (event) => {
+      const priceVisibility = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-price-visibility]');
+      if (priceVisibility) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setPriceSeriesRenderVisible(!this.getPriceSeriesRenderVisible());
+        return;
+      }
       const legendToggle = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-legend-toggle]');
       if (legendToggle) {
         event.preventDefault();
@@ -2859,6 +2866,8 @@ export class L2Chart {
       const f = (v: number) => formatPrice(v, decimals);
       const toggleTitle = this.legendCollapsed ? tr('Hiện các dòng chỉ báo') : tr('Ẩn các dòng chỉ báo');
       const toggleIcon = this.legendCollapsed ? icons.expand : icons.collapse;
+      const priceVisible = this.getPriceSeriesRenderVisible();
+      const visibilityTitle = tr(priceVisible ? 'Ẩn nến' : 'Hiện nến');
       html += `<div class="l2chart-legend-row l2chart-legend-primary${this.legendCollapsed ? ' collapsed' : ''}" style="color:${textColor}">` +
         `<span class="l2chart-legend-primary-text"><b>${esc(this.legendTitle)}</b>&nbsp; ` +
         `<span style="color:${dimColor}">O</span> <span style="color:${color}">${f(c.open)}</span> ` +
@@ -2867,6 +2876,7 @@ export class L2Chart {
         `<span style="color:${dimColor}">C</span> <span style="color:${color}">${f(c.close)}</span> ` +
         `<span style="color:${color}">${chg >= 0 ? '+' : ''}${f(chg)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)</span>`;
       html += `</span>` +
+        `<button type="button" class="l2chart-legend-action l2chart-legend-toggle l2chart-legend-price-visibility" data-price-visibility title="${escAttr(visibilityTitle)}" aria-label="${escAttr(visibilityTitle)}" aria-pressed="${!priceVisible}">${priceVisible ? icons.visible : icons.hidden}</button>` +
         `<button type="button" class="l2chart-legend-action l2chart-legend-toggle" data-legend-toggle title="${escAttr(toggleTitle)}" aria-label="${escAttr(toggleTitle)}" aria-expanded="${this.legendCollapsed ? 'false' : 'true'}">${toggleIcon}</button>` +
         `</div>`;
       if (this.legendCollapsed) {

@@ -377,7 +377,7 @@ body.light #brand-bolt {
 }
 
 .l2chart-legend-main {
-  padding-right: 32px;
+  padding-right: 58px;
 }
 
 .l2chart-legend-main.l2chart-legend-collapsed {
@@ -445,6 +445,10 @@ body.light .l2chart-legend {
 .l2chart-legend-toggle svg {
   width: 15px;
   height: 15px;
+}
+
+.l2chart-legend-toggle.l2chart-legend-price-visibility {
+  right: 31px;
 }
 
 body.light .l2chart-legend-action {
