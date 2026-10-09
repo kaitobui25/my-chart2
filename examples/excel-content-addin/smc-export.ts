@@ -97,7 +97,13 @@ export function buildVisibleSmcExport(input: VisibleSmcExportInput) {
         id, name, params, calculation: snapshot.calculation, rules: ORIGINAL_RULES,
         results: {
           structures: result.structures.filter(e => within(e.index, from, to)).map(e => structure(e, id)),
-          swingPoints: result.swingPoints.filter(e => within(e.index, from, to)).map(e => ({ ...e, time: at(e.index) })),
+          swingPoints: result.swingPoints.filter(e => within(e.index, from, to))
+            .map(e => ({
+              ...e,
+              time: at(e.index),
+              confirmedIndex: e.index + Number(params.swingLength),
+              confirmedTime: at(e.index + Number(params.swingLength)),
+            })),
           orderBlocks: result.orderBlocks.filter(e => overlaps(e.startIndex, e.endIndex, from, to)).map(zone),
           fairValueGaps: result.fairValueGaps.filter(e => overlaps(e.startIndex, e.endIndex, from, to)).map(zone),
         },

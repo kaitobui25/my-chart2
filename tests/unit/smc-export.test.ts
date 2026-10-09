@@ -5,6 +5,7 @@ import originalSmc from '../../src/indicators/builtin/smart-money-concepts';
 import smcV2 from '../../src/indicators/builtin/smart-money-concepts-v2';
 import smcV3 from '../../src/indicators/builtin/smart-money-concepts-v3';
 import type { SmcV2Result } from '../../src/indicators/builtin/smart-money-concepts-v2-model';
+import { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import { buildVisibleSmcExport, SMC_IDS } from '../../examples/excel-content-addin/smc-export';
 
 const candles: Candle[] = [
@@ -44,6 +45,27 @@ describe('SMC debug snapshots', () => {
 
   it('covers all 3 SMC implementations', () => {
     expect([...SMC_IDS].sort()).toEqual([originalSmc.id, smcV2.id, smcV3.id].sort());
+  });
+
+  it('reads only active SMC through the Excel controller without recomputing', () => {
+    const chart = {
+      ...fakeChart(),
+      on: vi.fn(() => () => undefined),
+      withIndicatorOwner: vi.fn((id: string, factory: () => unknown) => id === 'sma'
+        ? { recompute: vi.fn(), remove: vi.fn() }
+        : factory()),
+    } as unknown as L2Chart;
+    const controller = new IndicatorController(chart, null);
+    controller.activate('sma');
+    controller.activate(smcV3.id);
+
+    const first = controller.debugSnapshots(SMC_IDS);
+    const second = controller.debugSnapshots(SMC_IDS);
+    expect(first.map(item => item.id)).toEqual([smcV3.id]);
+    expect(first[0].snapshot.result).toBe(second[0].snapshot.result);
+    expect(first[0].params).toMatchObject({ swingLength: 50, showSwing: true });
+
+    controller.dispose();
   });
 });
 
