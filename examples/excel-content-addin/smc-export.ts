@@ -13,6 +13,18 @@ export const SMC_IDS = new Set([
   'smart-money-concepts-v3',
 ]);
 
+export function downloadSmcExport(snapshot: ReturnType<typeof buildVisibleSmcExport>): void {
+  const file = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  const safe = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, '_');
+  link.href = url;
+  link.download = `smc-${safe(snapshot.meta.symbol)}-${safe(snapshot.meta.timeframe)}-${snapshot.meta.visibleRange.fromTime}-${snapshot.meta.visibleRange.toTime}.json`;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  try { link.click(); } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+
 export interface SmcExportIndicator {
   id: string;
   name: string;

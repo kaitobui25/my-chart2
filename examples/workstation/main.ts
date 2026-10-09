@@ -1,4 +1,5 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
+import { buildVisibleSmcExport, downloadSmcExport, SMC_IDS } from '../excel-content-addin/smc-export';
 import {
   Brush,
   CalendarDays,
@@ -10,6 +11,7 @@ import {
   Columns2,
   Columns3,
   createElement as createLucideElement,
+  Download,
   Grid2X2,
   LayoutTemplate,
   MessageSquareText,
@@ -2088,6 +2090,35 @@ class Tile implements ReplayParticipant {
       }
     });
     toolbar.appendChild(clearButton);
+
+    const exportButton = document.createElement('button');
+    exportButton.type = 'button';
+    exportButton.className = 'drawing-tool-button chart-export-button';
+    exportButton.title = 'Xuất nến và kết quả SMC trong vùng chart đang xem';
+    exportButton.setAttribute('aria-label', exportButton.title);
+    exportButton.appendChild(createLucideElement(Download));
+    exportButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const tile = activeTile;
+      if (!tile) return;
+      try {
+        downloadSmcExport(buildVisibleSmcExport({
+          symbol: tile.symbol,
+          timeframe: tile.interval,
+          source: 'market',
+          candles: tile.chart.getCandles(),
+          visibleRange: tile.chart.timeScale.visibleRange(),
+          indicators: [...tile.active.entries()].filter(([id]) => SMC_IDS.has(id)).map(([id, instance]) => {
+            const snapshot = instance.getDebugSnapshot?.();
+            if (!snapshot) throw new Error(`Indicator ${id} không hỗ trợ export kết quả.`);
+            return { id, name: getIndicator(id)!.name, params: tile.getParams(id), snapshot };
+          }),
+        }));
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Không thể export chart.');
+      }
+    });
+    toolbar.appendChild(exportButton);
 
     queueMicrotask(() => (activeTile ?? this).selectDrawingTool('cursor'));
     return toolbar;

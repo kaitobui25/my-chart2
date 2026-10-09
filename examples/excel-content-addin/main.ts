@@ -16,7 +16,7 @@ import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
 import { createSymbolCombobox } from './symbol-combobox';
 import { bindViewTabs, type ViewTabsBinding } from './view-tabs';
-import { buildVisibleSmcExport, SMC_IDS } from './smc-export';
+import { buildVisibleSmcExport, downloadSmcExport, SMC_IDS } from './smc-export';
 import { WatchListController } from './watchlist-controller';
 import { WatchListStore } from './watchlist-store';
 import { WatchListView } from './watchlist-view';
@@ -201,15 +201,7 @@ function exportVisibleSmc(): void {
       visibleRange: chartViewElement.hidden ? lastVisibleRange : chart.timeScale.visibleRange(),
       indicators: indicators.debugSnapshots(SMC_IDS),
     });
-    const file = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(file);
-    const link = document.createElement('a');
-    const safe = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, '_');
-    link.href = url;
-    link.download = `smc-${safe(snapshot.meta.symbol)}-${safe(snapshot.meta.timeframe)}-${snapshot.meta.visibleRange.fromTime}-${snapshot.meta.visibleRange.toTime}.json`;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    try { link.click(); } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    downloadSmcExport(snapshot);
     setStatus(`Export ${snapshot.candles.length} nến · ${snapshot.indicators.length} SMC`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Không thể export chart.', true);
