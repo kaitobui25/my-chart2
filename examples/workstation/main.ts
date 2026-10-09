@@ -1,3 +1,4 @@
+import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import {
   Brush,
   CalendarDays,
@@ -4871,6 +4872,7 @@ providerOverlay.querySelectorAll<HTMLButtonElement>('[data-credential-provider]'
 const paramOverlay = document.getElementById('param-overlay')!;
 const paramTitle = document.getElementById('param-title')!;
 const paramFields = document.getElementById('param-fields')!;
+const indicatorSectionState = new IndicatorSectionStateStore();
 let paramDefId: string | null = null;
 let paramDialogMode: 'indicator' | 'candles' = 'indicator';
 
@@ -4924,13 +4926,47 @@ function fillParamFields(def: IndicatorDef, values: Params): void {
     paramFields.appendChild(inputTitle);
   }
   let currentSection: string | undefined;
+  let currentSectionBody: HTMLElement | null = null;
+  const collapsibleSections = def.id === 'smart-money-concepts-v2' || def.id === 'smart-money-concepts-v3';
   for (const p of def.params ?? []) {
     if (p.section && p.section !== currentSection) {
-      const sectionTitle = document.createElement('div');
-      sectionTitle.className = 'param-section-title param-group-title';
-      sectionTitle.textContent = p.section;
-      paramFields.appendChild(sectionTitle);
       currentSection = p.section;
+      const section = p.section;
+      if (collapsibleSections) {
+        const group = document.createElement('section');
+        group.className = 'param-group';
+        const body = document.createElement('div');
+        body.className = 'param-group-body';
+        const expanded = indicatorSectionState.isExpanded(def.id, section);
+        body.hidden = !expanded;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'param-group-toggle';
+        toggle.setAttribute('aria-expanded', String(expanded));
+        const arrow = document.createElement('span');
+        arrow.className = 'param-group-arrow';
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = expanded ? '▾' : '▸';
+        const label = document.createElement('span');
+        label.textContent = section;
+        toggle.append(arrow, label);
+        toggle.addEventListener('click', () => {
+          const nextExpanded = body.hidden === true;
+          body.hidden = !nextExpanded;
+          toggle.setAttribute('aria-expanded', String(nextExpanded));
+          arrow.textContent = nextExpanded ? '▾' : '▸';
+          indicatorSectionState.setExpanded(def.id, section, nextExpanded);
+        });
+        group.append(toggle, body);
+        paramFields.appendChild(group);
+        currentSectionBody = body;
+      } else {
+        const sectionTitle = document.createElement('div');
+        sectionTitle.className = 'param-section-title param-group-title';
+        sectionTitle.textContent = section;
+        paramFields.appendChild(sectionTitle);
+        currentSectionBody = null;
+      }
     }
     const row = document.createElement('label');
     row.className = p.type === 'boolean' ? 'param-row param-toggle-row' : 'param-row';
@@ -4964,7 +5000,7 @@ function fillParamFields(def: IndicatorDef, values: Params): void {
     }
     input.dataset.key = p.key;
     row.append(name, input);
-    paramFields.appendChild(row);
+    (currentSectionBody ?? paramFields).appendChild(row);
   }
   if (!def.params?.length) {
     const empty = document.createElement('div');

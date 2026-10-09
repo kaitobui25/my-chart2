@@ -2123,6 +2123,45 @@ select:focus-visible {
   padding-top: 0;
 }
 
+.param-group,
+.param-group-body {
+  display: grid;
+  gap: 10px;
+}
+
+.param-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.param-group-toggle:hover,
+.param-group-toggle:focus-visible {
+  color: var(--accent);
+}
+
+.param-group-arrow {
+  flex: 0 0 12px;
+  text-align: center;
+}
+
+.param-group-body[hidden] {
+  display: none;
+}
+
 .param-toggle-row input[type='checkbox'] {
   width: 16px;
   height: 16px;
