@@ -29,6 +29,15 @@ export interface IndicatorInstance {
   recompute(): void;
   /** Remove every series created by this indicator. */
   remove(): void;
+  /** Read the exact calculation currently used for rendering, without recomputing. */
+  getDebugSnapshot?(): IndicatorDebugSnapshot;
+}
+
+export interface IndicatorDebugSnapshot {
+  /** Indicator-specific model output. Consumers must interpret it by indicator ID. */
+  result: unknown;
+  /** Effective inputs and optional external timeframe candles used by that model. */
+  calculation: Record<string, unknown>;
 }
 
 export interface IndicatorDef {

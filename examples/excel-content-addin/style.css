@@ -26,7 +26,7 @@ body {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.view-tabs {
+.view-nav {
   display: flex;
   align-items: end;
   gap: 10px;
@@ -36,7 +36,14 @@ body {
   background: #fbfcfc;
 }
 
-.view-tabs button {
+.view-tabs {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
+.view-tabs button,
+#export-button {
   position: relative;
   height: 24px;
   border: 0;
@@ -61,7 +68,8 @@ body {
   background: #7f8d94;
 }
 
-.view-tabs button:focus-visible {
+.view-tabs button:focus-visible,
+#export-button:focus-visible {
   outline: 1px solid #c9ced1;
   outline-offset: 2px;
 }

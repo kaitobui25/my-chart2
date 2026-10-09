@@ -16,6 +16,7 @@ import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
 import { createSymbolCombobox } from './symbol-combobox';
 import { bindViewTabs, type ViewTabsBinding } from './view-tabs';
+import { buildVisibleSmcExport, SMC_IDS } from './smc-export';
 import { WatchListController } from './watchlist-controller';
 import { WatchListStore } from './watchlist-store';
 import { WatchListView } from './watchlist-view';
@@ -38,6 +39,7 @@ const indicatorMenu = requiredElement<HTMLElement>('#indicator-menu');
 const chartTab = requiredElement<HTMLButtonElement>('#chart-tab');
 const watchlistTab = requiredElement<HTMLButtonElement>('#watchlist-tab');
 const optionsTab = requiredElement<HTMLButtonElement>('#options-tab');
+const exportButton = requiredElement<HTMLButtonElement>('#export-button');
 const chartViewElement = requiredElement<HTMLElement>('#chart-view');
 const watchlistViewElement = requiredElement<HTMLElement>('#watchlist-view');
 const optionsViewElement = requiredElement<HTMLElement>('#options-view');
@@ -66,6 +68,7 @@ let activeSource: ExcelAssistantSource = 'market';
 let statusMessage: string = excelStealthUi.loading;
 let statusIsError = false;
 let marketLoadId = 0;
+let lastVisibleRange: { from: number; to: number } | null = null;
 
 const assistant = new ExcelAssistantController(createExcelAssistantBridge({
   chart,
@@ -103,7 +106,13 @@ viewTabs = bindViewTabs({
   chartView: chartViewElement,
   watchlistView: watchlistViewElement,
   optionsView: optionsViewElement,
-  onChange: (view) => watchlist.setActive(view === 'watchlist'),
+  onChange: (view) => {
+    if (view !== 'chart') lastVisibleRange = chart.timeScale.visibleRange() ?? lastVisibleRange;
+    watchlist.setActive(view === 'watchlist');
+  },
+});
+const offVisibleRange = chart.onVisibleRangeChange(({ from, to }) => {
+  if (!chartViewElement.hidden) lastVisibleRange = { from, to };
 });
 
 populateTimeframes();
@@ -145,6 +154,7 @@ document.addEventListener('keydown', (event) => {
   indicatorTrigger.focus();
 });
 loadButton.addEventListener('click', () => void loadSelectedRange());
+exportButton.addEventListener('click', exportVisibleSmc);
 chart.on('crosshair', ({ candle }) => setFocusStatus(candle));
 appShell.addEventListener('pointerenter', () => setChartHoverChrome(true));
 appShell.addEventListener('pointerleave', () => setChartHoverChrome(false));
@@ -171,6 +181,7 @@ window.addEventListener('beforeunload', () => {
   assistant.dispose();
   offIndicatorSettings();
   offIndicatorRemove();
+  offVisibleRange();
   indicatorSettings.dispose();
   optionsController.dispose();
   indicators.dispose();
@@ -179,6 +190,31 @@ window.addEventListener('beforeunload', () => {
 
 void initializeHost();
 void reloadMarket();
+
+function exportVisibleSmc(): void {
+  try {
+    const snapshot = buildVisibleSmcExport({
+      symbol: activeSource === 'sheet' ? 'Excel range' : market.getSnapshot()?.symbol ?? symbolInput.value.trim(),
+      timeframe: activeSource === 'sheet' ? 'sheet' : market.getSnapshot()?.timeframe ?? timeframeSelect.value,
+      source: activeSource,
+      candles: chart.getCandles(),
+      visibleRange: chartViewElement.hidden ? lastVisibleRange : chart.timeScale.visibleRange(),
+      indicators: indicators.debugSnapshots(SMC_IDS),
+    });
+    const file = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    const safe = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, '_');
+    link.href = url;
+    link.download = `smc-${safe(snapshot.meta.symbol)}-${safe(snapshot.meta.timeframe)}-${snapshot.meta.visibleRange.fromTime}-${snapshot.meta.visibleRange.toTime}.json`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    try { link.click(); } finally { link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    setStatus(`Export ${snapshot.candles.length} nến · ${snapshot.indicators.length} SMC`);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Không thể export chart.', true);
+  }
+}
 
 async function initializeHost(): Promise<void> {
   const officeInfo = await waitForOfficeReady();

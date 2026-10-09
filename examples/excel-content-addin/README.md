@@ -29,6 +29,14 @@ The **Watch List** tab keeps a small persisted list of Tokyo symbols next to the
 
 Watch List code is split into configuration, persistence, market-data, view, and controller modules so storage/UI/provider concerns can evolve independently.
 
+## Export chart and SMC diagnostics
+
+Click **Export** next to **Option** to download a JSON snapshot of the current chart viewport. The export works for both market and Excel Sheet candles. It includes absolute candle indices, UTC Unix timestamps, OHLCV, source/symbol/timeframe, and the active Smart Money Concepts (original, V2, V3) settings and calculation results. Other active indicators are intentionally excluded in phase 1.
+
+SMC snapshots come from the same model result used by the chart renderer; exporting does not rerun the indicator. The JSON includes SMC structures, pivots, order blocks, fair value gaps, equal levels, per-bar bias/ATR, alerts and derived Fibonacci/Premium/Discount values when applicable. Indexed events preserve their source and confirmation timestamps even when those candles are outside the viewport. Model-specific `rules` describe the conditions; `calculation` includes effective inputs and any higher-timeframe candles already supplied to SMC. Missing provider FVG bars are marked `waiting-or-unavailable`.
+
+Only the visible candles and events that overlap the visible range are serialized. Calculations still use **all loaded history** for proper pivot confirmation and indicator warm-up. OB/FVG inventories hold currently active zones, so historical mitigations are not fully reconstructible from the JSON. V2/V3 may calculate more events than the `Present` renderer or OB display limits show. For full-source replay, retain the complete provider history separately.
+
 ## AI assistant
 
 The `AI` action opens a non-modal assistant drawer **over the chart** instead of permanently shrinking the chart area. On a normal content-add-in size it docks to the right; below 600 px it becomes a bottom sheet. Closing the drawer keeps the current conversation in memory.

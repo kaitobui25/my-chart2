@@ -4,6 +4,7 @@ import {
   type IndicatorCategory,
   type IndicatorDef,
   type IndicatorInstance,
+  type IndicatorDebugSnapshot,
   type Params,
 } from '../../src/indicators/registry';
 import {
@@ -161,6 +162,17 @@ export class IndicatorController {
         Object.entries(this.getParams(id)).filter(([key]) => !key.startsWith('__')),
       ),
     }));
+  }
+
+  /** Returns already-computed model snapshots for selected active indicators. */
+  debugSnapshots(ids: ReadonlySet<string>): Array<{
+    id: string; name: string; params: Params; snapshot: IndicatorDebugSnapshot;
+  }> {
+    return [...this.active.entries()].filter(([id]) => ids.has(id)).map(([id, instance]) => {
+      const snapshot = instance.getDebugSnapshot?.();
+      if (!snapshot) throw new Error(`Indicator ${id} không hỗ trợ export kết quả.`);
+      return { id, name: this.byId.get(id)!.name, params: this.getParams(id), snapshot };
+    });
   }
 
   dispose(): void {

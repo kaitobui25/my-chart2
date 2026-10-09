@@ -149,6 +149,10 @@ const def: IndicatorDef = {
       recompute: () => {
         data = calculateSmartMoneyConcepts(chart.getCandles(), swingLength, internalLength);
       },
+      getDebugSnapshot: () => ({
+        result: data,
+        calculation: { swingLength, internalLength },
+      }),
       remove: () => chart.removeSeries(overlay),
     };
   },

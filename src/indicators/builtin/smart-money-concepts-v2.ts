@@ -806,6 +806,16 @@ const def: IndicatorDef = {
     recompute();
     return {
       recompute,
+      getDebugSnapshot: () => ({
+        result: data,
+        calculation: {
+          ...analysisOptions,
+          // The model gates FVG computation until provider bars arrive.
+          showFairValueGaps: analysisOptions.showFairValueGaps && (!requestedFvg || !!analysisOptions.fvgCandles),
+          requestedFairValueGaps: analysisOptions.showFairValueGaps,
+          fvgProviderState: !requestedFvg ? 'not-required' : analysisOptions.fvgCandles ? 'loaded' : 'waiting-or-unavailable',
+        },
+      }),
       remove: () => { removed = true; ++generation; chart.removeSeries(overlay); },
     };
   },

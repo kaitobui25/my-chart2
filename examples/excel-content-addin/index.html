@@ -9,11 +9,14 @@
   </head>
   <body>
     <main class="app-shell">
-      <nav class="view-tabs" role="tablist" aria-label="Chế độ hiển thị">
-        <button id="chart-tab" type="button" role="tab" aria-controls="chart-view" aria-selected="true">Chart</button>
-        <button id="watchlist-tab" type="button" role="tab" aria-controls="watchlist-view" aria-selected="false">Watch List</button>
-        <button id="options-tab" type="button" role="tab" aria-controls="options-view" aria-selected="false">Option</button>
-      </nav>
+      <div class="view-nav">
+        <nav class="view-tabs" role="tablist" aria-label="Chế độ hiển thị">
+          <button id="chart-tab" type="button" role="tab" aria-controls="chart-view" aria-selected="true">Chart</button>
+          <button id="watchlist-tab" type="button" role="tab" aria-controls="watchlist-view" aria-selected="false">Watch List</button>
+          <button id="options-tab" type="button" role="tab" aria-controls="options-view" aria-selected="false">Option</button>
+        </nav>
+        <button id="export-button" type="button" title="Xuất nến và kết quả SMC trong vùng chart đang xem">Export</button>
+      </div>
 
       <section class="view-stack">
         <section id="chart-view" class="view-panel chart-view" role="tabpanel" aria-labelledby="chart-tab">
