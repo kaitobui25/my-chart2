@@ -126,6 +126,8 @@ describe('YFinanceJapanDatafeed', () => {
   });
 
   it('forwards the full requested intraday range and only marks returned coverage', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_086_400 * 1000);
     const requested = { from: 1_700_000_000, to: 1_700_086_400 };
     const remote: Candle[] = [
       { time: 1_700_040_000, open: 100, high: 102, low: 99, close: 101, volume: 1_000 },
@@ -177,6 +179,44 @@ describe('YFinanceJapanDatafeed', () => {
       to: candles[1].time + 300,
     })).resolves.toEqual(candles);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['1m', 8], ['5m', 60], ['15m', 60], ['30m', 60], ['1h', 730], ['4h', 730],
+  ])('clips %s backfills to Yahoo retention while preserving older cached candles', async (interval, days) => {
+    vi.useFakeTimers();
+    const now = timestamp('2026-10-09T12:00:00Z');
+    vi.setSystemTime(now * 1000);
+    const earliest = now - Number(days) * 86_400 + 60;
+    const cached = { time: earliest - 86_400, open: 100, high: 102, low: 99, close: 101 };
+    const remote = { ...cached, time: earliest + 900 };
+    const cache = memoryCache();
+    await cache.write(YFINANCE_JP_HISTORY_SOURCE, '9984.T', String(interval), [cached]);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: [remote] }))) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache, fetchImpl });
+
+    await expect(feed.getHistory('9984.T', String(interval), 500, {
+      from: cached.time, to: now,
+    })).resolves.toEqual([cached, remote]);
+    const url = new URL(String(vi.mocked(fetchImpl).mock.calls[0][0]));
+    expect(Number(url.searchParams.get('from'))).toBe(earliest);
+    expect(Number(url.searchParams.get('to'))).toBe(now);
+
+    vi.mocked(fetchImpl).mockClear();
+    await expect(feed.getHistory('9984.T', String(interval), 500, {
+      from: cached.time - 86_400, to: cached.time,
+    })).resolves.toEqual([cached]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(['1d', '1w', '1M'])('keeps long-term %s history unrestricted', async (interval) => {
+    const range = { from: timestamp('2000-01-01'), to: timestamp('2020-01-01') };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: [] }))) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    await feed.getHistory('9984.T', interval, 500, range);
+    const url = new URL(String(vi.mocked(fetchImpl).mock.calls[0][0]));
+    expect(Number(url.searchParams.get('from'))).toBe(range.from);
+    expect(Number(url.searchParams.get('to'))).toBe(range.to);
   });
 
   it('polls active chart subscriptions every 60 seconds, batched by interval, without a bulk subscription API', async () => {
@@ -416,6 +456,7 @@ describe('YFinanceJapanDatafeed', () => {
 
   it('caps stale 1m recovery to Yahoo safe history horizon', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-06T15:00:00+09:00'));
     const latest = {
       time: timestamp('2026-10-06T15:00:00+09:00'),
       open: 100,

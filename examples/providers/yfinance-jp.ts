@@ -24,6 +24,26 @@ const SUPPORTED_INTERVALS = new Set<string>(YFINANCE_JP_SUPPORTED_INTERVALS);
 const TOKYO_UTC_OFFSET_MINUTES = 9 * 60;
 const MAX_HISTORY_REQUEST = 50_000;
 const DEFAULT_POLL_MS = 60_000;
+// Yahoo retention follows the native interval; 4h is aggregated from 1h.
+// https://github.com/ranaroussi/yfinance/blob/main/yfinance/scrapers/history.py
+const HISTORY_RETENTION_DAYS: Readonly<Record<string, number>> = {
+  '1m': 8,
+  '5m': 60,
+  '15m': 60,
+  '30m': 60,
+  '1h': 730,
+  '4h': 730,
+};
+
+function remoteHistoryRange(interval: string, range: HistoryRange): HistoryRange | null {
+  const days = HISTORY_RETENTION_DAYS[interval];
+  if (days === undefined) return range;
+  const now = Math.floor(Date.now() / 1000);
+  // Leave room for request latency at Yahoo's rolling retention boundary.
+  const from = Math.max(range.from, now - days * 86_400 + 60);
+  const to = Math.min(range.to, now);
+  return from <= to ? { from, to } : null;
+}
 const JP_CODE_PATTERN = /^(?:\d{4}|\d{3}[ACDFGHJKLMNPRSTUWXY]|\d[ACDFGHJKLMNPRSTUWXY]\d{2})$/;
 const LIVE_RECOVERY_LOOKBACK_SECONDS: Record<string, number> = {
   '1m': 5 * 86_400,
@@ -452,6 +472,11 @@ export class YFinanceJapanDatafeed implements Datafeed {
     limit: number,
     range?: HistoryRange,
   ): Promise<Candle[]> {
+    if (range) {
+      const remoteRange = remoteHistoryRange(interval, range);
+      if (!remoteRange) return [];
+      range = remoteRange;
+    }
     const url = this.apiUrl('/history');
     url.searchParams.set('symbol', symbol);
     // Keep chart interval codes intact. The sidecar maps 1w -> 1wk and 1M -> 1mo for yfinance.
