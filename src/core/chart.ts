@@ -49,7 +49,7 @@ import {
 
 export interface ChartOptions {
   /** Provider OHLC for indicators that request a different Pine timeframe. */
-  indicatorCandles?: (timeframe: string, range: { from: number; to: number }) => Promise<readonly Candle[]>;
+  indicatorCandles?: (timeframe: string, range: { from: number; to: number; limit?: number }) => Promise<readonly Candle[]>;
   theme?: Partial<Theme>;
   candleRendering?: Partial<CandleRenderingOptions>;
   chrome?: Partial<ChartChromeOptions>;
@@ -472,12 +472,12 @@ export class L2Chart {
     return this.candles;
   }
 
-  getIndicatorCandles(timeframe: string): Promise<readonly Candle[]> | undefined {
+  getIndicatorCandles(timeframe: string, range?: { from: number; to: number; limit?: number }): Promise<readonly Candle[]> | undefined {
     const source = this.indicatorCandleSource;
     const first = this.candles[0];
     const last = this.candles[this.candles.length - 1];
     if (!source || !first || !last) return undefined;
-    return source(timeframe, { from: first.time, to: last.time });
+    return source(timeframe, range ?? { from: first.time, to: last.time });
   }
 
   setIndicatorCandleSource(source: ChartOptions['indicatorCandles']): void {

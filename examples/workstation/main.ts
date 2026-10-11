@@ -1,4 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
+import { loadIndicatorHistory } from './indicator-history';
+import { restoreWorkspaceIndicatorSettings } from './workspace-indicator-settings';
 import { buildVisibleSmcExport, downloadSmcExport, SMC_IDS } from '../excel-content-addin/smc-export';
 import {
   Brush,
@@ -213,6 +215,7 @@ function resolveFiinQuantBase(baseUrl: string): string {
 }
 
 interface ChartPreferences {
+  updatedAt?: number;
   defaultsVersion: number;
   interval: string;
   mode: PriceSeriesMode;
@@ -543,6 +546,8 @@ function readAutoSaveWorkspace(): AutoSaveWorkspaceSnapshot | null {
     || !snapshot.provider
     || !validProviders.includes(snapshot.provider.id)
   ) return null;
+  const preferences = readStoredJson<Record<string, Partial<ChartPreferences>>>(CHART_PREFERENCES_KEY, {});
+  snapshot.workspace.tiles = restoreWorkspaceIndicatorSettings(snapshot.workspace.tiles, preferences, snapshot.savedAt);
   return snapshot;
 }
 
@@ -944,7 +949,7 @@ function preferencesFor(symbol: string): ChartPreferences {
 
 function savePreferencesFor(symbol: string, preferences: ChartPreferences): void {
   const all = readStoredJson<Record<string, ChartPreferences>>(CHART_PREFERENCES_KEY, {});
-  all[symbol.toUpperCase()] = preferences;
+  all[symbol.toUpperCase()] = { ...preferences, updatedAt: Date.now() };
   writeStoredJson(CHART_PREFERENCES_KEY, all);
 }
 
@@ -1804,6 +1809,9 @@ class Tile implements ReplayParticipant {
       if (!interval || !provider.feed || !intervalAllowedForProvider(activeProvider, interval)) {
         throw new Error(`Provider cannot supply indicator timeframe ${timeframe}`);
       }
+      if (range.limit !== undefined) {
+        return loadIndicatorHistory(provider.feed, this.symbol, interval, range);
+      }
       // Include prior requested bars for security(...)[1]/[2] and D/W/M levels.
       const from = range.from - 3 * intervalApproxSeconds(interval);
       const limit = Math.max(historyPageSizeFor(interval), estimateIntervalBars(from, range.to, interval) + 3);
@@ -1939,7 +1947,7 @@ class Tile implements ReplayParticipant {
       mode: this.mode,
       indicators: [...this.active.keys()],
       indicatorParams: Object.fromEntries(
-        [...this.active.keys()].map((id) => [id, this.getParams(id)]),
+        [...new Set([...this.active.keys(), ...this.paramsById.keys()])].map((id) => [id, this.getParams(id)]),
       ),
       sessions: this.chart.getSessionsVisible(),
       candleColors: this.candleColors ? { ...this.candleColors } : undefined,
@@ -1995,6 +2003,8 @@ class Tile implements ReplayParticipant {
 
   private persistPreferences(): void {
     savePreferencesFor(this.symbol, this.currentPreferences());
+    // Committed chart settings must survive reload independently of the periodic timer.
+    saveAutoSaveWorkspaceSnapshot();
   }
 
   private resolvedTheme(): Theme {
@@ -4958,7 +4968,7 @@ function fillParamFields(def: IndicatorDef, values: Params): void {
   }
   let currentSection: string | undefined;
   let currentSectionBody: HTMLElement | null = null;
-  const collapsibleSections = def.id === 'smart-money-concepts-v2' || def.id === 'smart-money-concepts-v3';
+  const collapsibleSections = def.id === 'smart-money-concepts-v2' || def.id === 'smart-money-concepts-v3' || def.id === 'super-ema';
   for (const p of def.params ?? []) {
     if (p.section && p.section !== currentSection) {
       currentSection = p.section;
@@ -5040,6 +5050,7 @@ function fillParamFields(def: IndicatorDef, values: Params): void {
     paramFields.appendChild(empty);
   }
 
+  if (def.styleControls === 'custom') return;
   const styleTitle = document.createElement('div');
   styleTitle.className = 'param-section-title param-style-title';
   styleTitle.innerHTML = '<strong>Hiển thị</strong><span>Áp dụng cho các series của chỉ báo</span>';

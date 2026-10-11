@@ -50,6 +50,8 @@ export interface IndicatorDef {
   params?: ParamDef[];
   /** Description of the calculation exposed to data consumers. */
   formula?: string;
+  /** Indicators with per-line styling supply their own settings controls. */
+  styleControls?: 'custom';
   /** Pure, candle-aligned output series; null represents warm-up bars. */
   calculate?: (candles: readonly Candle[], params: Params) => Record<string, (number | null)[]>;
   /**

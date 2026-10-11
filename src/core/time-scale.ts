@@ -14,6 +14,23 @@ export class TimeScale {
   maxBarSpacing = 80;
 
   private dataLen = 0;
+  private readonly rightMargins = new Set<() => number>();
+
+  /** Reserve room for indicator previews when following the latest candle. */
+  reserveRightMargin(pixels: () => number): () => void {
+    const atEnd = this.isAtEnd();
+    this.rightMargins.add(pixels);
+    if (atEnd) this.scrollToEnd();
+    return () => {
+      const following = this.isAtEnd();
+      this.rightMargins.delete(pixels);
+      if (following) this.scrollToEnd();
+    };
+  }
+
+  private reservedPixels(): number {
+    return Math.min(this.width * 0.65, Math.max(0, ...Array.from(this.rightMargins, margin => margin())));
+  }
 
   setWidth(w: number): void {
     const wasAtEnd = this.isAtEnd();
@@ -75,7 +92,8 @@ export class TimeScale {
   /** Reset to show the most recent data with a small right margin. */
   scrollToEnd(): void {
     const rightMarginBars = this.width <= 720 ? 2 : this.width <= 960 ? 4 : 10;
-    this.rightIndex = this.dataLen - 1 + Math.min(rightMarginBars, this.width / this.barSpacing / 10);
+    this.rightIndex = this.dataLen - 1 + Math.max(this.reservedPixels() / this.barSpacing,
+      Math.min(rightMarginBars, this.width / this.barSpacing / 10));
     this.clampRight();
   }
 
@@ -86,7 +104,7 @@ export class TimeScale {
 
   private clampRight(): void {
     if (this.dataLen === 0) return;
-    const maxRight = this.dataLen - 1 + (this.width / this.barSpacing) * 0.5;
+    const maxRight = this.dataLen - 1 + Math.max(this.width * 0.5, this.reservedPixels()) / this.barSpacing;
     this.rightIndex = clamp(this.rightIndex, Math.min(2, this.dataLen - 1), maxRight);
   }
 }
