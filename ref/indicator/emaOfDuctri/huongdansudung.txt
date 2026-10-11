@@ -1,0 +1,94 @@
+Hướng Dẫn Sử Dụng Chỉ Báo Super EMA {DucTri_dev}
+
+Chỉ báo Super EMA là công cụ phân tích kỹ thuật toàn diện trên nền tảng TradingView (Pine Script v6), kết hợp sức mạnh của 4 đường Trung Bình Động (MA) đa năng, hệ thống Tín Hiệu & Cảnh Báo (Alerts/Labels) đa dạng và cụm Mini-Chart Đa Khung Thời Gian (MTF) hiển thị trực quan trực tiếp trên biểu đồ giá.
+📌 Các Tính Năng Nổi Bật
+1. 📈 Hệ Thống 4 Đường MA Độc Lập
+
+Hỗ trợ hiển thị và tùy biến linh hoạt 4 đường MA với các thuật toán phổ biến:
+
+    Các kiểu MA hỗ trợ: EMA, SMA, SMMA (RMA), WMA, VWMA.
+    Cấu hình mặc định tối ưu theo xu hướng:
+        🟡 MA #1 (EMA 20): Xu hướng ngắn hạn / Hỗ trợ - kháng cự động nhanh.
+        🟠 MA #2 (EMA 50): Xu hướng trung hạn / Mốc phân định xung lực tăng/giảm.
+        🔴 MA #3 (EMA 100): Xu hướng trung - dài hạn (Độ dày nét: 2).
+        🟣 MA #4 (EMA 200): Ranh giới xu hướng dài hạn kinh điển (Độ dày nét: 3).
+    Cho phép bật/tắt riêng biệt từng đường, tùy biến nguồn giá (close, hl2,...) và màu sắc hiển thị.
+
+2. ⚡ Tín Hiệu & Nhãn Cảnh Báo Trực Quan (Signals & Labels)
+
+Chỉ báo tích hợp các tín hiệu giao dịch quan trọng và hiển thị nhãn (label) trực tiếp trên nến:
+Nhãn	Tín Hiệu	Mô Tả & Ý Nghĩa
+<font color="#22c55e">MA↗</font>	MA1 Cắt Lên MA2	Giao cắt vàng ngắn hạn (Golden Cross), xác nhận xung lực tăng.
+<font color="#ef4444">MA↘</font>	MA1 Cắt Xuống MA2	Giao cắt tử thần ngắn hạn (Death Cross), cảnh báo áp lực giảm.
+<font color="#3b82f6">P↗</font>	Giá Cắt Lên MA1	Giá đóng cửa vượt lên trên MA1 (EMA 20), xung lực mua trở lại.
+<font color="#f97316">P↘</font>	Giá Cắt Xuống MA1	Giá đóng cửa thủng dưới MA1 (EMA 20), cảnh báo nhịp điều chỉnh.
+<font color="#84cc16">PB↗</font>	Bull Pullback	Điểm Mua Hồi Quy: Giá pullback về test hỗ trợ MA1 hoặc MA2 sau chuỗi nến nằm hoàn toàn phía trên đường MA.
+<font color="#d946ef">PB↘</font>	Bear Pullback	Điểm Bán Hồi Quy: Giá hồi lên test kháng cự MA1 hoặc MA2 sau chuỗi nến nằm hoàn toàn phía dưới đường MA.
+<font color="#22c55e">BULL🔥</font>	Cấu Trúc MA Tăng	Xuất hiện khi toàn bộ 4 đường xếp thứ tự: MA1 > MA2 > MA3 > MA4 (Đại xu hướng tăng đồng thuận).
+<font color="#ef4444">BEAR🔥</font>	Cấu Trúc MA Giảm	Xuất hiện khi toàn bộ 4 đường xếp thứ tự: MA1 < MA2 < MA3 < MA4 (Đại xu hướng giảm đồng thuận).
+3. 🔍 Bộ Lọc Xu Hướng Chống "Nhiễu" (Alert Filter)
+
+    Tùy chọn lọc tín hiệu theo mối quan hệ giữa MA #3 và MA #4:
+        None: Nhận tất cả tín hiệu mà không qua bộ lọc.
+        MA #3 > MA #4: Chỉ kích hoạt các tín hiệu khi EMA 100 nằm trên EMA 200 (Ưu tiên chỉ đánh lệnh Mua trong Uptrend lớn).
+        MA #3 < MA #4: Chỉ kích hoạt các tín hiệu khi EMA 100 nằm dưới EMA 200 (Ưu tiên chỉ đánh lệnh Bán trong Downtrend lớn).
+
+4. 📺 Mini-Chart Đa Khung Thời Gian (Multi-Timeframe)
+
+    Vẽ tối đa 3 biểu đồ nến mini cùng cả 4 đường MA tương ứng của các khung thời gian lớn hơn (HTF) ngay bên cạnh lề phải nến hiện tại.
+    Mặc định: Khung 15 (15m), 60 (1H), 240 (4H).
+    Cơ chế tự động thích ứng:
+        Tự động co giãn theo biên độ giá hiện tại trên màn hình, không làm lệch tỉ lệ nến chính.
+        Tự động phát hiện và ngăn lỗi nến nếu người dùng chọn khung mini nhỏ hơn khung biểu đồ đang xem.
+    Giúp theo dõi cấu trúc nến và vị trí EMA của khung lớn mà không cần chuyển đổi tab hay chia nhỏ màn hình.
+
+⚙️ Hướng Dẫn Cấu Hình (Settings)
+📈 1. Cấu Hình Đường MA
+
+    Tích chọn bật/tắt từng đường MA #1 đến MA #4.
+    Chọn kiểu MA (EMA, SMA, SMMA, WMA, VWMA).
+    Chọn nguồn giá (close, open, hlc3,...).
+    Điền chu kỳ (Length) và chọn màu sắc nhận diện.
+
+🔔 2. Cài Đặt Cảnh Báo Chung
+
+    🔔 Bật Hệ Thống Cảnh Báo: Bật/Tắt phát âm thanh/thông báo alert của TradingView.
+    🏷️ Hiển Thị Nhãn Tín Hiệu Biểu Đồ: Bật/Tắt vẽ nhãn (MA↗, PB↗, BULL🔥,...) trên biểu đồ nến.
+    🔍 Bộ Lọc Xu Hướng (MA #3 vs MA #4): Chọn None, MA #3 > MA #4 hoặc MA #3 < MA #4.
+
+⚡ 3. Tín Hiệu & Điều Kiện Alert
+
+    Bật/Tắt từng loại tín hiệu: Giao cắt MA1/MA2, Giá cắt MA1, Bull/Bear Pullback, Cấu trúc MA (Alignment).
+    Tùy chỉnh Pullback:
+        Chọn MA làm mốc Pullback: Cho phép chọn MA #1 hoặc MA #2.
+        Lookback (Số nến): Số lượng nến tối thiểu cần duy trì ở phía trước khi chạm lại MA (mặc định: 3 nến).
+
+📺 4. Cài Đặt Mini-Chart (Multi-Timeframe)
+
+    Hiện Mini-Chart 1, 2, 3: Bật/tắt từng chart mini.
+    Khung thời gian: Nhập 15, 30, 60, 240, D, W...
+    Số Lượng Nến Hiển Thị: Số nến hiển thị trên mỗi mini-chart (mặc định: 50 nến).
+    Khoảng Cách Ngang (Offset): Số nến cách từ nến cuối sang phải (tránh đè lên nến hiện tại).
+    Khoảng Cách Giữa Nến (Spacing): Độ rộng khoảng cách giữa các nến mini (mặc định: 2).
+    Chiều Cao / Khoảng Cách Giữa Các Chart (%): Tinh chỉnh kích thước hiển thị theo nhu cầu.
+
+💡 Chiến Lược Giao Dịch Thực Chiến Gợi Ý
+🟢 Chiến Lược 1: Bắt Sóng Thuận Xu Hướng Với Pullback (Khuyên Dùng)
+
+    Xác nhận xu hướng lớn: Quan sát Mini-Chart (H1 hoặc H4) thấy nến nằm trên EMA và các đường EMA dốc lên, hoặc trên chart chính MA3 > MA4.
+    Đợi nhịp hồi (Pullback): Giá điều chỉnh giảm chạm vào đường EMA 20 hoặc EMA 50 $\rightarrow$ Xuất hiện nhãn PB↗.
+    Vào lệnh: Mua (Long) khi nến tín hiệu đóng cửa rút chân hoặc nến tiếp theo vượt đỉnh nến tín hiệu.
+    Cắt lỗ (SL): Đặt dưới đáy nến Pullback hoặc dưới đường MA #2 (EMA 50).
+    Chốt lời (TP): Theo tỷ lệ R:R tối thiểu 1:1.5 - 1:2 hoặc khi xuất hiện nhãn P↘ (giá gãy lại MA20).
+
+🔴 Chiến Lược 2: Đánh Theo Cấu Trúc Bùng Nổ Xu Hướng (Alignment Trigger)
+
+    Tín hiệu: Khi thị trường tích lũy kéo dài và bắt đầu bùng nổ, 4 đường MA xòe nan quạt theo thứ tự hoàn chỉnh $\rightarrow$ Xuất hiện nhãn BULL🔥 (cho lệnh Mua) hoặc BEAR🔥 (cho lệnh Bán).
+    Hành động: Vào lệnh thăm dò ngay khi nến đóng cửa, hoặc chờ một nhịp test nhẹ về MA1/MA2 để gia tăng vị thế.
+    Quản lý lệnh: Giữ lệnh theo xu hướng bám sát đường MA1 hoặc MA2 cho đến khi xuất hiện tín hiệu đảo chiều ngược lại.
+
+ℹ️ Thông Tin Bổ Sung
+
+    Tác giả: DucTri_dev
+    Phiên bản: Pine Script v6
+    Tương thích: Hỗ trợ tốt trên mọi khung thời gian (Scalping M1-M5, Day Trading M15-H1, Swing Trading H4-D1) và mọi thị trường (Crypto, Forex, Cổ phiếu, Vàng).
