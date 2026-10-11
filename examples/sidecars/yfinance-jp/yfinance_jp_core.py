@@ -51,6 +51,11 @@ JP_CODE_RE = re.compile(
 SCANNER_PAGE_SIZE = 250
 SCANNER_HISTORY_BATCH_SIZE = 250
 SCANNER_HISTORY_THREADS = 8
+SYMBOL_ALIASES = {
+    "BTC": "BTC-USD", "BTCUSD": "BTC-USD", "BTC/USD": "BTC-USD", "BTC-USD": "BTC-USD",
+    "USDYEN": "JPY=X", "USDJPY": "JPY=X", "USD/JPY": "JPY=X", "USDJPY=X": "JPY=X", "JPY=X": "JPY=X",
+    "XAUUSD": "GC=F", "XAU/USD": "GC=F", "XAUUSD=X": "GC=F", "GOLD": "GC=F", "GC=F": "GC=F",
+}
 
 
 @dataclass(slots=True)
@@ -70,6 +75,13 @@ class SymbolItem:
     exchange: str = "JPX"
 
 
+GLOBAL_SYMBOLS = (
+    SymbolItem("BTC-USD", "Bitcoin / US Dollar", "Crypto"),
+    SymbolItem("JPY=X", "USD/JPY — US Dollar / Japanese Yen", "Forex"),
+    SymbolItem("GC=F", "Gold Futures (USD) — XAUUSD alternative", "COMEX Futures"),
+)
+
+
 @dataclass(slots=True)
 class ScannerInstrument:
     symbol: str
@@ -84,10 +96,12 @@ class ScannerInstrument:
 
 def normalize_symbol(raw: str) -> str:
     value = str(raw or "").strip().upper()
+    if value in SYMBOL_ALIASES:
+        return SYMBOL_ALIASES[value]
     if value.endswith(".T"):
         value = value[:-2]
     if not JP_CODE_RE.fullmatch(value):
-        raise ValueError("Japan stock symbol must be a 4-character TSE code, optionally ending in .T")
+        raise ValueError("Unsupported Yahoo symbol: use a TSE code, BTC, USDJPY, or XAUUSD (Gold Futures)")
     return f"{value}.T"
 
 
@@ -206,7 +220,12 @@ def _aggregate_group(group: list[Candle]) -> Candle:
     )
 
 
-def aggregate_four_hour(candles: Iterable[Candle]) -> list[Candle]:
+def aggregate_four_hour(candles: Iterable[Candle], continuous: bool = False) -> list[Candle]:
+    if continuous:
+        buckets: dict[int, list[Candle]] = {}
+        for candle in sorted(candles, key=lambda item: item.time):
+            buckets.setdefault(candle.time // 14_400, []).append(candle)
+        return [_aggregate_group(buckets[key]) for key in sorted(buckets)]
     per_day: dict[tuple[int, int, int], list[Candle]] = {}
     for candle in sorted(candles, key=lambda item: item.time):
         local = datetime.fromtimestamp(candle.time, TOKYO_TZ)
@@ -259,6 +278,13 @@ class YFinanceJapanGateway:
         limit = max(1, limit)
         direct = try_normalize_symbol(query)
         items: dict[str, SymbolItem] = {}
+        for item in GLOBAL_SYMBOLS:
+            if item.symbol == direct or query.upper() in f"{item.symbol} {item.name}".upper():
+                items[item.symbol] = item
+
+        # Known global instruments do not depend on Yahoo's search availability.
+        if direct in {item.symbol for item in GLOBAL_SYMBOLS}:
+            return [items[direct]][:limit]
 
         try:
             yf = self._yfinance()
@@ -267,7 +293,7 @@ class YFinanceJapanGateway:
                 if not isinstance(quote, dict):
                     continue
                 raw_symbol = str(quote.get("symbol") or "")
-                if not raw_symbol.upper().endswith(".T"):
+                if not raw_symbol.upper().endswith(".T") and raw_symbol.upper() not in SYMBOL_ALIASES:
                     continue
                 symbol = try_normalize_symbol(raw_symbol)
                 if symbol is None:
@@ -276,7 +302,7 @@ class YFinanceJapanGateway:
                 exchange = str(quote.get("exchange") or quote.get("exchDisp") or "JPX").strip() or "JPX"
                 items[symbol] = SymbolItem(symbol=symbol, name=name, exchange=exchange)
         except Exception:
-            if direct is None:
+            if direct is None and not items:
                 raise
 
         if direct is not None and direct not in items:
@@ -396,7 +422,7 @@ class YFinanceJapanGateway:
         frame = ticker.history(**self._history_kwargs(interval, adjusted, from_time, to_time))
         candles = frame_to_candles(frame)
         if interval == "4h":
-            candles = aggregate_four_hour(candles)
+            candles = aggregate_four_hour(candles, continuous=not normalized.endswith(".T"))
         if from_time is not None:
             candles = [item for item in candles if item.time >= from_time]
         if to_time is not None:
@@ -498,7 +524,7 @@ class YFinanceJapanGateway:
                 )
                 candles = frame_to_candles(frame)
                 if interval == "4h":
-                    candles = aggregate_four_hour(candles)
+                    candles = aggregate_four_hour(candles, continuous=not symbol.endswith(".T"))
                 if candles:
                     output[symbol] = candles[-1]
             except Exception:

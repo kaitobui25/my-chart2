@@ -64,6 +64,19 @@ describe('YFinanceJapanDatafeed', () => {
     expect(YFINANCE_JP_SUPPORTED_INTERVALS).toEqual(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M']);
   });
 
+  it.each([
+    ['btc', 'BTC-USD'], ['BTC/USD', 'BTC-USD'], ['BTC-USD', 'BTC-USD'],
+    ['usdyen', 'JPY=X'], ['USD/JPY', 'JPY=X'], ['USDJPY=X', 'JPY=X'],
+    ['xauusd', 'GC=F'], ['XAU/USD', 'GC=F'], ['GC=F', 'GC=F'],
+  ])('loads history for alias %s using Yahoo ticker %s', async (alias, symbol) => {
+    expect(normalizeYFinanceJapanSymbol(alias)).toBe(symbol);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ candles: [] }))) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    await feed.getHistory(alias, '1d');
+    const url = new URL(String(vi.mocked(fetchImpl).mock.calls[0][0]));
+    expect(url.searchParams.get('symbol')).toBe(symbol);
+  });
+
   it('searches through the sidecar and keeps only valid Tokyo symbols', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       symbols: [
@@ -83,6 +96,17 @@ describe('YFinanceJapanDatafeed', () => {
     expect(url.pathname).toBe('/yfinance-jp-api/symbols');
     expect(url.searchParams.get('q')).toBe('130A');
     expect(url.searchParams.get('limit')).toBe('10');
+  });
+
+  it('keeps global search results so they can be selected for the chart', async () => {
+    const symbols = [
+      { symbol: 'BTC-USD', name: 'Bitcoin / US Dollar', exchange: 'Crypto' },
+      { symbol: 'JPY=X', name: 'USD/JPY', exchange: 'Forex' },
+      { symbol: 'GC=F', name: 'Gold Futures (USD) — XAUUSD alternative', exchange: 'COMEX Futures' },
+    ];
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ symbols }))) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    await expect(feed.searchSymbols('usd')).resolves.toEqual(symbols);
   });
 
   it('loads small multi-symbol daily histories in one sidecar request for watchlists', async () => {

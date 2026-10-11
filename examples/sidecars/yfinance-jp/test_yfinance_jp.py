@@ -113,6 +113,27 @@ def sample_frame() -> pd.DataFrame:
 
 
 class SymbolTests(unittest.TestCase):
+    def test_global_four_hour_buckets_keep_gaps_and_cross_tokyo_midnight(self) -> None:
+        start = 1_790_000_000 // 14_400 * 14_400
+        candles = [Candle(start + hours * 3600, 100, 102, 99, 101, 10)
+                   for hours in [0, 1, 4, 5, 12]]
+        result = aggregate_four_hour(candles, continuous=True)
+        self.assertEqual([item.time for item in result], [start, start + 14_400, start + 43_200])
+        self.assertEqual([item.volume for item in result], [20, 20, 10])
+
+    def test_global_alias_search_and_history(self) -> None:
+        fake = FakeYFinance(sample_frame())
+        gateway = YFinanceJapanGateway(fake)
+        for alias, symbol in [("btc", "BTC-USD"), ("BTC/USD", "BTC-USD"),
+                              ("usdyen", "JPY=X"), ("USD/JPY", "JPY=X"),
+                              ("xauusd", "GC=F"), ("XAU/USD", "GC=F")]:
+            with self.subTest(alias=alias):
+                self.assertEqual(normalize_symbol(alias), symbol)
+                self.assertEqual(gateway.symbols(alias, 10)[0].symbol, symbol)
+                self.assertEqual(len(gateway.history(alias, "1d", 10)), 2)
+                self.assertEqual(fake.history_calls[-1][0], symbol)
+        self.assertEqual(fake.search_calls, [])
+
     def test_normalizes_numeric_and_alphanumeric_tse_codes(self) -> None:
         self.assertEqual(normalize_symbol("7203"), "7203.T")
         self.assertEqual(normalize_symbol("130a"), "130A.T")

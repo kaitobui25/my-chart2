@@ -333,7 +333,7 @@ function integrateHtml(original: string): string {
   html = replaceRequired(
     html,
     '        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>',
-    `        <section class="provider-panel" data-provider-panel="yfinance-jp" hidden>\n          <span class="provider-note">Tokyo Stock Exchange qua Yahoo Finance/yfinance. Giá có thể bị trễ; chart cập nhật mỗi 60 giây trong phiên.</span>\n        </section>\n        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
+    `        <section class="provider-panel" data-provider-panel="yfinance-jp" hidden>\n          <span class="provider-note">Yahoo Finance/yfinance: cổ phiếu Nhật, BTC, USD/JPY và vàng futures (GC=F, tìm bằng XAUUSD). Giá có thể bị trễ; chart cập nhật mỗi 60 giây.</span>\n        </section>\n        <form id="fiinquant-credential-form" class="provider-panel" data-provider-panel="fiinquant" autocomplete="on" hidden>`,
   );
   return html;
 }

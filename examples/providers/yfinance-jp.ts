@@ -96,6 +96,12 @@ interface MultiHistoryPayload {
 
 export function normalizeYFinanceJapanSymbol(value: string): string {
   const upper = value.trim().toUpperCase();
+  const aliases: Record<string, string> = {
+    BTC: 'BTC-USD', BTCUSD: 'BTC-USD', 'BTC/USD': 'BTC-USD', 'BTC-USD': 'BTC-USD',
+    USDYEN: 'JPY=X', USDJPY: 'JPY=X', 'USD/JPY': 'JPY=X', 'USDJPY=X': 'JPY=X', 'JPY=X': 'JPY=X',
+    XAUUSD: 'GC=F', 'XAU/USD': 'GC=F', 'XAUUSD=X': 'GC=F', GOLD: 'GC=F', 'GC=F': 'GC=F',
+  };
+  if (Object.prototype.hasOwnProperty.call(aliases, upper)) return aliases[upper];
   const base = upper.endsWith('.T') ? upper.slice(0, -2) : upper;
   return JP_CODE_PATTERN.test(base) ? `${base}.T` : '';
 }
@@ -134,7 +140,7 @@ function formatHistoryDate(time: number): string {
   return new Date(time * 1000).toISOString().slice(0, 10);
 }
 
-/** Yahoo Finance Japan equities via the local yfinance sidecar. */
+/** Japanese equities, Bitcoin, USD/JPY and gold futures via the local yfinance sidecar. */
 export class YFinanceJapanDatafeed implements Datafeed {
   readonly name = 'Yahoo Japan';
 
