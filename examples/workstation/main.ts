@@ -795,7 +795,9 @@ function setupToolbarOverflow(): void {
     button.setAttribute('aria-expanded', 'false');
   };
   const restore = () => {
-    for (const entry of entries) entry.marker.before(entry.element);
+    for (const entry of entries) {
+      if (entry.marker.previousSibling !== entry.element) entry.marker.before(entry.element);
+    }
     menu.replaceChildren();
   };
   const update = () => {
@@ -3633,9 +3635,10 @@ function refreshReplayUi(): void {
     ?? (active ? 'Dừng replay đồng bộ và quay lại dữ liệu thời gian thực' : 'Replay đồng bộ các chart đang hiển thị');
   replayBtn.setAttribute('aria-label', replayBtn.title);
 
+  const controlsVisibilityChanged = replayControls.hidden === active;
   replayControls.hidden = !active;
   if (!active) {
-    scheduleToolbarOverflow();
+    if (controlsVisibilityChanged) scheduleToolbarOverflow();
     return;
   }
 
@@ -3647,13 +3650,23 @@ function refreshReplayUi(): void {
     : loading
       ? 'Đang tải raw candles...'
       : `${replay.cursor + 1}/${replay.total}${timeLabel ? ` · ${timeLabel}` : ''}`;
-  replayPlay.innerHTML = `<span class="replay-play-icon ${playing ? 'pause' : 'play'}">${playing ? REPLAY_PAUSE_ICON : REPLAY_PLAY_ICON}</span>`;
-  replayPlay.title = playing ? 'Dừng replay' : 'Phát replay';
+  const playbackIcon = playing ? 'pause' : 'play';
+  if (!replayPlay.querySelector(`.replay-play-icon.${playbackIcon}`)) {
+    replayPlay.innerHTML = `<span class="replay-play-icon ${playbackIcon}">${playing ? REPLAY_PAUSE_ICON : REPLAY_PLAY_ICON}</span>`;
+  }
+  replayPlay.title = `${playing ? 'Dừng replay' : 'Phát replay'} (Shift + ↓)`;
+  replayPlay.setAttribute('aria-label', replayPlay.title);
+  replayStep.title = 'Tiến một nến (Shift + →)';
+  replayStep.setAttribute('aria-label', replayStep.title);
+  replaySpeed.title = 'Đổi tốc độ replay (Shift + ↑)';
+  replaySpeed.setAttribute('aria-label', replaySpeed.title);
   replayPlay.disabled = selecting || loading || finished;
   replayStep.disabled = selecting || loading || finished;
   replaySpeed.disabled = selecting || loading;
-  replaySpeed.textContent = `${replay.speed}×`;
-  scheduleToolbarOverflow();
+  const speedLabel = `${replay.speed}×`;
+  const speedChanged = replaySpeed.textContent !== speedLabel;
+  if (speedChanged) replaySpeed.textContent = speedLabel;
+  if (controlsVisibilityChanged || speedChanged) scheduleToolbarOverflow();
 }
 
 replaySession = new SyncedReplaySession({
@@ -5517,6 +5530,11 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (e.shiftKey && activeTile) {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      replaySession?.cycleSpeed();
+      return;
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       replaySession?.togglePlayback();

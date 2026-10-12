@@ -38,4 +38,22 @@ describe('ReplayClock', () => {
     expect(clock.cycleSpeed()).toBe(10);
     expect(clock.cycleSpeed()).toBe(1);
   });
+
+  it.each([1, 2, 5, 10])('pauses with one toggle and resumes at %sx', (speed) => {
+    vi.useFakeTimers();
+    const clock = new ReplayClock(() => undefined);
+    clock.load(Array.from({ length: 100 }, (_, index) => index * 100), 0);
+    clock.setSpeed(speed);
+    const tickMs = 1000 / speed;
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      clock.togglePlayback();
+      vi.advanceTimersByTime(tickMs);
+      expect(clock.snapshot().cursor).toBe(attempt + 1);
+      clock.togglePlayback();
+      expect(clock.snapshot().phase).toBe('paused');
+      vi.advanceTimersByTime(2000);
+      expect(clock.snapshot().cursor).toBe(attempt + 1);
+    }
+  });
 });
