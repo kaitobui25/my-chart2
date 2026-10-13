@@ -1,5 +1,6 @@
 export interface ExcelDisplayPreferences {
   candlesOnHoverOnly: boolean;
+  preserveReplayZoom: boolean;
 }
 
 export interface PreferenceStorage {
@@ -11,6 +12,7 @@ const STORAGE_KEY = 'l2chart.excel.display-preferences.v1';
 
 export const DEFAULT_EXCEL_DISPLAY_PREFERENCES: Readonly<ExcelDisplayPreferences> = Object.freeze({
   candlesOnHoverOnly: false,
+  preserveReplayZoom: false,
 });
 
 export class ExcelDisplayPreferencesStore {
@@ -40,6 +42,9 @@ export class ExcelDisplayPreferencesStore {
         candlesOnHoverOnly: typeof parsed.candlesOnHoverOnly === 'boolean'
           ? parsed.candlesOnHoverOnly
           : DEFAULT_EXCEL_DISPLAY_PREFERENCES.candlesOnHoverOnly,
+        preserveReplayZoom: typeof parsed.preserveReplayZoom === 'boolean'
+          ? parsed.preserveReplayZoom
+          : DEFAULT_EXCEL_DISPLAY_PREFERENCES.preserveReplayZoom,
       };
     } catch {
       return { ...DEFAULT_EXCEL_DISPLAY_PREFERENCES };

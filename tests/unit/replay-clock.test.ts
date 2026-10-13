@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ReplayClock } from '../../examples/workstation/replay/replay-clock';
+import { ReplayClock } from '../../examples/shared/replay/replay-clock';
 
 afterEach(() => vi.useRealTimers());
 

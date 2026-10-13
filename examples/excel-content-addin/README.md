@@ -29,6 +29,22 @@ The **Watch List** tab keeps a small persisted list of Tokyo symbols next to the
 
 Watch List code is split into configuration, persistence, market-data, view, and controller modules so storage/UI/provider concerns can evolve independently.
 
+## Bar Replay
+
+The chart toolbar's **Replay** action works with both Japan market history and an Excel **Sheet** OHLC(V) selection:
+
+1. Load the market chart or choose **Sheet** to load a selected range (at least two candles).
+2. Click **Replay**, then click a bar on the chart before the final available bar.
+3. Use **Phát/Tạm dừng** (play/pause), **+1 nến** (step), **1×/2×/5×/10×** (speed), or **Thoát** to restore the chart. Press **Esc** to cancel the starting-bar selection.
+
+Replay uses the candles already loaded in the chart; each playback tick reveals one more candle without fetching the provider or rereading the worksheet. The live market subscription is paused during Replay and resumes on exit. A still-forming market candle is excluded from playback, and the original dataset is restored on exit. Switching market symbols, timeframes, or loading a new Sheet range ends the current Replay.
+
+Active indicators, Export and the AI primary chart context see only the currently revealed candles. Additional market-timeframe requests from the AI are unavailable during Replay, to avoid revealing future data.
+
+In **Option**, enable **Giữ zoom khi chọn nến Replay** to retain the zoom/viewport set just before choosing the starting bar. During Replay the chart stops forcing the viewport to the latest bar, and **Thoát** restores the original selection-time view. This setting is **Off by default** and is remembered locally.
+
+Run the production-bundle Replay smoke with `npm run test:excel-replay`. It uses 64 deterministic mock candles and headless Chromium to exercise real chart clicks, Step, Play/Pause, Stop, and history restoration without an Excel host.
+
 ## Export chart and SMC diagnostics
 
 Click **Export** next to **Option** to download a JSON snapshot of the current chart viewport. The export works for both market and Excel Sheet candles. It includes absolute candle indices, UTC Unix timestamps, OHLCV, source/symbol/timeframe, and the active Smart Money Concepts (original, V2, V3) settings and calculation results. Other active indicators are intentionally excluded in phase 1.

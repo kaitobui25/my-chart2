@@ -6,6 +6,7 @@ export interface ExcelOptionsControllerOptions {
   chart: L2Chart;
   surface: HTMLElement;
   candlesOnHoverOnly: HTMLInputElement;
+  preserveReplayZoom: HTMLInputElement;
   storage?: PreferenceStorage | null;
 }
 
@@ -13,11 +14,13 @@ export class ExcelOptionsController {
   private readonly store: ExcelDisplayPreferencesStore;
   private readonly hoverCandles: HoverCandleController;
   private readonly onChange: () => void;
+  private readonly onReplayZoomChange: () => void;
 
   constructor(private readonly options: ExcelOptionsControllerOptions) {
     this.store = new ExcelDisplayPreferencesStore(options.storage);
     const preferences = this.store.get();
     options.candlesOnHoverOnly.checked = preferences.candlesOnHoverOnly;
+    options.preserveReplayZoom.checked = preferences.preserveReplayZoom;
     this.hoverCandles = new HoverCandleController(
       options.chart,
       options.surface,
@@ -29,10 +32,19 @@ export class ExcelOptionsController {
       this.hoverCandles.setEnabled(enabled);
     };
     options.candlesOnHoverOnly.addEventListener('change', this.onChange);
+    this.onReplayZoomChange = () => {
+      this.store.update({ preserveReplayZoom: options.preserveReplayZoom.checked });
+    };
+    options.preserveReplayZoom.addEventListener('change', this.onReplayZoomChange);
+  }
+
+  isReplayZoomPreserved(): boolean {
+    return this.store.get().preserveReplayZoom;
   }
 
   dispose(): void {
     this.options.candlesOnHoverOnly.removeEventListener('change', this.onChange);
+    this.options.preserveReplayZoom.removeEventListener('change', this.onReplayZoomChange);
     this.hoverCandles.dispose();
   }
 }

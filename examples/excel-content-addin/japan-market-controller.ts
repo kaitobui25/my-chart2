@@ -29,6 +29,7 @@ export interface JapanMarketSnapshot {
 
 export class JapanMarketController {
   private generation = 0;
+  private liveGeneration = 0;
   private unsubscribe: (() => void) | null = null;
   private current: JapanMarketSnapshot | null = null;
 
@@ -49,10 +50,12 @@ export class JapanMarketController {
     try {
       candles = await this.feed.getHistory(symbol, timeframe, limit, range);
     } catch {
+      if (generation !== this.generation) return null;
       // Yahoo can reject explicit intraday ranges that are wider than the
       // provider currently allows. The no-range request uses provider-safe
       // defaults in the sidecar.
     }
+    if (generation !== this.generation) return null;
     if (candles.length === 0) {
       candles = await this.feed.getHistory(symbol, timeframe, limit);
     }
@@ -66,10 +69,7 @@ export class JapanMarketController {
     this.chart.setData(candles);
     this.chart.fitContent();
     this.current = { symbol, timeframe };
-    this.unsubscribe = this.feed.subscribe(symbol, timeframe, (candle) => {
-      if (generation !== this.generation) return;
-      this.chart.updateCandle(candle);
-    });
+    this.startLive(symbol, timeframe);
 
     return { symbol, timeframe, candles };
   }
@@ -91,13 +91,27 @@ export class JapanMarketController {
     this.stopLive();
   }
 
+  /** Resume the existing market without refetching or replacing chart history. */
+  resume(): void {
+    if (!this.current || this.unsubscribe) return;
+    this.startLive(this.current.symbol, this.current.timeframe);
+  }
+
   dispose(): void {
     this.pause();
     this.feed.dispose?.();
   }
 
   private stopLive(): void {
+    this.liveGeneration += 1;
     this.unsubscribe?.();
     this.unsubscribe = null;
+  }
+
+  private startLive(symbol: string, timeframe: JapanTimeframe): void {
+    const ticket = ++this.liveGeneration;
+    this.unsubscribe = this.feed.subscribe(symbol, timeframe, (candle) => {
+      if (ticket === this.liveGeneration) this.chart.updateCandle(candle);
+    });
   }
 }

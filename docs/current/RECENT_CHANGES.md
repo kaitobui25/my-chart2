@@ -161,7 +161,7 @@ Per-tile Replay timing was replaced by a shared `ReplayClock` orchestrated by `S
 
 Visible charts for the same symbol can use different timeframes but advance on one raw market-time cursor. Raw candles are incrementally projected into each target timeframe without future OHLC leakage. Replay also claims MarketHub source ownership so live quotes cannot interfere with paper trading during an historical replay.
 
-Relevant implementation: `examples/workstation/replay/replay-clock.ts`, `examples/workstation/replay/replay-session.ts`, `examples/workstation/replay/replay-projection.ts`.
+Relevant implementation: `examples/shared/replay/replay-clock.ts`, `examples/workstation/replay/replay-session.ts`, `examples/workstation/replay/replay-projection.ts`.
 
 ### One-click/local provider startup was simplified
 

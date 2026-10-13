@@ -95,10 +95,11 @@ body {
 
 .chart-view {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .market-strip {
+  grid-row: 1;
   position: relative;
   z-index: 20;
   display: grid;
@@ -581,6 +582,76 @@ body {
   opacity: 0.24;
 }
 
+.replay-toggle[aria-pressed='true'] {
+  border-color: #cfd7d9;
+  background: #f3f7f6;
+  opacity: 1;
+}
+
+.replay-controls {
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e6e6e6;
+  background: #fafbfb;
+  color: #6f777c;
+  font-size: 11px;
+}
+
+.replay-controls[hidden],
+.replay-actions[hidden],
+.replay-cancel[hidden] {
+  display: none !important;
+}
+
+.replay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.replay-control-button {
+  flex: none;
+  height: 24px;
+  min-width: 38px;
+  border: 1px solid #d9dddf;
+  border-radius: 2px;
+  padding: 2px 7px;
+  background: #ffffff;
+  color: #626b70;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.replay-control-button:hover:not(:disabled),
+.replay-control-button:focus-visible {
+  border-color: #aebcc0;
+  background: #f3f7f6;
+  outline: 1px solid #bfc9cc;
+  outline-offset: 1px;
+}
+
+.replay-control-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.replay-status {
+  flex: 1 1 170px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.replay-status[data-state='error'] {
+  color: #9b5c5c;
+}
+
 .assistant-toggle {
   position: relative;
 }
@@ -639,6 +710,10 @@ body {
   gap: 14px;
   padding: 9px 10px;
   cursor: pointer;
+}
+
+.option-toggle + .option-toggle {
+  border-top: 1px solid #e6e8e9;
 }
 
 .option-copy {
@@ -856,6 +931,7 @@ body {
 }
 
 .chart-stage {
+  grid-row: 3;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -1264,6 +1340,18 @@ body {
   .indicator-control { grid-area: indicator; }
   .strip-actions { grid-area: actions; }
   #status { grid-area: status; }
+
+  .replay-controls {
+    gap: 4px 6px;
+  }
+
+  .replay-actions {
+    flex: 1 1 100%;
+  }
+
+  .replay-control-button {
+    padding-inline: 6px;
+  }
 
   .watchlist-toolbar {
     grid-template-columns: minmax(92px, 112px) auto minmax(0, 1fr);

@@ -7,7 +7,7 @@ Replay is a workstation subsystem built around one shared raw market-time clock.
 
 ## Modules
 
-- `examples/workstation/replay/replay-clock.ts` — playback timeline, cursor, speed and timer.
+- `examples/shared/replay/replay-clock.ts` — shared playback timeline, cursor, speed and timer (Workstation and Excel).
 - `examples/workstation/replay/replay-session.ts` — session state, participants, history loading, source ownership and orchestration.
 - `examples/workstation/replay/replay-projection.ts` — incremental raw-candle projection into each participant timeframe.
 - `src/candle-aggregation.ts` — pure OHLC aggregation helpers used by projection.

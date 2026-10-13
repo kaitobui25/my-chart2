@@ -140,7 +140,7 @@ SyncedReplaySession
           └─ raw source candle -> chart timeframe candle
 ```
 
-Evidence: `examples/workstation/replay/replay-session.ts`, `examples/workstation/replay/replay-clock.ts`, `examples/workstation/replay/replay-projection.ts`.
+Evidence: `examples/workstation/replay/replay-session.ts`, `examples/shared/replay/replay-clock.ts`, `examples/workstation/replay/replay-projection.ts`.
 
 All visible replay participants must use the same symbol. The session chooses a common raw base interval; the special Week+Month combination falls back to daily raw candles because weeks cannot be safely folded into calendar months.
 

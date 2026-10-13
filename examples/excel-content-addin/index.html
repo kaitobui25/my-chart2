@@ -53,9 +53,29 @@
                 title="Mở trợ lý"
               >AI</button>
               <button id="load-selection" class="strip-button sheet-button" type="button" disabled title="Dùng vùng OHLC đang chọn trong Excel">Sheet</button>
+              <button
+                id="replay-toggle"
+                class="strip-button replay-toggle"
+                type="button"
+                aria-label="Bắt đầu Replay"
+                aria-controls="replay-controls"
+                aria-expanded="false"
+                aria-pressed="false"
+                title="Chọn nến bắt đầu Replay"
+              >Replay</button>
             </div>
             <span id="status" aria-live="polite">Đang tải…</span>
           </header>
+          <div id="replay-controls" class="replay-controls" role="group" aria-label="Điều khiển Replay" hidden>
+            <div id="replay-actions" class="replay-actions" hidden>
+              <button id="replay-play-pause" class="replay-control-button" type="button" aria-label="Phát Replay" title="Phát Replay">Phát</button>
+              <button id="replay-step" class="replay-control-button" type="button" aria-label="Tiến một nến" title="Tiến một nến">+1 nến</button>
+              <button id="replay-speed" class="replay-control-button" type="button" aria-label="Đổi tốc độ Replay" title="Đổi tốc độ Replay">1×</button>
+              <button id="replay-stop" class="replay-control-button" type="button" aria-label="Thoát Replay" title="Thoát Replay">Thoát</button>
+            </div>
+            <span id="replay-status" class="replay-status" role="status" aria-live="polite"></span>
+            <button id="replay-cancel" class="replay-control-button replay-cancel" type="button" aria-label="Hủy chọn nến Replay" title="Hủy chọn nến Replay" hidden>Hủy</button>
+          </div>
           <section class="chart-stage">
             <div id="chart" aria-label="Biến động dữ liệu">
               <span id="chart-pointer-dot" class="chart-pointer-dot" aria-hidden="true" hidden></span>
@@ -150,6 +170,13 @@
                 <small>Ẩn nến khi chuột rời add-in; dữ liệu, scale và indicator vẫn được giữ nguyên.</small>
               </span>
               <input id="candles-on-hover-only" type="checkbox" />
+            </label>
+            <label class="option-toggle" for="preserve-replay-zoom">
+              <span class="option-copy">
+                <strong>Giữ zoom khi chọn nến Replay</strong>
+                <small>Giữ mức zoom, hạn chế tự cuộn khi chọn nến; khôi phục khung nhìn lúc thoát Replay.</small>
+              </span>
+              <input id="preserve-replay-zoom" type="checkbox" />
             </label>
           </div>
         </section>

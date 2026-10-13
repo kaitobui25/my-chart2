@@ -83,6 +83,13 @@ export class ExcelAssistantController {
       : 'Chưa có dữ liệu chart');
   }
 
+  /** Prevent an in-flight answer using pre-Replay candles from appearing after Replay starts. */
+  cancelForChartChange(): void {
+    if (!this.busy) return;
+    this.cancelRequested = true;
+    if (this.requestId) void this.client.cancel(this.requestId).catch(() => undefined);
+  }
+
   private bindEvents(): void {
     this.listen(this.view.toggle, 'click', () => {
       this.view.togglePanel();

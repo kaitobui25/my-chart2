@@ -1,7 +1,7 @@
 import type { Candle } from '../../../src/core/types';
 import type { Datafeed } from '../../../src/datafeed';
 import { estimateIntervalBars, intervalApproxSeconds, intervalStart, nextIntervalStart } from '../../../src/interval';
-import { ReplayClock, type ReplayClockSnapshot } from './replay-clock';
+import { ReplayClock, type ReplayClockSnapshot } from '../../shared/replay/replay-clock';
 import { ReplayProjection } from './replay-projection';
 
 export type ReplaySessionPhase = 'idle' | 'selecting' | 'loading' | 'paused' | 'playing';

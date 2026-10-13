@@ -1,6 +1,8 @@
 import { L2Chart, type Candle } from '../../src/library';
 import { ExcelAssistantController } from './assistant-controller';
 import { createExcelAssistantBridge, type ExcelAssistantSource } from './assistant-context';
+import { ExcelReplayController } from './excel-replay-controller';
+import { bindExcelReplayControls } from './excel-replay-controls';
 import { isExcelHost, readSelectedRange, waitForOfficeReady } from './excel-host';
 import { IndicatorController } from './indicator-controller';
 import { IndicatorSettingsDialog } from './indicator-settings-dialog';
@@ -60,6 +62,7 @@ const optionsController = new ExcelOptionsController({
   chart,
   surface: appShell,
   candlesOnHoverOnly: requiredElement<HTMLInputElement>('#candles-on-hover-only'),
+  preserveReplayZoom: requiredElement<HTMLInputElement>('#preserve-replay-zoom'),
 });
 const watchlistStore = new WatchListStore(JAPAN_MARKET_CONFIG.defaultSymbols);
 let watchlist: WatchListController;
@@ -68,7 +71,9 @@ let activeSource: ExcelAssistantSource = 'market';
 let statusMessage: string = excelStealthUi.loading;
 let statusIsError = false;
 let marketLoadId = 0;
+let activeLoadId: number | null = null;
 let lastVisibleRange: { from: number; to: number } | null = null;
+let replay: ExcelReplayController | null = null;
 
 const assistant = new ExcelAssistantController(createExcelAssistantBridge({
   chart,
@@ -77,7 +82,42 @@ const assistant = new ExcelAssistantController(createExcelAssistantBridge({
   getSource: () => activeSource,
   getSymbol: () => market.getSnapshot()?.symbol ?? symbolInput.value.trim(),
   getTimeframe: () => market.getSnapshot()?.timeframe ?? timeframeSelect.value,
+  getReplaySnapshot: () => replay?.snapshot() ?? null,
 }));
+
+const replayControls = bindExcelReplayControls({
+  onToggle: () => {
+    if (activeLoadId !== null) {
+      setPersistentStatus('Đang tải dữ liệu, hãy bắt đầu Replay sau khi tải xong.');
+      return;
+    }
+    replay?.begin();
+  },
+  onPlayPause: () => replay?.togglePlayback(),
+  onStep: () => replay?.step(),
+  onSpeed: () => replay?.cycleSpeed(),
+  onStop: () => replay?.stop(),
+  onCancelSelection: () => replay?.stop(),
+});
+replay = new ExcelReplayController({
+  chart,
+  market,
+  getSource: () => activeSource,
+  getMarketTimeframe: () => market.getSnapshot()?.timeframe ?? (timeframeSelect.value as JapanTimeframe),
+  getPreserveReplayZoom: () => optionsController.isReplayZoomPreserved(),
+  onBegin: () => {
+    marketLoadId += 1;
+    assistant.cancelForChartChange();
+  },
+  onChange: (snapshot) => {
+    replayControls.render(snapshot);
+    assistant.refreshContext();
+  },
+});
+replayControls.render(replay.snapshot());
+const offReplayBarClick = chart.onBarClick(({ index }) => {
+  if (index !== null) replay?.selectStart(index);
+});
 
 const watchlistView = new WatchListView({
   list: requiredElement<HTMLElement>('#watchlist-list'),
@@ -107,7 +147,10 @@ viewTabs = bindViewTabs({
   watchlistView: watchlistViewElement,
   optionsView: optionsViewElement,
   onChange: (view) => {
-    if (view !== 'chart') lastVisibleRange = chart.timeScale.visibleRange() ?? lastVisibleRange;
+    if (view !== 'chart') {
+      lastVisibleRange = chart.timeScale.visibleRange() ?? lastVisibleRange;
+      replay?.pause();
+    }
     watchlist.setActive(view === 'watchlist');
   },
 });
@@ -170,11 +213,15 @@ window.addEventListener('blur', () => {
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
+  replay?.pause();
   chart.clearCrosshair();
   hideChartPointerDot();
   setChartHoverChrome(false);
 });
 window.addEventListener('beforeunload', () => {
+  replayControls.dispose();
+  offReplayBarClick();
+  replay?.dispose();
   symbolCombobox.dispose();
   viewTabs.dispose();
   watchlist.dispose();
@@ -214,7 +261,9 @@ async function initializeHost(): Promise<void> {
 }
 
 async function reloadMarket(): Promise<void> {
+  replay?.stop();
   const loadId = ++marketLoadId;
+  activeLoadId = loadId;
   const timeframe = timeframeSelect.value as JapanTimeframe;
   setPersistentStatus(`Đang tải ${symbolInput.value.trim()} · ${timeframe}…`);
 
@@ -230,19 +279,28 @@ async function reloadMarket(): Promise<void> {
     setPersistentStatus(`${result.symbol} · ${timeframeLabel(result.timeframe)} · ${result.candles.length.toLocaleString()} nến`);
   } catch (error) {
     if (loadId !== marketLoadId) return;
+    if (activeSource === 'market') market.resume();
     setPersistentStatus(error instanceof Error ? error.message : 'Không thể tải dữ liệu Nhật.', true);
+  } finally {
+    if (activeLoadId === loadId) activeLoadId = null;
   }
 }
 
 async function loadSelectedRange(): Promise<void> {
+  // The Sheet request immediately pauses Market; avoid resubscribing just to stop it again.
+  replay?.stop(false);
   loadButton.disabled = true;
-  marketLoadId += 1;
+  const loadId = ++marketLoadId;
+  activeLoadId = loadId;
+  const wasMarket = activeSource === 'market';
+  // Invalidate a pending Market request before awaiting the Excel host.
+  market.pause();
   setPersistentStatus(excelStealthUi.loading);
 
   try {
     const candles = candlesFromRange(await readSelectedRange(), excelRangeOptions);
+    if (loadId !== marketLoadId) return;
     if (candles.length === 0) throw new Error(excelStealthUi.emptyRange);
-    market.pause();
     chart.setIntervalSec(inferCandleIntervalSeconds(candles));
     chart.setData(candles);
     chart.fitContent();
@@ -251,8 +309,11 @@ async function loadSelectedRange(): Promise<void> {
     watchlist.setActiveSymbol(null);
     setPersistentStatus(`Sheet · ${candles.length.toLocaleString()} nến`);
   } catch (error) {
+    if (loadId !== marketLoadId) return;
+    if (wasMarket) market.resume();
     setPersistentStatus(error instanceof Error ? error.message : excelStealthUi.genericError, true);
   } finally {
+    if (activeLoadId === loadId) activeLoadId = null;
     loadButton.disabled = false;
   }
 }

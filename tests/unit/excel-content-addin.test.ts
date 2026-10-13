@@ -24,6 +24,7 @@ import {
   formatCodexQuotaSummary,
 } from '../../examples/excel-content-addin/assistant-controller';
 import { ExcelDisplayPreferencesStore } from '../../examples/excel-content-addin/display-preferences';
+import { ExcelOptionsController } from '../../examples/excel-content-addin/options-controller';
 import { HoverCandleController } from '../../examples/excel-content-addin/hover-candle-controller';
 import { excelStealthChartOptions } from '../../examples/excel-content-addin/stealth-preset';
 import {
@@ -380,7 +381,7 @@ describe('Excel hover candle option', () => {
     });
   });
 
-  it('persists the hover-only candle preference', () => {
+  it('persists hover-only and replay zoom preferences, with replay zoom off for older settings', () => {
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -388,10 +389,48 @@ describe('Excel hover candle option', () => {
     };
     const store = new ExcelDisplayPreferencesStore(storage);
     expect(store.get().candlesOnHoverOnly).toBe(false);
+    expect(store.get().preserveReplayZoom).toBe(false);
 
     store.update({ candlesOnHoverOnly: true });
 
     expect(new ExcelDisplayPreferencesStore(storage).get().candlesOnHoverOnly).toBe(true);
+    expect(new ExcelDisplayPreferencesStore(storage).get().preserveReplayZoom).toBe(false);
+    store.update({ preserveReplayZoom: true });
+    expect(new ExcelDisplayPreferencesStore(storage).get()).toMatchObject({
+      candlesOnHoverOnly: true,
+      preserveReplayZoom: true,
+    });
+  });
+
+  it('loads the Replay zoom checkbox and persists updates through Options', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    const checkbox = () => Object.assign(new EventTarget(), { checked: false }) as HTMLInputElement;
+    const hoverInput = checkbox();
+    const replayInput = checkbox();
+    const surface = Object.assign(new EventTarget(), { matches: () => false }) as unknown as HTMLElement;
+    const chart = { setPriceSeriesRenderVisible: vi.fn() } as unknown as L2Chart;
+
+    const first = new ExcelOptionsController({
+      chart, surface, candlesOnHoverOnly: hoverInput, preserveReplayZoom: replayInput, storage,
+    });
+    expect(replayInput.checked).toBe(false);
+    expect(first.isReplayZoomPreserved()).toBe(false);
+    replayInput.checked = true;
+    replayInput.dispatchEvent(new Event('change'));
+    expect(first.isReplayZoomPreserved()).toBe(true);
+    first.dispose();
+
+    const restoredInput = checkbox();
+    const restored = new ExcelOptionsController({
+      chart, surface, candlesOnHoverOnly: checkbox(), preserveReplayZoom: restoredInput, storage,
+    });
+    expect(restoredInput.checked).toBe(true);
+    expect(restored.isReplayZoomPreserved()).toBe(true);
+    restored.dispose();
   });
 
   it('shows candles only while the pointer is inside when enabled', () => {
@@ -472,6 +511,85 @@ describe('Excel Japan market controller', () => {
     expect(controller.getSnapshot()).toEqual({ symbol: '7203.T', timeframe: '1d' });
     controller.dispose();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps old live candles flowing while replacement history is loading or fails', async () => {
+    const getHistory = vi.fn()
+      .mockResolvedValueOnce([candle()])
+      .mockRejectedValueOnce(new Error('range failed'))
+      .mockRejectedValueOnce(new Error('fallback failed'));
+    const feed = fakeFeed(getHistory);
+    let oldLive!: (bar: Candle) => void;
+    const unsubscribe = vi.fn();
+    feed.subscribe = vi.fn((_symbol, _timeframe, callback) => {
+      oldLive = callback;
+      return unsubscribe;
+    });
+    const chart = fakeChart();
+    const controller = new JapanMarketController(chart, feed);
+    await controller.load('7203', '1d');
+    const replacement = controller.load('6758', '1d');
+    oldLive(candle(1_700_086_400));
+    await expect(replacement).rejects.toThrow('fallback failed');
+    oldLive(candle(1_700_172_800));
+    expect(chart.updateCandle).toHaveBeenCalledTimes(2);
+    expect(feed.subscribe).toHaveBeenCalledOnce();
+    expect(unsubscribe).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('resumes the previous market subscription after Replay without another history fetch', async () => {
+    const feed = fakeFeed(vi.fn(async () => [candle()]));
+    const callbacks: Array<(bar: Candle) => void> = [];
+    const unsubscribers = [vi.fn(), vi.fn()];
+    feed.subscribe = vi.fn((_symbol, _timeframe, callback) => {
+      callbacks.push(callback);
+      return unsubscribers[callbacks.length - 1];
+    });
+    const chart = fakeChart();
+    const controller = new JapanMarketController(chart, feed);
+    await controller.load('7203', '1d');
+    controller.pause();
+    callbacks[0](candle(1_700_086_400));
+    expect(chart.updateCandle).not.toHaveBeenCalled();
+    expect(unsubscribers[0]).toHaveBeenCalledOnce();
+
+    controller.resume();
+    controller.resume(); // Idempotent while subscribed.
+    expect(feed.subscribe).toHaveBeenCalledTimes(2);
+    expect(feed.getHistory).toHaveBeenCalledOnce();
+    callbacks[1](candle(1_700_086_400));
+    expect(chart.updateCandle).toHaveBeenCalledWith(candle(1_700_086_400));
+    controller.dispose();
+    expect(unsubscribers[1]).toHaveBeenCalledOnce();
+  });
+
+  it('discards an in-flight market load when Replay pauses the market', async () => {
+    let complete!: (candles: Candle[]) => void;
+    const pending = new Promise<Candle[]>((resolve) => { complete = resolve; });
+    const feed = fakeFeed(vi.fn(() => pending));
+    const chart = fakeChart();
+    const controller = new JapanMarketController(chart, feed);
+    const loading = controller.load('7203', '1d');
+    controller.pause();
+    complete([candle()]);
+    expect(await loading).toBeNull();
+    expect(chart.setData).not.toHaveBeenCalled();
+    expect(feed.subscribe).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('does not retry a failed history fetch after the load was cancelled', async () => {
+    let rejectRequest!: (reason: Error) => void;
+    const pending = new Promise<Candle[]>((_resolve, reject) => { rejectRequest = reject; });
+    const feed = fakeFeed(vi.fn(() => pending));
+    const controller = new JapanMarketController(fakeChart(), feed);
+    const loading = controller.load('7203', '1h');
+    controller.pause();
+    rejectRequest(new Error('Cancelled upstream'));
+    expect(await loading).toBeNull();
+    expect(feed.getHistory).toHaveBeenCalledOnce();
+    controller.dispose();
   });
 });
 
