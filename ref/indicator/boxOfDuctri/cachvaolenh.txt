@@ -1,0 +1,86 @@
+00:00:01
+Thì hôm nay mình sẽ chia sẻ thêm một cái phương pháp giao dịch về cái hộp Davas này. Cái phương pháp này thì nó sẽ phức tạp hơn nhưng mà cái độ hiệu quả của nó sẽ cao hơn đúng không? Đó thì mình có update thêm cái à indicator về hộp Davas của mình. Mình thêm cái chức năng là gì? Nếu mà cái hộp ấy nó hình thành xong ấy. Về cái logic hình thành hộp để mọi người xem ở cái video trước nhá. Thì cái hộp mà nó hình thành xong rồi ấ khi mà nó phá xuống ấy thì nó sẽ màu đỏ. Còn mà nó phá lên ấy thì nó sẽ màu xanh. Đó thì
+
+00:00:25
+cái hộp mà nó cứ xanh đỏ liên tiếp như này này thì nó sẽ là đang vào cái trường hợp sideway mình sẽ không vào lại được. Mình sẽ tìm kiếm cái chen để mình vào lệnh. Bây giờ sẽ xác định xác định chen như nào? Thì mọi người xác định chen tăng ấy khi mà có hai cái hộp màu xanh và nó cao hơn cái hộp sau nó cao hơn hộp trước và đầy là cùng màu cùng là màu xanh thì là sẽ là vào lệnh bay được. Thì ví dụ như hộp này cái hộp này màu đỏ này sau đó hình thành hộp này à hộp này màu xanh này sau đó hình thành hộp này màu
+
+00:00:47
+đỏ này. Mặc dù cái hộp sau này nó cao hơn đúng không? Nhưng mà nó không cùng màu thế nó ra là mình sẽ không xác định được là một cái chen nó vẫn đang sideway thôi. Đó ví dụ như trường hợp này nhá. Hai hộp màu xanh này. Hai hộp màu xanh nhưng mà cái hộp này nó phải nằm trên cơ. Nó phải nằm phía trên này cơ thì mới được. Nó phải nằm phía trên này này thì mới ok. Nhưng hai hộp này nó nằm như này thì nó cũng không được xác định là chen tăng. Hiện đợi nó có chen rõ ràng. Đây ví dụ như trường hợp này thì cũng được này.
+
+00:01:11
+Đây trường hợp này thì hộp này mới hình thành đúng không? Hộp này cùng là màu xanh phá lên. Đó thì mọi người xác định đây là một cái chen tăng. Đó xác định một cái chen tăng như này. Đó thì khi mà cái hộp này vừa bị phá ấ thì có thể phá luôn anh bài ở đây. Đây cái nến này là cái nến phá hộp đúng không? thì vào luôn khi phá hộp một cái mọi người vào luôn anh B đây SL ở dưới cái hộp có sẽ gồng đến khi nào mà gồng đến khi nào mà mà xuất hiện một cái hộp màu đỏ thôi. Đó đây ví dụ cái hộp này màu đỏ này thì mọi
+
+00:01:37
+người có thể cắt luôn cái lệnh này đây. Đấy cái lệnh này thì có thể bị SL ngay đây. Ok chưa? Đấy tiếp tục thế thôi. Thì đoạn này nó đang xanh đỏ này. Tức là nó đang si này. Đây cũng thế này. Đỏ này xanh này nó đang sai qu này nó chưa có chen rõ ràng này. Đây đây cũng thế này. Xanh đỏ này. Mặc dù cái hộp này nó cao hơn hộp này nhá nhưng hộp này nó bị phá xuống thì mình không tính. Mình không nên tính. Đó, bây giờ đợi đến khi nào nó vàng cái then rõ ràng ấy. Đây ví dụ một hộp màu xanh này. Bây giờ mình đãi thêm cái hộp
+
+00:02:02
+màu xanh nữa nó ở trên hẳn nhá. Đấy, ví dụ đây thì hợp này nó tạo ra cái hộp nó phá cái hộp tạo lên trên đúng không? Thì mọi người có thể vào lệnh bài ngay cái lúc mà nó phá hộp xong này thì vào lệnh bài ở đây. Đấy vào là nó chạy nhanh qua mình không kịp vào. Đó thì đây là trường hợp rõ rất rõ ràng này. Hai hộp tavas tăng này. Hai hộp màu xanh và nó nằm trên nhau thì mình sẽ vào lịch b đó thì mình cũng sẽ gồng đến khi nào mà nó xuất hiện một hộp đỏ thì thôi. Còn nếu không thì mình cứ tiếp tục vào lệnh theo cái chen. Đấy đây
+
+00:02:30
+là hình ảnh hộp tiếp nhá. Đây bây giờ đợi xem nó phá như nào đó phá lên một cái thì mọi người thấy này hai hộp bắn nhất này. Có phải hai hộp tăng không? Và đây đang là đi lên rồi hai tăng và nó nằm trên nhau đúng không? Thì mọ người lại tiếp tục vào đánh bay tiếp tục vào đánh b khi ngay khi nó phá hộp này vào đánh bay đây nhớ là phải đại nếu nó đóng cửa phá qua hộp nhá lần dưới hộp đó thì cứ gồng thôi ví dụ khi mà vào lệnh mới thì những cái lệnh cũ này mọi người rời vào be là được rồi đúng không
+
+00:02:59
+để cho an toàn tránh ôm một lúc nhiều lệnh thì lệnh này là đã rời về hòa rồi thì không sợ nữa đó thì cứ tiếp tục chạy thôi. Đó đây hình thành tiếp cái hộp này. Hình thành cái hộp này rất là to này. Đây là đáy hộp. Đây đỉnh hộp này thì đã xem nó như nào đó nó chưa phá đây. Cái đế này đóng cửa phá qua là nó nó đóng cửa từ cây này đã phá qua rồi đúng không? Cây đế này đóng cửa phá qua rồi. Nó sẽ tiếp tục vào lệnh bay tiếp. SL hơi xa nhưng lệnh n xa này thì mọi người đi vô thấp thôi là được. Đó thì cứ
+
+00:03:31
+mỗi khi mà vào lệnh mới thì mọi người lại kéo những cái lệnh cũ về về BE để để ôm những lệnh cũ đi thôi. Đó thì cứ ôm đến khi nào mà nó có một cái hộp mới đây. Ví dụ cái hộp này đến khi nào mà có cái hộp nó bị phá xuống ấy thì mới cắt lệnh. Đó đây là anh tiếp tục phá lên đúng không? Cái hộp này tiếp tục phá lên nó sẽ tiếp tục và đánh bài ở đây khi mà nó phá lên đây. Đây là cái nến đây. Cái nến này nó phá lên đúng không? đóng cửa đến v đó thì mình sẽ follow cái chen mình follow theo cái chen thì nó sẽ phù
+
+00:03:59
+hợp với những cái những cặp tiền ví dụ như vàn chẳng hạn nó đi theo chen nhưng mọi người phải đánh timefame nó cao cao một chút đúng không 30 H1 chẳng hạn ví dụ đây mình đang test H1 này đi theo chen tốt ấy thì cái chiến thuật này sẽ ok và cái chiến thuật này nó cũng sẽ loại bỏ được những cái việc mà xoay gây đúng không ví dụ đây xoay đây những cái đ xoay này đây hộp nó cứ xanh đỏ liên tục và nó không đi xuống rõ ràng đó thì nó sẽ loại bỏ được cái việc đấy rồi tất nhiên là cứ đi theo Chen này đến
+
+00:04:25
+cái lúc nó đảo chen thì mình sẽ bị SL thôi. Chắc chắn sẽ bị nhưng mà thấy là điều không tránh khỏi nhưng mà nó cũng là một chuyến thuật. Đây tiếp tục này. Đây là hai cái hộp tiếp tục này hai cái hộp tăng này. Đó thì mọi người có thể khi mà cái nến này nó phá cái hộp đúng không? Thế tục vào lệnh B đặt L ở dưới hộp. Đó khi mà đặt vào lệnh mới rồi thì mình lại kéo cái lệnh cũ này về B. Ok chưa? Mình lại gồng tiếp. Đây này. Tiếp tục này. Tiếp tục này. Gì? Cái hộp này có phải cái hộp này mà hai cái hộp gần nhất đúng không? Hộp này có
+
+00:04:56
+phải tăng hơn hộp này không? Đó thì hãy tiếp tục cái hộp này bị phá tiếp tục vào lên bài đó cứ bài thì khi nào hết chen thôi. Rồi thì khi nào hết chen thì mọi người cứ theo dõi tiếp thì khi nào nó hết chen thì như nào nhá. Đấy mọi người nhìn này. Thấy không cái hộp này bị phá này. Đó nó tạo ra cái hộp mặc dù hộp này tăng nhanh như mọi người tạo ra cái hộp mới màu đỏ. Đó thì mọi người sẽ đóng hết tất cả những lệnh còn lại. Đóng hết những lệnh đang ôm lại. Đó đóng hết tất cả những lệnh mà mình đã đi
+
+00:05:22
+từ dưới này lên này thì đóng hết lại. Tất cả những cái lệnh này đã được kéo về BE rồi nhá. Cứ có lệnh mới thì kéo lệnh cũ về BE. Đây có cái lệnh mới này thì sẽ kéo lệnh cũ này về BE. Đó thì đến đây ấ thì mình sẽ đóng hết tất cả các lệnh lại. Đến đây thì lệnh này sẽ bị S đúng không? Kể cả là nó chưa đến S L thì mình cũng đóng luôn. Khi mà cái nến này đóng cửa dưới hộp một cái thì tất cả những cái lệnh mà mình follow cái chen đấy mình sẽ đóng lại. Ok chưa? Và đây mọi người có thể thấy đây nó đang sideway
+
+00:05:46
+này đúng không? Hộp nó chưa hình thành hai cái hộp mà cùng màu và cùng hướng đó. Đây này. Đấy những cái hộp nó đang xen màu nhau này thì mình không làm gì được. Mình không vào lệnh. Nhớ là hai cái hộp phải cùng màu và cùng hướng. Đây ví dụ đây nó cứ xanh đỏ này. Mặc dù hai cái hộp này nó nằm trên nhau đúng không? Hộp này nó cao hơn hộp này nhưng mà cái hộp này nó bị phá xuống nó thành màu đỏ thì mình cũng không vào lệnh được. Nó cứ xanh đỏ liên tục. Thế này đang xanh quê thì mình không làm gì được này.
+
+00:06:11
+Đợi tiếp đó. Nó lại tiếp tục ngài lại đỏ lại xanh này nó đang sideway đó lại xanh xong lại đỏ này liên tục như vậy đó đây lại đỏ lại xanh này thì mình tránh cái đoạn đấy mình không làm gì mình không vào lệnh gì đoạn đấy cả đây trường hợp này nó phá lên rõ ràng đúng không một hộp hộp gần nhất là màu xanh này đây hộp vừa tạo ra là màu xanh này hộp trước nó là màu xanh này đó thì mình sẽ vào lệnh ngay cái đếm mà nó phá lên ấy ngay cái đếm mà nó phá lên này thì mình đặt l ở đây đó nếu mà đặt l ở đây mà cái trường hợp
+
+00:06:41
+này nó quét xuống nó quét xuống ấy thì con như lệnh này bị sl đúng không thì phải chấp nhận thôi. N trường hợp này thì khả năng cao b nếu mà mọi người đặt xa một tí thì còn tránh được còn nếu mọi người đặt sát sát vào chỗ hộp này thì lệnh này B l nhá đó thì đây tiếp tục này đây mọi người nhìn nhá cái trường hợp này thì mọi cũng không nên vào lệnh này hộp này cái hộp này nhá cái hộp này là hộp trước đó này mặc dù nó cùng màu nhưng mà cái hộp này nó không nằm nó không nằm lên trên cao hẳn cái hộp này đúng không nó không nằm
+
+00:07:08
+lên hộp này này nó không nằm lên cao hẳn cái hộp này đó nó không giống nó nó không giống như cái trường hợp này ví dụ hộp này với hộp này nó nằm hơn hộp này với hộp này đúng không thì hộp này nó nằm cao hơn hẳn Nhưng mà khi mọi người xét hai hộp này thì rõ ràng hộp này nó không nằm không bằng đúng không? Nó lệnh trước vừa v xong lệnh này lại vừa cái hộp mới lại không cao hơn hẳn. Mặc dù cùng màu nhưng mà gì thì nó không cùng hướng thì mọi người cũng không nên vào cũng không nên làm gì cả. Đẩy nguyên
+
+00:07:33
+đó đợi tiếp này. Đó thấy chưa? Xanh đỏ này. Đó thì lại đang sideway này. Đó tiếp tục này. Đây hộp này đỏ đây. Hai hộp đỏ đây. Nhưng mà rõ ràng gì? Cái hộp màu đỏ này nó không nằm ở dưới hẳn đúng không? Nó phải nằm dưới hẳn cơ. Thế mà cũng không vào lệnh gì được ở đây đó đỏ xanh này. Đó thì cái cái đoạn này nó sideway này các bạn đoạn từ đây đến đây nó cứ sideway này thì mình cũng không làm gì được nó mình bị SL ngay có đoạn sideway đấy. Đây hai hộp này màu xanh nhưng mà rõ ràng thì màu xanh nó phải cùng đi lên
+
+00:08:03
+cơ. Đây màu xanh lại cùng đi xuống màu xanh lại xuống dưới này thì không làm gì được. Đợi tiếp đây trường hợp này. Đó hộp này màu hộp này màu xanh vừa tạo ra này. Hộp trước đó cũng là màu xanh này. Hộp này cao hơn này. Đó thì mình có thể vào lệnh ngay cái lúc mà nó phá phá lên này. Được chưa? Thì nó cứ mọi người sẽ cũng sẽ ôm đến khi nào mà nó gặp g màu đỏ thôi. Đó ôm đến khi nào nó gặp gồm màu đỏ thôi. Đây tiếp tục này. Lại có hai hộp đúng không? Hộp này màu xanh. Hôm này vừa tạo ra màu xanh này. Hôm này vừa tạo
+
+00:08:33
+ra màu xanh này. Đó thì khi mà đóng cái nến này đóng nến qua gộp này. Lệnh bay ở đây này. Đó cứ vào lệnh bay mới nhá. Vào lệnh mới thì lãnh cũ kéo về Be. Ok chưa? Tiếp tục này. Cái lệnh này n nó cứ phải gồng. Lệnh này cứ phải gồng nhá. Tất cả lệnh này để phải gồng. Đó. Đ tiếp tục này. Đây có hộp hộp mới này. Theo hộp cũ này cùng màu này. Đó thì lại khi mà nó đóng đến qua hộp ấy thì người vào lệnh bài đây l dưới này. Đó. Cứ vào lệnh bài mới thì kéo lệnh cũ về ba. Đó thì mình cứ gồng theo cái chen đấy.
+
+00:09:04
+Gồng đến khi nào mà nó tạo một cái hộp. Đấy cái gồng đế khi nào đây đ gồng đến khi nào nó tạo cái hộp mà hộp đấy nó bị phá xuống thì cây nến phá xuống đây này. Đây là cây nến nó phá xuống rồi thì mọi người đóng cửa ở đoạn này. Khi mà cái cây nến này nó sác nó đóng nến dưới hộp thì mọi người đóng lệnh ở đây. Đó thì lệnh này sẽ bị l đúng không? Lệnh này sẽ lây. Đó và tất cả những cái lệnh cũ này thì mình sẽ cắt hết lệnh. Tất cả những lệnh cũ mình vừa vào trước ấy có một lệnh này, hai lệnh này đó thì cũng cắt ở
+
+00:09:30
+đây. Đó thì cái lệnh này cũng đi được khá xa đúng không? Còn lệnh này thì cũng đi được một đoạn không xa lắm. Lệnh này thì đi được một tí thôi. Lệnh này thì bị lỗ nhưng mà cái lệnh này nó sẽ bù lại cho mọi người rất nhiều những cái lệnh lãi to này. Đó thì tiếp tục nhá. Đã xem có trường hợp sale không nhá. Đó thì đây đã sideway quaya này. Đỏ xanh này. Đỏ lại xanh này đang sideway quaya này. Đó thì đây cái chiều này cũng vào lệnh cũng được chứ nó không quá đẹp thôi đúng không? cũng là một hộp màu xanh này.
+
+00:09:57
+Cũng là một hộp màu xanh đằng sau nó hộp màu xanh. Hộp màu xanh này cao hơn hộp màu xanh trước đúng chưa? Thì vào lệnh cũng được nhưng nó không quá đẹp. Đó thì đây là cái nến đóng lệnh này đóng đóng cửa ngoài hộp này thì lệnh bay ngay đầu nếnh tiếp theo này. SL ở đây này. TP trên này này. Đó thì đây cũng tiếp tục á. Tiếp tục này. Đây là một cái hộp mới được tạo ra này. Đây là hộp mới tạo ra đúng không? hộp trước là màu xanh này thì nó lại vào lệnh tiếp à cái cây nế mà nó phá qua hộp đây. Đó thì cái lệnh này cũ thì lại kéo
+
+00:10:26
+về ba nó cứ làm đi làm lại cái cái như vậy thôi. Đó thì đây tiếp tục là lại phá hộ hộp tiếp tục rồi thì lại lại tiếp tục cái lệnh này lại kéo về ba đó lệnh này lại kéo về ba sau đó lại nhồi tiếp lệnh bay vào đây đóng cửa ở trên đúng không? Bay tiếp vào đây. Đó thì tất cả những lệnh trước là đều dương rồi đúng không? Mình kéo hết về về điểm hòa rồi đúng không? thì mình không không sợ nữa, mình chỉ ôm mỗi lệnh này thôi. Còn tất cả những lệnh cũ mình đều kéo hết cái ventry rồi. Đó thì chỉ có gồng lãi thôi.
+
+00:10:56
+Rồi đó lại tiếp tục đúng không? Khi mà lại có một cái hộp mới này, cái hộp màu xanh này đúng không? Hộp màu xanh mới này cao hơn màu xanh cũ này thì lại tiếp tục khi mà nó phá hộp đây là cái nến phá hộp này. Phá hộp qua phát thì mình phá lệnh luôn. Đó l ở đây. Đó thì những cái lệnh cũ này kéo hết về BE chỉ có ôm một lệnh thôi. Tại thời điểm tại một thời điểm mình chỉ ôm lên ôm một lệnh thôi. Mình chỉ nên để một lệnh lỗ thôi. Đó thì đây cái lệnh này thì SL này. Đó SL rồi thì tất cả những lệnh này cũng bị
+
+00:11:27
+SL theo này. Lệnh này SL này. Đó lệnh này SL này. Lệnh này chưa SL lệnh này SL rồi đấy. Thì chỉ gồng được mỗi lệnh này thôi. Đó. Đó mặc dù mình mình gồng được ba lệnh này nhưng bị giật xuống một phát là bị SL luôn cả ba lệnh đúng không? Thì mai là mình vẫn còn một cái lệnh này thì SL ở đây. Đó SL cái tại điểm này cái nến này nó SL phát thì mình nóng hết luôn. Đó thì khả năng cao đoạn này sẽ là Sway qu tiếp này. Đây rõ ràng hai hộp màu xanh nhưng mà gì hộp màu xanh này nó không nằm trên nó bao bao lên như này thì mình không vào
+
+00:11:59
+lệnh được. Đấy. Đây xanh đỏ này không vào lệnh được này. Đây hai hộp màu đỏ này nhưng mà nó bao nó hộp này nó không nằm dưới thì không vào lệnh được này. Đó đây là đỏ xanh không vào lệnh được nhưng đoạn này là vào lệnh được này. Đây màu xanh này. Đó có thể vào lệnh ba ngay lúc mà nó mở đóng cửa ở trên này. Đó mọi người làm như thế thôi. Thì cái chiến thật này nó sẽ phù hợp vào với những cái cặp tiền mà nó đấy đi theo chèn đúng không? Đ tiếp tục này có một hộp xanh tiếp này. Đó ch đóng cửa ở trên
+
+00:12:25
+đây thì bay ở đây khi vào lệnh bay thì lệnh kéo lệnh này với SL. Ok chưa? Đó thì nó sẽ cái dùng mọi người dùng hai cái hộp như này ấy cùng hướng và cùng màu như này ấy thì nó sẽ tránh được những đoạn thị trường sideway đúng không? tránh được những đoạn thị trường sideway đó và mình sẽ gồng gồng đến khi nào mà nó mình sẽ gồng theo cái chen này đến khi nào mà nó cái chen này nó kết thúc thì thôi đó phù hợp với những cặp tiền mà những cái cặp mà hai sideway nhá thì nó sẽ ít ít lệnh còn nó sẽ hai BSL mọi người tìm
+
+00:12:51
+những cái cặp mà nó ví dụ như vàng chẳng hạn cái timeframe tầm H1 H4 chẳng hạn đó thì nó đi theo chen ấy hoặc là Bitcoin cũng được nó đi theo chen nó dễ đi theo ch hay đi theo chen thì mọi người có thể dùng cái chứng to này follow chen là được đó cái là gì hai hộp cùng hướng cùng màu đó phá hộp này mọi người vào.
