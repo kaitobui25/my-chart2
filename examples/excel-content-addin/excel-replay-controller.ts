@@ -25,6 +25,7 @@ export interface ReplayChart {
   getCandles(): readonly Candle[];
   setData(candles: Candle[]): void;
   updateCandle(candle: Candle): void;
+  ensureCandlePriceVisible(candle: Candle): void;
   setReplaySelectionMode(active: boolean): void;
   scrollToLatest(): void;
   fitContent(): void;
@@ -128,6 +129,7 @@ export class ExcelReplayController {
     this.deps.chart.setData(this.candles.slice(0, index + 1).map((candle) => ({ ...candle })));
     if (this.viewportBeforeSelection) this.restoreViewport(this.viewportBeforeSelection);
     else this.deps.chart.scrollToLatest();
+    this.deps.chart.ensureCandlePriceVisible(this.candles[index]);
     this.clock.load(this.candles.map((candle) => candle.time), index);
     return true;
   }
@@ -194,6 +196,7 @@ export class ExcelReplayController {
     const candle = this.candles[cursor];
     if (!candle) return;
     this.deps.chart.updateCandle({ ...candle });
+    this.deps.chart.ensureCandlePriceVisible(candle);
     if (!this.preserveZoom) this.deps.chart.scrollToLatest();
   }
 

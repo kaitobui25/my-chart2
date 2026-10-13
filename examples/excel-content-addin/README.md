@@ -43,6 +43,8 @@ Active indicators, Export and the AI primary chart context see only the currentl
 
 In **Option**, enable **Giữ zoom khi chọn nến Replay** to retain the zoom/viewport set just before choosing the starting bar. During Replay the chart stops forcing the viewport to the latest bar, and **Thoát** restores the original selection-time view. This setting is **Off by default** and is remembered locally.
 
+When Replay reveals a candle outside a manually adjusted vertical price range, the price axis expands just enough (with padding) to include its new high/low. It does not shrink an existing manual price range or change the horizontal Replay zoom. With automatic price scaling, the chart continues to follow the visible candles as before.
+
 Run the production-bundle Replay smoke with `npm run test:excel-replay`. It uses 64 deterministic mock candles and headless Chromium to exercise real chart clicks, Step, Play/Pause, Stop, and history restoration without an Excel host.
 
 ## Export chart and SMC diagnostics

@@ -65,6 +65,49 @@ describe('chart scales', () => {
     scale.setRange(10, 20);
     expect(scale.priceFor(scale.yFor(17.5))).toBeCloseTo(17.5, 8);
   });
+
+  it('expands a manual price viewport only for new candle highs and lows', () => {
+    const scale = new PriceScale();
+    scale.setHeight(400);
+    scale.setRange(100, 110);
+    scale.panBy(80);
+    const bottomBefore = scale.priceFor(400);
+    const topBefore = scale.priceFor(0);
+
+    expect(scale.expandToInclude(105, 110)).toBe(false);
+    expect(scale.priceFor(0)).toBeCloseTo(topBefore);
+    expect(scale.expandToInclude(106, 140)).toBe(true);
+    const topAfterHigh = scale.priceFor(0);
+    expect(topAfterHigh).toBeGreaterThan(140);
+    expect(scale.priceFor(400)).toBeCloseTo(bottomBefore);
+    expect(scale.yFor(140)).toBeGreaterThan(0);
+    expect(scale.yFor(140)).toBeLessThan(400);
+
+    expect(scale.expandToInclude(80, 108)).toBe(true);
+    expect(scale.priceFor(400)).toBeLessThan(80);
+    expect(scale.priceFor(0)).toBeCloseTo(topAfterHigh);
+    expect(scale.yFor(80)).toBeGreaterThan(0);
+    expect(scale.yFor(80)).toBeLessThan(400);
+    expect(scale.isManual()).toBe(true);
+  });
+
+  it('keeps automatic price scaling automatic and supports inverted logarithmic scales', () => {
+    const scale = new PriceScale();
+    scale.setHeight(400);
+    scale.setRange(100, 120);
+    expect(scale.expandToInclude(40, 300)).toBe(false);
+    expect(scale.isManual()).toBe(false);
+    scale.setRange(40, 300);
+    expect(scale.yFor(300)).toBeGreaterThan(0);
+
+    scale.setMode('log');
+    scale.setInverted(true);
+    scale.setRange(100, 120);
+    scale.panBy(10);
+    expect(scale.expandToInclude(50, 250)).toBe(true);
+    expect(scale.yFor(50)).toBeGreaterThan(0);
+    expect(scale.yFor(250)).toBeLessThan(400);
+  });
 });
 
 describe('drawing normalization', () => {

@@ -83,6 +83,27 @@ export class PriceScale {
   }
 
   /**
+   * Keep a new price range visible in a manually adjusted viewport.
+   * Replay should never shrink or reset a user's vertical zoom; only extend
+   * the side crossed by a new high/low. Auto-scale already handles new data.
+   */
+  expandToInclude(low: number, high: number): boolean {
+    if (!this.manual || !Number.isFinite(low) || !Number.isFinite(high)) return false;
+    const a = this.transform(low);
+    const b = this.transform(high);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+    const bottom = Math.min(a, b);
+    const top = Math.max(a, b);
+    if (bottom >= this.min && top <= this.max) return false;
+
+    const span = Math.max(this.max, top) - Math.min(this.min, bottom);
+    const padding = span * 0.05;
+    if (bottom < this.min) this.min = bottom - padding;
+    if (top > this.max) this.max = top + padding;
+    return true;
+  }
+
+  /**
    * Capture only an explicitly user-controlled viewport. Auto-scale state is
    * intentionally omitted so background data refreshes can continue autoscaling.
    */

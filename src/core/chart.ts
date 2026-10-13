@@ -830,6 +830,11 @@ export class L2Chart {
     this.invalidate();
   }
 
+  /** Expand only the main pane's manual price scale for a newly revealed Replay bar. */
+  ensureCandlePriceVisible(candle: Candle): void {
+    if (this.panes[0]?.priceScale.expandToInclude(candle.low, candle.high)) this.invalidate();
+  }
+
   scrollToLatest(): void {
     this.timeScale.scrollToEnd();
     this.invalidate();

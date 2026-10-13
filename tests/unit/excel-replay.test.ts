@@ -4,13 +4,19 @@ import { ExcelReplayController, type ExcelReplayDependencies } from '../../examp
 import { createExcelAssistantBridge } from '../../examples/excel-content-addin/assistant-context';
 import type { IndicatorController } from '../../examples/excel-content-addin/indicator-controller';
 import type { JapanMarketController } from '../../examples/excel-content-addin/japan-market-controller';
+import { PriceScale } from '../../src/core/price-scale';
 
 const sample: Candle[] = [100, 160, 220, 280].map((time, i) => ({
   time, open: 10 + i, high: 12 + i, low: 9 + i, close: 11 + i, volume: 100 + i,
 }));
 
-function setup(source: 'sheet' | 'market' = 'sheet', nowSeconds = 100_000, preserveReplayZoom = false) {
-  let visible = sample.map((bar) => ({ ...bar }));
+function setup(
+  source: 'sheet' | 'market' = 'sheet',
+  nowSeconds = 100_000,
+  preserveReplayZoom = false,
+  candles: readonly Candle[] = sample,
+) {
+  let visible = candles.map((bar) => ({ ...bar }));
   let selecting = false;
   const timeScale = {
     barSpacing: 12,
@@ -19,6 +25,9 @@ function setup(source: 'sheet' | 'market' = 'sheet', nowSeconds = 100_000, prese
       timeScale.rightIndex -= deltaPx / timeScale.barSpacing;
     }),
   };
+  const priceScale = new PriceScale();
+  priceScale.setHeight(400);
+  priceScale.setRange(9, 15);
   const chart: ExcelReplayDependencies['chart'] = {
     getCandles: () => visible,
     setData: vi.fn((data: Candle[]) => { visible = data; }),
@@ -29,6 +38,7 @@ function setup(source: 'sheet' | 'market' = 'sheet', nowSeconds = 100_000, prese
     }),
     setReplaySelectionMode: vi.fn((value: boolean) => { selecting = value; }),
     scrollToLatest: vi.fn(),
+    ensureCandlePriceVisible: vi.fn((candle: Candle) => { priceScale.expandToInclude(candle.low, candle.high); }),
     fitContent: vi.fn(),
     invalidate: vi.fn(),
     timeScale,
@@ -41,7 +51,7 @@ function setup(source: 'sheet' | 'market' = 'sheet', nowSeconds = 100_000, prese
     getPreserveReplayZoom: () => preserveReplayZoom,
     nowSeconds: () => nowSeconds, onChange, onBegin,
   });
-  return { replay, chart, market, onChange, onBegin, getVisible: () => visible, isSelecting: () => selecting };
+  return { replay, chart, market, priceScale, onChange, onBegin, getVisible: () => visible, isSelecting: () => selecting };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -141,6 +151,37 @@ describe('Excel Replay', () => {
     h.replay.stop();
     expect(h.chart.fitContent).not.toHaveBeenCalled();
     expect(h.chart.timeScale).toMatchObject({ barSpacing: 18, rightIndex: 2 });
+  });
+
+  it('expands the vertical manual price range for breakout highs and lows without changing the horizontal zoom', () => {
+    const candles = sample.map((bar) => ({ ...bar }));
+    candles[3] = { ...candles[3], open: 13, close: 13.5, high: 13.8, low: 4 };
+    const h = setup('sheet', 100_000, true, candles);
+    h.priceScale.restoreManualViewport({ topPrice: 12.5, bottomPrice: 10 });
+    h.chart.timeScale.barSpacing = 23;
+    h.chart.timeScale.rightIndex = 1.25;
+    h.replay.begin();
+    h.replay.selectStart(1);
+    expect(h.chart.ensureCandlePriceVisible).toHaveBeenCalledWith(candles[1]);
+
+    const topBefore = h.priceScale.priceFor(0);
+    const bottomBefore = h.priceScale.priceFor(400);
+    h.replay.step();
+    expect(h.chart.ensureCandlePriceVisible).toHaveBeenLastCalledWith(candles[2]);
+    // The next high exceeds the manually controlled price viewport.
+    expect(h.priceScale.priceFor(0)).toBeGreaterThan(topBefore);
+    expect(h.priceScale.priceFor(400)).toBeCloseTo(bottomBefore);
+    expect(h.priceScale.yFor(candles[2].high)).toBeGreaterThan(0);
+
+    // A later low breakout expands only the bottom of the price axis.
+    const topAfterHigh = h.priceScale.priceFor(0);
+    h.replay.step();
+    expect(h.chart.ensureCandlePriceVisible).toHaveBeenLastCalledWith(candles[3]);
+    expect(h.priceScale.priceFor(400)).toBeLessThan(candles[3].low);
+    expect(h.priceScale.priceFor(0)).toBeCloseTo(topAfterHigh);
+    expect(h.chart.timeScale).toMatchObject({ barSpacing: 23, rightIndex: 1.25 });
+    h.replay.stop();
+    expect(h.getVisible()).toEqual(candles);
   });
 
   it('plays with one timer, pauses on hidden, and clears timer on dispose', () => {
