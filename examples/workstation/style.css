@@ -4426,6 +4426,64 @@ body.light #range-bar input {
   gap: 8px;
 }
 
+#order-instrument-hint,
+#order-estimate {
+  display: block;
+  margin: 6px 0;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+#execution-settings {
+  margin: 10px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+#execution-settings summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+#ticket-positions,
+#ticket-orders {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  font-size: 11px;
+}
+
+#ticket-position-rows,
+#ticket-order-rows {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.ticket-position-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.ticket-position-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-dim);
+}
+
+.ticket-position-row button {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
 #volume-presets {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -4816,7 +4874,7 @@ body.light #range-bar input {
 #order-confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 230;
   display: grid;
   place-items: center;
   padding: 16px;

@@ -162,7 +162,7 @@
               <button data-order-type="limit">Limit</button>
               <button data-order-type="stop">Stop</button>
             </div>
-            <label class="trade-field"><span>Khối lượng</span><input id="order-volume" type="number" min="1" step="100" value="100" /></label>
+            <label class="trade-field"><span id="order-volume-label">Khối lượng (cp)</span><input id="order-volume" type="number" min="1" step="1" value="100" /></label>
             <div id="volume-presets">
               <button data-volume="100">100</button><button data-volume="500">500</button><button data-volume="1000">1K</button><button data-volume="5000">5K</button>
             </div>
@@ -171,9 +171,28 @@
               <label class="trade-field"><span>Take profit</span><input id="order-tp" type="number" min="0" step="0.01" placeholder="Tùy chọn" /></label>
               <label class="trade-field"><span>Stop loss</span><input id="order-sl" type="number" min="0" step="0.01" placeholder="Tùy chọn" /></label>
             </div>
+            <small id="order-instrument-hint"></small>
+            <small id="order-estimate"></small>
+            <details id="execution-settings">
+              <summary>Giả định khớp lệnh (bps)</summary>
+              <div class="trade-field-grid">
+                <label class="trade-field"><span>Spread</span><input id="paper-spread" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+                <label class="trade-field"><span>Trượt giá</span><input id="paper-slippage" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+                <label class="trade-field"><span>Phí / phía</span><input id="paper-commission" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+              </div>
+              <small>Yahoo chỉ có OHLCV tại đây. Spread/phí mặc định bằng 0; giá có thể trễ và không phải báo giá đặt lệnh thực.</small>
+            </details>
             <label id="one-click-row"><input id="one-click" type="checkbox" /><span>Giao dịch một chạm</span></label>
             <button id="submit-order" class="submit-order buy">Mua market</button>
             <div id="order-message" aria-live="polite"></div>
+            <section id="ticket-positions" hidden>
+              <strong>Vị thế đang mở</strong>
+              <div id="ticket-position-rows"></div>
+            </section>
+            <section id="ticket-orders" hidden>
+              <strong>Lệnh đang chờ</strong>
+              <div id="ticket-order-rows"></div>
+            </section>
           </section>
           <section id="dom-view" class="right-view" hidden>
             <div class="panel-title-row"><strong id="dom-symbol">DOM</strong><span>Khối lượng</span></div>

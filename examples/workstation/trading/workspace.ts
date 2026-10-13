@@ -8,6 +8,7 @@ import {
   MarketHub,
   PaperTradingEngine,
 } from './paper';
+import { quantityDecimals, roundToTick, type Currency, type InstrumentSpec } from './instruments';
 import { localeTag, tr } from '../i18n';
 
 interface DrawingAdapter {
@@ -28,6 +29,7 @@ export interface TradingWorkspaceOptions {
 
 const WATCHLIST_KEY = 'l2chart.watchlist.v1';
 const ONE_CLICK_KEY = 'l2chart.paper.oneClick';
+const EXECUTION_KEY = 'l2chart.paper.execution.v1';
 const DEFAULT_WATCHLIST = ['HPG', 'SSI', 'VNM', 'FPT', 'VN30F1M', 'VNINDEX'];
 
 function el<T extends HTMLElement>(id: string): T {
@@ -49,14 +51,19 @@ function number(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function formatMoney(value: number): string {
-  return new Intl.NumberFormat(localeTag(), { maximumFractionDigits: 0 }).format(value);
+function formatMoney(value: number | null, currency?: Currency): string {
+  if (value === null || !Number.isFinite(value)) return '--';
+  return new Intl.NumberFormat(localeTag(), { maximumFractionDigits: currency === 'USD' ? 2 : 0 }).format(value)
+    + (currency ? ` ${currency}` : '');
+}
+
+function formatQuantity(value: number, spec: InstrumentSpec): string {
+  return new Intl.NumberFormat(localeTag(), { maximumFractionDigits: quantityDecimals(spec) }).format(value);
 }
 
 function formatPrice(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) return '--';
-  if (Math.abs(value) >= 1000) return value.toLocaleString(localeTag(), { maximumFractionDigits: 2 });
-  return value.toFixed(value < 10 ? 3 : 2);
+  return new Intl.NumberFormat(localeTag(), { maximumFractionDigits: 3 }).format(value);
 }
 
 function quoteChangeClass(quote: MarketQuote | null | undefined): string {
@@ -88,6 +95,7 @@ export class TradingWorkspace {
   private orderType: OrderType = 'market';
   private blotterTab: 'positions' | 'orders' | 'history' = 'positions';
   private pendingOrder: OrderRequest | null = null;
+  private ticketSymbol = '';
 
   private readonly watchlistRows = el<HTMLDivElement>('watchlist-rows');
   private readonly watchlistSource = el<HTMLSpanElement>('watchlist-source');
@@ -144,11 +152,53 @@ export class TradingWorkspace {
   refreshActiveSymbol(): void {
     const symbol = this.options.getActiveSymbol() || '--';
     this.orderSymbol.textContent = symbol;
+    this.configureInstrument(symbol);
     el<HTMLElement>('dom-symbol').textContent = `${symbol} · DOM`;
     const quote = this.options.market.get(symbol);
     this.renderActiveQuote(quote);
     this.renderDom(quote);
     this.renderWatchlist();
+    this.renderTradingState();
+  }
+
+  private configureInstrument(symbol: string): void {
+    const spec = this.options.engine.getInstrument(symbol);
+    el<HTMLElement>('order-volume-label').textContent = `Khối lượng (${spec.unit})`;
+    this.orderVolume.min = String(spec.minQuantity);
+    this.orderVolume.step = String(spec.quantityStep);
+    for (const id of ['order-price', 'order-tp', 'order-sl']) {
+      const price = el<HTMLInputElement>(id);
+      price.step = String(spec.tickSize);
+      price.min = String(spec.tickSize);
+    }
+    if (this.ticketSymbol !== symbol) {
+      this.ticketSymbol = symbol;
+      this.orderVolume.value = String(spec.assetClass === 'legacy' ? 100 : spec.minQuantity);
+      this.orderPrice.value = '';
+      this.orderTp.value = '';
+      this.orderSl.value = '';
+    }
+    const presets = spec.assetClass === 'crypto' ? [0.001, 0.01, 0.1, 1]
+      : spec.assetClass === 'forex' ? [0.01, 0.1, 1, 5]
+      : spec.assetClass === 'futures' ? [1, 2, 5, 10]
+      : spec.assetClass === 'stock' ? [100, 200, 500, 1000]
+      : [100, 500, 1000, 5000];
+    el<HTMLElement>('volume-presets').querySelectorAll<HTMLButtonElement>('[data-volume]').forEach((button, index) => {
+      button.dataset.volume = String(presets[index]);
+      button.textContent = formatQuantity(presets[index], spec);
+    });
+    el<HTMLElement>('order-instrument-hint').textContent =
+      `Min ${spec.minQuantity} · bước ${spec.quantityStep} ${spec.unit} · x${spec.multiplier} · margin ${spec.marginRate * 100}%`;
+    this.renderEstimate();
+  }
+
+  private renderEstimate(): void {
+    const symbol = this.options.getActiveSymbol();
+    const price = this.orderType === 'market' ? undefined : number(this.orderPrice.value);
+    const estimate = this.options.engine.estimateOrder(symbol, Number(this.orderVolume.value), price);
+    el<HTMLElement>('order-estimate').textContent = estimate
+      ? `Giá trị ≈ ${formatMoney(estimate.notional, estimate.currency)} · Ký quỹ ≈ ${formatMoney(estimate.margin, estimate.accountCurrency)} · Phí ≈ ${formatMoney(estimate.fee, estimate.accountCurrency)}`
+      : 'Đang chờ giá để ước tính giá trị lệnh';
   }
 
   refreshObjects(): void {
@@ -225,12 +275,56 @@ export class TradingWorkspace {
   }
 
   private bindOrderTicket(): void {
+    el<HTMLElement>('ticket-order-rows').addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-ticket-cancel]');
+      if (!button) return;
+      const cancelled = this.options.engine.cancelOrder(button.dataset.ticketCancel ?? '');
+      this.orderMessage.className = cancelled ? 'success' : 'error';
+      this.orderMessage.textContent = cancelled ? 'Đã hủy lệnh paper' : 'Lệnh không còn ở trạng thái chờ';
+    });
+    el<HTMLElement>('ticket-position-rows').addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-ticket-close]');
+      if (!button) return;
+      const closed = this.options.engine.closePosition(button.dataset.ticketClose ?? '');
+      this.orderMessage.className = closed ? 'success' : 'error';
+      this.orderMessage.textContent = closed
+        ? 'Đã đóng vị thế paper'
+        : 'Chưa thể đóng vị thế: thiếu giá hợp lệ hoặc ngoài phiên giao dịch';
+    });
+    const fields = [
+      el<HTMLInputElement>('paper-spread'),
+      el<HTMLInputElement>('paper-slippage'),
+      el<HTMLInputElement>('paper-commission'),
+    ];
+    try {
+      const saved = JSON.parse(localStorage.getItem(EXECUTION_KEY) ?? 'null') as number[] | null;
+      if (Array.isArray(saved) && saved.length === 3) {
+        fields.forEach((field, index) => {
+          const value = Number(saved[index]);
+          if (Number.isFinite(value)) field.value = String(Math.max(0, Math.min(1000, value)));
+        });
+      }
+    } catch { /* Reset malformed local settings to defaults. */ }
+    const updateExecution = () => {
+      const values = fields.map((field) => {
+        const parsed = Number(field.value);
+        return Number.isFinite(parsed) ? Math.max(0, Math.min(1000, parsed)) : 0;
+      });
+      this.options.engine.setExecution({
+        spreadBps: values[0], slippageBps: values[1], commissionBps: values[2],
+      });
+      localStorage.setItem(EXECUTION_KEY, JSON.stringify(values));
+      this.renderEstimate();
+    };
+    fields.forEach((field) => field.addEventListener('change', updateExecution));
+    updateExecution();
     el<HTMLElement>('order-side').addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-order-side]');
       if (!button) return;
       this.side = button.dataset.orderSide as OrderSide;
       el<HTMLElement>('order-side').querySelectorAll('button').forEach((item) => item.classList.toggle('active', item === button));
       this.refreshSubmitButton();
+      this.renderEstimate();
     });
     el<HTMLElement>('order-type').addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-order-type]');
@@ -239,13 +333,22 @@ export class TradingWorkspace {
       el<HTMLElement>('order-type').querySelectorAll('button').forEach((item) => item.classList.toggle('active', item === button));
       this.orderPriceRow.hidden = this.orderType === 'market';
       const quote = this.options.market.get(this.options.getActiveSymbol());
-      if (quote && this.orderType !== 'market') this.orderPrice.value = formatPrice(quote.last);
+      if (quote && this.orderType !== 'market') {
+        this.orderPrice.value = String(roundToTick(quote.last, this.options.engine.getInstrument(quote.symbol)));
+      }
       this.refreshSubmitButton();
+      this.renderEstimate();
     });
     el<HTMLElement>('volume-presets').addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-volume]');
-      if (button) this.orderVolume.value = button.dataset.volume ?? '100';
+      if (button) {
+        this.orderVolume.value = button.dataset.volume ?? '100';
+        this.renderEstimate();
+      }
     });
+    for (const input of [this.orderVolume, this.orderPrice, this.orderTp, this.orderSl]) {
+      input.addEventListener('input', () => this.renderEstimate());
+    }
     this.oneClick.addEventListener('change', () => localStorage.setItem(ONE_CLICK_KEY, this.oneClick.checked ? '1' : '0'));
     this.submitOrder.addEventListener('click', () => this.requestOrder());
     el<HTMLButtonElement>('order-confirm-cancel').addEventListener('click', () => this.closeConfirmation());
@@ -309,11 +412,12 @@ export class TradingWorkspace {
   }
 
   private requestOrder(): void {
+    const spec = this.options.engine.getInstrument(this.options.getActiveSymbol());
     const request: OrderRequest = {
       symbol: this.options.getActiveSymbol(),
       side: this.side,
       type: this.orderType,
-      volume: Math.max(0, Math.floor(Number(this.orderVolume.value))),
+      volume: Number(this.orderVolume.value),
       price: this.orderType === 'market' ? undefined : number(this.orderPrice.value),
       takeProfit: number(this.orderTp.value),
       stopLoss: number(this.orderSl.value),
@@ -325,7 +429,7 @@ export class TradingWorkspace {
     this.pendingOrder = request;
     el<HTMLElement>('order-confirm-summary').innerHTML = `
       <strong class="${request.side}">${request.side === 'buy' ? tr('Mua').toUpperCase() : tr('Bán').toUpperCase()} ${safe(request.symbol)}</strong>
-      <span>${formatMoney(request.volume)} cp · ${safe(request.type.toUpperCase())}</span>
+      <span>${formatQuantity(request.volume, spec)} ${safe(spec.unit)} · ${safe(request.type.toUpperCase())}</span>
       <span>${request.price ? `@ ${formatPrice(request.price)}` : tr('Theo giá thị trường')}</span>`;
     el<HTMLElement>('order-confirm-overlay').hidden = false;
   }
@@ -343,8 +447,13 @@ export class TradingWorkspace {
 
   private onQuote(quote: MarketQuote): void {
     this.renderWatchlistQuote(quote);
+    if (quote.symbol === 'JPY=X') {
+      this.renderTradingState();
+      this.renderEstimate();
+    }
     if (quote.symbol !== this.options.getActiveSymbol()) return;
     this.renderActiveQuote(quote);
+    this.renderEstimate();
     this.renderDom(quote);
   }
 
@@ -386,7 +495,7 @@ export class TradingWorkspace {
       ? `${formatPrice(quote.bid)} / ${formatPrice(quote.ask)}`
       : '-- / --';
     if (quote && this.orderType !== 'market' && !this.orderPrice.matches(':focus')) {
-      this.orderPrice.value = formatPrice(quote.last);
+      this.orderPrice.value = String(roundToTick(quote.last, this.options.engine.getInstrument(quote.symbol)));
     }
   }
 
@@ -423,18 +532,37 @@ export class TradingWorkspace {
   }
 
   private renderTradingState(): void {
-    const account = this.options.engine.getAccount();
-    el<HTMLElement>('account-equity').textContent = formatMoney(account.equity);
-    el<HTMLElement>('account-balance').textContent = formatMoney(account.balance);
-    el<HTMLElement>('account-margin').textContent = formatMoney(account.usedMargin);
-    el<HTMLElement>('account-free').textContent = formatMoney(account.freeMargin);
+    const account = this.options.engine.getAccount(this.options.getActiveSymbol());
+    el<HTMLElement>('account-equity').textContent = formatMoney(account.equity, account.currency);
+    el<HTMLElement>('account-balance').textContent = formatMoney(account.balance, account.currency);
+    el<HTMLElement>('account-margin').textContent = formatMoney(account.usedMargin, account.currency);
+    el<HTMLElement>('account-free').textContent = formatMoney(account.freeMargin, account.currency);
     const pnl = el<HTMLElement>('account-pnl');
-    const totalPnl = account.realizedPnl + account.unrealizedPnl;
-    pnl.textContent = `${totalPnl >= 0 ? '+' : ''}${formatMoney(totalPnl)}`;
-    pnl.className = totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : '';
-    pnl.title = `${tr('Đã chốt')}: ${formatMoney(account.realizedPnl)} · ${tr('Đang mở')}: ${formatMoney(account.unrealizedPnl)}`;
+    const totalPnl = account.unrealizedPnl === null ? null : account.realizedPnl + account.unrealizedPnl;
+    pnl.textContent = `${totalPnl !== null && totalPnl >= 0 ? '+' : ''}${formatMoney(totalPnl, account.currency)}`;
+    pnl.className = totalPnl === null ? '' : totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : '';
+    pnl.title = account.warning ?? `${tr('Đã chốt')}: ${formatMoney(account.realizedPnl, account.currency)} · ${tr('Đang mở')}: ${formatMoney(account.unrealizedPnl, account.currency)}`;
     const positions = this.options.engine.getPositions();
+    const ticketPositions = el<HTMLElement>('ticket-positions');
+    ticketPositions.hidden = positions.length === 0;
+    el<HTMLElement>('ticket-position-rows').innerHTML = positions.map((position) => {
+      const spec = position.instrument ?? this.options.engine.getInstrument(position.symbol);
+      return `<div class="ticket-position-row">
+        <span><strong>${safe(position.symbol)}</strong> · ${formatQuantity(position.volume, spec)} ${safe(spec.unit)}
+          <small>${formatMoney(position.unrealizedPnl, spec.currency)}</small></span>
+        <button data-ticket-close="${safe(position.id)}">Đóng</button>
+      </div>`;
+    }).join('');
     const working = this.options.engine.getOrders().filter((order) => order.status === 'working');
+    el<HTMLElement>('ticket-orders').hidden = working.length === 0;
+    el<HTMLElement>('ticket-order-rows').innerHTML = working.map((order) => {
+      const spec = order.instrument ?? this.options.engine.getInstrument(order.symbol);
+      return `<div class="ticket-position-row">
+        <span><strong>${safe(order.symbol)}</strong> · ${safe(order.type)} ${safe(order.side)}
+          <small>${formatQuantity(order.volume, spec)} ${safe(spec.unit)} @ ${formatPrice(order.price)}</small></span>
+        <button data-ticket-cancel="${safe(order.id)}">Hủy</button>
+      </div>`;
+    }).join('');
     el<HTMLElement>('positions-count').textContent = positions.length ? String(positions.length) : '';
     el<HTMLElement>('orders-count').textContent = working.length ? String(working.length) : '';
     el<HTMLButtonElement>('close-all').disabled = positions.length === 0;
@@ -446,8 +574,8 @@ export class TradingWorkspace {
       const positions = this.options.engine.getPositions();
       this.blotterTable.innerHTML = positions.length
         ? `<table><thead><tr><th>Mã</th><th>Phía</th><th>KL</th><th>Giá vào</th><th>Hiện tại</th><th>P&amp;L</th><th>SL / TP</th><th></th></tr></thead><tbody>${positions.map((position) => `<tr>
-          <td><strong>${safe(position.symbol)}</strong></td><td class="${position.side}">${position.side === 'buy' ? 'Mua' : 'Bán'}</td><td>${formatMoney(position.volume)}</td>
-          <td>${formatPrice(position.entryPrice)}</td><td>${formatPrice(position.currentPrice)}</td><td class="${position.unrealizedPnl >= 0 ? 'up' : 'down'}">${position.unrealizedPnl >= 0 ? '+' : ''}${formatMoney(position.unrealizedPnl)}</td>
+          <td><strong>${safe(position.symbol)}</strong></td><td class="${position.side}">${position.side === 'buy' ? 'Mua' : 'Bán'}</td><td>${formatQuantity(position.volume, position.instrument ?? this.options.engine.getInstrument(position.symbol))}</td>
+          <td>${formatPrice(position.entryPrice)}</td><td>${formatPrice(position.currentPrice)}</td><td class="${position.unrealizedPnl >= 0 ? 'up' : 'down'}">${position.unrealizedPnl >= 0 ? '+' : ''}${formatMoney(position.unrealizedPnl, position.pnlCurrency ?? position.instrument?.currency)}</td>
           <td>${formatPrice(position.stopLoss)} / ${formatPrice(position.takeProfit)}</td><td><button data-row-action="close" data-row-id="${position.id}">Đóng</button></td>
         </tr>`).join('')}</tbody></table>`
         : '<div class="empty-state">Chưa có vị thế paper</div>';
@@ -457,7 +585,7 @@ export class TradingWorkspace {
       const orders = this.options.engine.getOrders();
       this.blotterTable.innerHTML = orders.length
         ? `<table><thead><tr><th>Mã</th><th>Phía</th><th>Loại</th><th>KL</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead><tbody>${orders.map((order: PaperOrder) => `<tr>
-          <td><strong>${safe(order.symbol)}</strong></td><td class="${order.side}">${order.side === 'buy' ? 'Mua' : 'Bán'}</td><td>${safe(order.type)}</td><td>${formatMoney(order.volume)}</td>
+          <td><strong>${safe(order.symbol)}</strong></td><td class="${order.side}">${order.side === 'buy' ? 'Mua' : 'Bán'}</td><td>${safe(order.type)}</td><td>${formatQuantity(order.volume, order.instrument ?? this.options.engine.getInstrument(order.symbol))}</td>
           <td>${formatPrice(order.fillPrice ?? order.price)}</td><td>${safe(order.status)}</td><td>${order.status === 'working' ? `<button data-row-action="modify" data-row-id="${order.id}">Sửa</button><button data-row-action="cancel" data-row-id="${order.id}">Hủy</button>` : ''}</td>
         </tr>`).join('')}</tbody></table>`
         : '<div class="empty-state">Chưa có lệnh paper</div>';
@@ -467,7 +595,7 @@ export class TradingWorkspace {
     this.blotterTable.innerHTML = trades.length
       ? `<table><thead><tr><th>Thời gian</th><th>Mã</th><th>Phía</th><th>KL</th><th>Vào</th><th>Ra</th><th>P&amp;L</th><th>Lý do</th></tr></thead><tbody>${trades.map((trade) => `<tr>
         <td>${new Date(trade.closedAt).toLocaleString(localeTag())}</td><td><strong>${safe(trade.symbol)}</strong></td><td class="${trade.side}">${trade.side === 'buy' ? tr('Mua') : tr('Bán')}</td>
-        <td>${formatMoney(trade.volume)}</td><td>${formatPrice(trade.entryPrice)}</td><td>${formatPrice(trade.exitPrice)}</td><td class="${trade.pnl >= 0 ? 'up' : 'down'}">${trade.pnl >= 0 ? '+' : ''}${formatMoney(trade.pnl)}</td><td>${safe(trade.reason)}</td>
+        <td>${formatQuantity(trade.volume, this.options.engine.getInstrument(trade.symbol))}</td><td>${formatPrice(trade.entryPrice)}</td><td>${formatPrice(trade.exitPrice)}</td><td class="${trade.pnl >= 0 ? 'up' : 'down'}">${trade.pnl >= 0 ? '+' : ''}${formatMoney(trade.pnl, trade.pnlCurrency)}</td><td>${safe(trade.reason)}</td>
       </tr>`).join('')}</tbody></table>`
       : '<div class="empty-state">Chưa có lịch sử khớp lệnh</div>';
   }

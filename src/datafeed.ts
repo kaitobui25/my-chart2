@@ -40,6 +40,8 @@ export interface Datafeed {
    * Returns an unsubscribe function.
    */
   subscribe(symbol: string, interval: string, onCandle: (c: Candle) => void): () => void;
+  /** Optional one-shot refresh after a live subscription starts (scheduled polling continues normally). */
+  refreshQuotes?(): Promise<void>;
   /**
    * Optional lifecycle hook fired when the realtime transport connects again.
    * Consumers can backfill a historical gap without opening another stream.

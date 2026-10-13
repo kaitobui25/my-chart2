@@ -276,6 +276,24 @@ describe('YFinanceJapanDatafeed', () => {
     feed.dispose();
   });
 
+  it('primes a new chart quote immediately while retaining the normal 60-second poll', async () => {
+    vi.useFakeTimers();
+    const candle = { time: 1_754_860_800, open: 100, high: 105, low: 99, close: 103, volume: 1_000 };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      candles: { '7203.T': candle },
+    }), { status: 200 })) as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    const onCandle = vi.fn();
+    const unsubscribe = feed.subscribe('7203.T', '1d', onCandle);
+    await feed.refreshQuotes();
+    expect(onCandle).toHaveBeenCalledWith(candle);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    feed.dispose();
+  });
+
   it.each([
     ['1m', '2026-10-06T09:00:00+09:00', '2026-10-06T09:01:00+09:00', '2026-10-06T09:02:00+09:00'],
     ['5m', '2026-10-06T09:00:00+09:00', '2026-10-06T09:05:00+09:00', '2026-10-06T09:10:00+09:00'],

@@ -368,6 +368,11 @@ export class YFinanceJapanDatafeed implements Datafeed {
     };
   }
 
+  /** Prime a new chart immediately without changing the 60-second polling cadence. */
+  async refreshQuotes(): Promise<void> {
+    await this.poll();
+  }
+
   dispose(): void {
     this.disposed = true;
     this.subscriptions.clear();

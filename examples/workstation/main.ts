@@ -984,7 +984,7 @@ function saveDrawings(symbol: string, interval: string, drawings: SerializedDraw
   writeStoredJson(drawingsStorageKey(symbol, interval), drawings);
 }
 
-function quoteFromCandle(symbol: string, candle: Candle, reference: number, source: string): MarketQuote {
+function quoteFromCandle(symbol: string, candle: Candle, reference: number, source: string, tradable = true): MarketQuote {
   const change = candle.close - reference;
   return {
     symbol: symbol.toUpperCase(),
@@ -996,6 +996,7 @@ function quoteFromCandle(symbol: string, candle: Candle, reference: number, sour
     changePct: reference ? (change / reference) * 100 : 0,
     time: candle.time,
     source,
+    tradable,
   };
 }
 
@@ -1332,6 +1333,7 @@ function setActiveProvider(provider: PriceProviderId): void {
   reloadAllTiles();
   tradingWorkspace?.setSourceLabel(currentFeed().label);
   syncWatchlistFeeds();
+  syncPaperFxFeed();
 }
 
 function disableActiveProvider(): void {
@@ -1343,6 +1345,7 @@ function disableActiveProvider(): void {
   reloadAllTiles();
   tradingWorkspace?.setSourceLabel(tr('Tắt'));
   syncWatchlistFeeds();
+  syncPaperFxFeed();
 }
 
 function currentFeed(): { feed: Datafeed | null; label: string; unavailable: string | null } {
@@ -1404,7 +1407,6 @@ function syncWatchlistFeeds(seedSymbols: string[] = []): void {
       lastTime: 0,
     });
   }
-
   const publishWatchlistCandle = (feedSymbol: string, candle: Candle) => {
     const state = watchlistSymbols.get(feedSymbol.toUpperCase());
     if (!state || generation !== watchlistGeneration) return;
@@ -1455,7 +1457,7 @@ function syncWatchlistFeeds(seedSymbols: string[] = []): void {
         state.lastTime = last.time;
         for (const symbol of state.symbols) {
           marketHub.update(preserveDepth(
-            quoteFromCandle(symbol, last, state.previousClose, provider.label),
+            quoteFromCandle(symbol, last, state.previousClose, provider.label, false),
             marketHub.get(symbol),
           ));
         }
@@ -1476,6 +1478,32 @@ function syncWatchlistFeeds(seedSymbols: string[] = []): void {
     });
     watchlistUnsubscribers.push(unsubscribe);
   }
+}
+
+let paperFxGeneration = 0;
+let unsubscribePaperFx: (() => void) | null = null;
+
+function syncPaperFxFeed(): void {
+  const generation = ++paperFxGeneration;
+  unsubscribePaperFx?.();
+  unsubscribePaperFx = null;
+  const provider = currentFeed();
+  if (!provider.feed || provider.label !== 'Yahoo Japan') return;
+
+  const publish = (candle: Candle, tradable: boolean) => {
+    if (generation !== paperFxGeneration) return;
+    const previous = marketHub.get('JPY=X');
+    if (!tradable && previous?.source === provider.label && previous.tradable !== false
+      && previous.time >= candle.time) return;
+    marketHub.update(quoteFromCandle('JPY=X', candle, candle.open, provider.label, tradable));
+  };
+  unsubscribePaperFx = provider.feed.subscribe('JPY=X', '1d', (candle) => publish(candle, true));
+  void provider.feed.getHistory('JPY=X', '1d', 2).then((candles) => {
+    const last = candles[candles.length - 1];
+    if (last) publish(last, false);
+  }).catch(() => {
+    // Keep the live subscription running; a later Yahoo poll can restore the FX rate.
+  });
 }
 
 function reloadAllTiles(): void {
@@ -2601,10 +2629,10 @@ class Tile implements ReplayParticipant {
     this.applyLocalQuote(quoteFromCandle(this.symbol, candle, reference, 'Replay'));
   }
 
-  private publishCandle(candle: Candle, source: string): void {
+  private publishCandle(candle: Candle, source: string, tradable = true): void {
     const candles = this.chart.getCandles();
     const reference = candles[candles.length - 2]?.close ?? candle.open;
-    const quote = preserveDepth(quoteFromCandle(this.symbol, candle, reference, source), this.latestQuote);
+    const quote = preserveDepth(quoteFromCandle(this.symbol, candle, reference, source, tradable), this.latestQuote);
     this.applyLocalQuote(quote);
     marketHub.update(quote);
   }
@@ -2836,7 +2864,7 @@ class Tile implements ReplayParticipant {
       this.chart.setData(this.history.map((candle) => ({ ...candle })));
       if (wasAtEnd) this.chart.scrollToLatest();
       const latest = this.history[this.history.length - 1];
-      if (latest) this.publishCandle(latest, provider.label);
+      if (latest) this.publishCandle(latest, provider.label, false);
       if (activeTile === this) syncRangeUi();
     } catch (error) {
       console.warn(`Unable to backfill realtime gap for ${symbol} ${interval}`, error);
@@ -2908,7 +2936,7 @@ class Tile implements ReplayParticipant {
         this.history = candles.map((candle) => ({ ...candle }));
         this.chart.setData(this.history.map((candle) => ({ ...candle })));
         if (fitContent) this.chart.fitContent();
-        this.publishCandle(this.history[this.history.length - 1], provider.label);
+        this.publishCandle(this.history[this.history.length - 1], provider.label, false);
       };
 
       let cached: Candle[] = [];
@@ -2991,6 +3019,7 @@ class Tile implements ReplayParticipant {
         this.publishCandle(candle, provider.label);
         this.setFeedStatus('live', `${provider.label} · ${new Date(candle.time * 1000).toLocaleTimeString()}`);
       });
+      if (provider.label === 'Yahoo Japan') void provider.feed.refreshQuotes?.();
       this.quoteUnsubscribe = provider.feed.subscribeQuotes?.([symbol], (quote) => {
         if (token !== this.loadToken || this.replayActive) return;
         this.publishDepth(quote, provider.label);
@@ -5612,6 +5641,7 @@ tradingWorkspace = new TradingWorkspace({
 });
 tradingWorkspace.setSourceLabel(currentFeed().label);
 syncWatchlistFeeds();
+syncPaperFxFeed();
 setupToolbarOverflow();
 configureAutoSaveTimer();
 
