@@ -29,6 +29,20 @@ The **Watch List** tab keeps a small persisted list of Tokyo symbols next to the
 
 Watch List code is split into configuration, persistence, market-data, view, and controller modules so storage/UI/provider concerns can evolve independently.
 
+## Paper trading in Excel
+
+The **Trade** tab runs the same `MarketHub`, `PaperTradingEngine` and instrument specifications as the standalone workstation. This is **paper trading only**; it never submits an order to a broker or to an Excel worksheet.
+
+- Select `7203.T` (Toyota), `BTC-USD` (minimum/step **0.001 BTC**), `JPY=X` (0.01 forex lot), `GC=F` (1 futures contract), or the Japanese equity currently selected on the chart.
+- Submit **Market**, **Limit**, or **Stop** paper orders with optional take-profit and stop-loss. A confirmation dialog shows the order size and expected margin.
+- The account displays balance, equity, used margin, and available margin in USD for Yahoo instruments. The USD/JPY price is subscribed in the background for JPY conversions.
+- Open positions can be closed, working orders cancelled, and the last 30 closed trades inspected directly in the tab. Spread, slippage and per-side fees in basis points are optional; the defaults are zero.
+- Market quotes are obtained from the Yahoo datafeed independently of the chart and are kept subscribed for working orders/open positions even while displaying a different symbol, a Sheet selection, or chart Replay. **Sheet and Replay prices are never used for fills.**
+- State is persisted with `l2chart.paper.v2` in the Excel content add-in's browser storage and restored on reload. It uses the same data schema as the workstation; different origins/webview storage are **not automatically synchronized**.
+- Trading is blocked when required market quotes are stale or when the basic session check says the market is closed. Yahoo OHLCV polling and synthetic execution cannot reproduce broker bid/ask, real liquidity, holidays, or futures rollover.
+
+Run `npm run test:excel-trading` for a deterministic browser smoke (with mocked Yahoo prices). It tests a full 0.001 BTC purchase, reload, close, Limit cancellation and forex/futures instrument controls. No Excel desktop host is required for this test.
+
 ## Bar Replay
 
 The chart toolbar's **Replay** action works with both Japan market history and an Excel **Sheet** OHLC(V) selection:

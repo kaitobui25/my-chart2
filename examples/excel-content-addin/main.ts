@@ -14,6 +14,8 @@ import {
 import { JapanMarketController } from './japan-market-controller';
 import { MarketSelectionStore } from './market-selection-store';
 import { ExcelOptionsController } from './options-controller';
+import { ExcelPaperMarketBridge } from './paper-market-bridge';
+import { ExcelPaperTradingController } from './paper-trading-controller';
 import { candlesFromRange, inferCandleIntervalSeconds } from './ohlc-range';
 import { excelRangeOptions, excelStealthChartOptions, excelStealthUi } from './stealth-preset';
 import { createSymbolCombobox } from './symbol-combobox';
@@ -40,10 +42,12 @@ const indicatorTriggerLabel = requiredElement<HTMLElement>('#indicator-trigger-l
 const indicatorMenu = requiredElement<HTMLElement>('#indicator-menu');
 const chartTab = requiredElement<HTMLButtonElement>('#chart-tab');
 const watchlistTab = requiredElement<HTMLButtonElement>('#watchlist-tab');
+const tradeTab = requiredElement<HTMLButtonElement>('#trade-tab');
 const optionsTab = requiredElement<HTMLButtonElement>('#options-tab');
 const exportButton = requiredElement<HTMLButtonElement>('#export-button');
 const chartViewElement = requiredElement<HTMLElement>('#chart-view');
 const watchlistViewElement = requiredElement<HTMLElement>('#watchlist-view');
+const tradeViewElement = requiredElement<HTMLElement>('#trade-view');
 const optionsViewElement = requiredElement<HTMLElement>('#options-view');
 const watchlistSymbolControl = requiredElement<HTMLElement>('#watchlist-symbol-control');
 const watchlistInput = requiredElement<HTMLInputElement>('#watchlist-symbol-input');
@@ -57,6 +61,8 @@ const indicatorSettings = new IndicatorSettingsDialog(indicators, () => {
   setPersistentStatus(statusMessage);
 });
 const market = new JapanMarketController(chart);
+const paperMarket = new ExcelPaperMarketBridge(market.getDatafeed());
+const paperTrading = new ExcelPaperTradingController(tradeViewElement, paperMarket);
 const marketSelectionStore = new MarketSelectionStore();
 const optionsController = new ExcelOptionsController({
   chart,
@@ -142,9 +148,11 @@ watchlist = new WatchListController({
 viewTabs = bindViewTabs({
   chartTab,
   watchlistTab,
+  tradeTab,
   optionsTab,
   chartView: chartViewElement,
   watchlistView: watchlistViewElement,
+  tradeView: tradeViewElement,
   optionsView: optionsViewElement,
   onChange: (view) => {
     if (view !== 'chart') {
@@ -152,6 +160,7 @@ viewTabs = bindViewTabs({
       replay?.pause();
     }
     watchlist.setActive(view === 'watchlist');
+    if (view === 'trade') paperTrading.refresh();
   },
 });
 const offVisibleRange = chart.onVisibleRangeChange(({ from, to }) => {
@@ -224,6 +233,8 @@ window.addEventListener('beforeunload', () => {
   replay?.dispose();
   symbolCombobox.dispose();
   viewTabs.dispose();
+  paperTrading.dispose();
+  paperMarket.dispose();
   watchlist.dispose();
   assistant.dispose();
   offIndicatorSettings();
@@ -273,6 +284,7 @@ async function reloadMarket(): Promise<void> {
     symbolInput.value = result.symbol;
     timeframeSelect.value = result.timeframe;
     marketSelectionStore.update({ symbol: result.symbol, timeframe: result.timeframe });
+    paperTrading.setMarketSymbol(result.symbol);
     activeSource = 'market';
     assistant.refreshContext();
     watchlist.setActiveSymbol(result.symbol);

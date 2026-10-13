@@ -63,6 +63,7 @@
     "test:assistant-sidecar": "node --test examples/sidecars/assistant/tests/*.test.mjs",
     "test:browser": "playwright test --config config/playwright.config.ts",
     "test:excel-replay": "npm run build:excel && node tests/browser/excel-replay.smoke.mjs",
+    "test:excel-trading": "npm run build:excel && node tests/browser/excel-trading.smoke.mjs",
     "test:browser:serve": "vite --config tests/browser/vite.config.ts",
     "test:package": "node scripts/verify-package.mjs",
     "test:sidecar": "node scripts/run-python-unittest.mjs examples/sidecars/fiinquant",

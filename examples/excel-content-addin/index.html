@@ -13,6 +13,7 @@
         <nav class="view-tabs" role="tablist" aria-label="Chế độ hiển thị">
           <button id="chart-tab" type="button" role="tab" aria-controls="chart-view" aria-selected="true">Chart</button>
           <button id="watchlist-tab" type="button" role="tab" aria-controls="watchlist-view" aria-selected="false">Watch List</button>
+          <button id="trade-tab" type="button" role="tab" aria-controls="trade-view" aria-selected="false">Trade</button>
           <button id="options-tab" type="button" role="tab" aria-controls="options-view" aria-selected="false">Option</button>
         </nav>
         <button id="export-button" type="button" title="Xuất nến và kết quả SMC trong vùng chart đang xem">Export</button>
@@ -162,6 +163,80 @@
           <div id="watchlist-empty" class="watchlist-empty" hidden>Chưa có mã trong Watch List.</div>
         </section>
 
+        <section id="trade-view" class="view-panel trade-view" role="tabpanel" aria-labelledby="trade-tab" hidden>
+          <header class="trade-header">
+            <strong>Paper trading</strong>
+            <span>Yahoo Finance · không gửi lệnh tới broker</span>
+          </header>
+          <div class="trade-content">
+            <section class="trade-card">
+              <div class="trade-account-grid" aria-label="Paper account">
+                <div><small>Equity</small><strong id="trade-equity">--</strong></div>
+                <div><small>Balance</small><strong id="trade-balance">--</strong></div>
+                <div><small>Margin</small><strong id="trade-margin">--</strong></div>
+                <div><small>Available</small><strong id="trade-available">--</strong></div>
+              </div>
+              <small id="trade-account-note" role="status"></small>
+            </section>
+            <section class="trade-card">
+              <div class="trade-fields">
+                <label>Mã giao dịch
+                  <select id="trade-symbol" aria-label="Mã giao dịch">
+                    <option value="7203.T">7203.T · Toyota</option>
+                    <option value="BTC-USD">BTC-USD · Bitcoin</option>
+                    <option value="JPY=X">JPY=X · USD/JPY</option>
+                    <option value="GC=F">GC=F · Gold Futures</option>
+                  </select>
+                </label>
+                <div class="trade-quote"><span>Giá Yahoo</span><strong id="trade-quote">Đang tải…</strong></div>
+                <label>Phía
+                  <select id="trade-side"><option value="buy">Mua / Long</option><option value="sell">Bán / Short</option></select>
+                </label>
+                <label>Loại lệnh
+                  <select id="trade-type"><option value="market">Market</option><option value="limit">Limit</option><option value="stop">Stop</option></select>
+                </label>
+                <label>Khối lượng <small id="trade-unit">cp</small>
+                  <input id="trade-volume" type="number" min="100" step="100" value="100" />
+                </label>
+                <label id="trade-price-row" hidden>Giá đặt lệnh
+                  <input id="trade-price" type="number" min="0" step="0.5" />
+                </label>
+                <label>Take profit
+                  <input id="trade-tp" type="number" min="0" step="0.5" placeholder="Tùy chọn" />
+                </label>
+                <label>Stop loss
+                  <input id="trade-sl" type="number" min="0" step="0.5" placeholder="Tùy chọn" />
+                </label>
+              </div>
+              <small id="trade-rules"></small>
+              <small id="trade-estimate">Đang chờ giá…</small>
+              <details class="trade-execution">
+                <summary>Mô phỏng spread, trượt giá và phí (bps)</summary>
+                <div class="trade-fields">
+                  <label>Spread <input id="trade-spread" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+                  <label>Slippage <input id="trade-slippage" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+                  <label>Phí mỗi phía <input id="trade-commission" type="number" min="0" max="1000" step="0.1" value="0" /></label>
+                </div>
+              </details>
+              <button id="trade-submit" class="trade-primary" type="button">Đặt lệnh paper</button>
+              <small id="trade-status" role="status" aria-live="polite"></small>
+            </section>
+            <section class="trade-card">
+              <strong>Vị thế đang mở</strong>
+              <div id="trade-positions" class="trade-rows"></div>
+            </section>
+            <section class="trade-card">
+              <strong>Lệnh đang chờ</strong>
+              <div id="trade-orders" class="trade-rows"></div>
+            </section>
+            <section class="trade-card">
+              <strong>Lịch sử giao dịch</strong>
+              <div id="trade-history" class="trade-rows"></div>
+            </section>
+            <small class="trade-footnote">Giá OHLCV Yahoo có thể trễ; spread mặc định 0. Lệnh paper chỉ mô phỏng, không dùng dữ liệu Sheet/Replay để khớp.</small>
+          </div>
+        </section>
+
         <section id="options-view" class="view-panel options-view" role="tabpanel" aria-labelledby="options-tab" hidden>
           <div class="options-card">
             <label class="option-toggle" for="candles-on-hover-only">
@@ -194,6 +269,16 @@
           <span></span>
           <button id="param-cancel" type="button">Hủy</button>
           <button id="param-ok" type="button">OK</button>
+        </footer>
+      </section>
+    </div>
+    <div id="trade-confirm-overlay" class="trade-confirm-overlay" hidden>
+      <section class="trade-confirm-box" role="dialog" aria-modal="true" aria-labelledby="trade-confirm-title">
+        <strong id="trade-confirm-title">Xác nhận lệnh paper</strong>
+        <p id="trade-confirm-summary"></p>
+        <footer>
+          <button id="trade-confirm-cancel" type="button">Quay lại</button>
+          <button id="trade-confirm-submit" type="button">Xác nhận</button>
         </footer>
       </section>
     </div>
