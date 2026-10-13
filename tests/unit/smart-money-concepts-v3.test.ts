@@ -1,15 +1,121 @@
-import { describe, expect, it } from 'vitest';
-import type { Candle } from '../../src/core/types';
+import { describe, expect, it, vi } from 'vitest';
+import type { L2Chart } from '../../src/core/chart';
+import type { RenderContext } from '../../src/core/series';
+import { OverlaySeries } from '../../src/core/series';
+import { TimeScale } from '../../src/core/time-scale';
+import { PriceScale } from '../../src/core/price-scale';
+import { darkTheme, type Candle } from '../../src/core/types';
 import { defaultParams } from '../../src/indicators/registry';
 import v2 from '../../src/indicators/builtin/smart-money-concepts-v2';
 import v3 from '../../src/indicators/builtin/smart-money-concepts-v3';
-import { calculateSmartMoneyConceptsV2, type SmcV2Options, type SmcV2Pivot } from '../../src/indicators/builtin/smart-money-concepts-v2-model';
+import { calculateSmartMoneyConceptsV2, type SmcV2BarState, type SmcV2Options, type SmcV2Pivot, type SmcV2Result } from '../../src/indicators/builtin/smart-money-concepts-v2-model';
 import { calculateSmartMoneyConceptsV3, createProtectedStructurePolicy } from '../../src/indicators/builtin/smart-money-concepts-v3-model';
+import { alignedStructureBias, drawAlignedStructureBackground } from '../../src/indicators/builtin/smart-money-concepts-v3-trend';
 
 const pivot = (price: number, index: number, high = false): SmcV2Pivot => ({
   price, index, confirmedAt: index + 1, direction: high ? 'bearish' : 'bullish', label: high ? 'HH' : 'HL',
 });
 const bar = (high: number, low: number): Candle => ({ time: 0, open: (high + low) / 2, close: (high + low) / 2, high, low });
+
+function backgroundFixture() {
+  const fills: Array<{ x: number; y: number; width: number; height: number; color: string; alpha: number }> = [];
+  const stack: Array<{ alpha: number; color: string }> = [];
+  const ctx = {
+    globalAlpha: 0.8, fillStyle: '#000000', strokeStyle: '#000000',
+    save() { stack.push({ alpha: this.globalAlpha, color: this.fillStyle }); },
+    restore() { const previous = stack.pop()!; this.globalAlpha = previous.alpha; this.fillStyle = previous.color; },
+    fillRect(x: number, y: number, width: number, height: number) {
+      fills.push({ x, y, width, height, color: this.fillStyle, alpha: this.globalAlpha });
+    },
+    beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), setLineDash: vi.fn(), fillText: vi.fn(),
+  };
+  const ts = new TimeScale(); ts.setWidth(800);
+  const ps = new PriceScale(); ps.setHeight(400); ps.setRange(50, 150);
+  const context = { ctx: ctx as unknown as CanvasRenderingContext2D, ts, ps, from: 0, to: 0,
+    paneWidth: 800, paneHeight: 400, legendWidth: 0, legendHeight: 0, theme: darkTheme } satisfies RenderContext;
+  return { context, fills, ctx, stack };
+}
+
+describe('SMC V3 aligned Internal / Swing background', () => {
+  it.each([
+    [1, 1, 1], [-1, -1, -1], [1, -1, 0], [-1, 1, 0],
+    [0, 1, 0], [-1, 0, 0], [0, 0, 0],
+  ] as const)('aligns Internal=%i, Swing=%i to %i', (internal, swing, expected) => {
+    expect(alignedStructureBias(internal, swing)).toBe(expected);
+  });
+
+  it('paints only matching non-neutral bars, respecting colors, opacity and viewport', () => {
+    const { context, fills, ctx, stack } = backgroundFixture();
+    const states = ([[0, 0], [1, 1], [1, -1], [-1, -1], [0, -1], [1, 0], [-1, -1]] as const)
+      .map(([internalBias, bias], index) => ({ index, internalBias, bias }) as SmcV2BarState);
+    const colors = { bullish: '#11aa11', bearish: '#aa1111', opacity: 25 };
+    context.to = states.length - 1;
+    drawAlignedStructureBackground(context, states, colors);
+    expect(fills.map(fill => fill.color)).toEqual(['#11aa11', '#aa1111', '#aa1111']);
+    expect(fills.map(fill => fill.alpha)).toEqual([0.2, 0.2, 0.2]);
+    expect(fills.every(fill => fill.y === 0 && fill.height === 400 && fill.width === context.ts.barSpacing)).toBe(true);
+    expect(fills.map(fill => fill.x)).toEqual([1, 3, 6].map(i => context.ts.xForIndex(i) - context.ts.barSpacing / 2));
+    expect(ctx.globalAlpha).toBe(0.8);
+    expect(ctx.fillStyle).toBe('#000000');
+    expect(stack).toHaveLength(0);
+
+    fills.length = 0;
+    context.from = 2; context.to = 5;
+    drawAlignedStructureBackground(context, states, colors);
+    expect(fills.map(fill => fill.color)).toEqual(['#aa1111']);
+    fills.length = 0;
+    drawAlignedStructureBackground(context, states, { ...colors, opacity: 0 });
+    expect(fills).toEqual([]);
+  });
+
+  it('is opt-in for V3 only and does not change any V2 settings', () => {
+    const keys = v3.params?.map(param => param.key) ?? [];
+    expect(defaultParams(v3)).toMatchObject({ showAlignedTrendBackground: false,
+      alignedTrendBullColor: '#089981', alignedTrendBearColor: '#f23645', alignedTrendOpacity: 15 });
+    for (const key of ['showAlignedTrendBackground', 'alignedTrendBullColor', 'alignedTrendBearColor', 'alignedTrendOpacity']) {
+      expect(keys).toContain(key);
+      expect(v2.params?.some(param => param.key === key)).toBe(false);
+    }
+  });
+
+  it('draws only aligned V3 background despite enabled legacy backgrounds, and restores them when disabled', () => {
+    const candles = Array.from({ length: 260 }, (_, i) => {
+      const center = 100 + 15 * Math.sin(i * 0.16) + 5 * Math.sin(i * 0.044);
+      return { ...bar(center + 2, center - 2), time: i * 60 };
+    });
+    const options = { ...defaultParams(v3), internalLength: 3, swingLength: 12,
+      showInternal: false, showSwing: false, internalLine: false, swingLine: false,
+      showInternalOrderBlocks: false, showSwingOrderBlocks: false, showFairValueGaps: false,
+      showEqualLevels: false, showStrongWeak: false, showPremiumDiscount: false, showFib: false,
+      internalTrend: 'background', swingTrend: 'background',
+      showAlignedTrendBackground: true, alignedTrendBullColor: '#22aa22', alignedTrendBearColor: '#aa2222',
+      alignedTrendOpacity: 30 };
+    let overlay!: OverlaySeries;
+    const chart = { getCandles: () => candles, getIntervalSec: () => 60,
+      addOverlay: (settings: ConstructorParameters<typeof OverlaySeries>[0]) => (overlay = new OverlaySeries(settings)),
+      removeSeries: vi.fn() };
+    const render = (enabled: boolean) => {
+      const instance = v3.create(chart as unknown as L2Chart, { ...options, showAlignedTrendBackground: enabled });
+      const result = instance.getDebugSnapshot?.().result as SmcV2Result;
+      const fixture = backgroundFixture();
+      fixture.context.to = candles.length - 1;
+      overlay.draw(fixture.context);
+      instance.remove();
+      return { result, fills: fixture.fills };
+    };
+    const aligned = render(true);
+    const expected = aligned.result.barStates.map(state => alignedStructureBias(state.internalBias, state.bias))
+      .filter(bias => bias !== 0);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(expected.length).toBeLessThan(candles.length);
+    expect(aligned.fills.map(fill => fill.color)).toEqual(expected.map(bias => bias === 1 ? '#22aa22' : '#aa2222'));
+    expect(aligned.fills.every(fill => fill.alpha === 0.24)).toBe(true);
+
+    const legacy = render(false);
+    expect(legacy.fills).toHaveLength(candles.length);
+    expect(legacy.fills.every(fill => fill.color !== '#22aa22' && fill.color !== '#aa2222')).toBe(true);
+  });
+});
 
 describe('SMC V3 protected structure', () => {
   it.each([['swing', false], ['swing', true], ['internal', false], ['internal', true]] as const)('ignores minor pivots until promotion, scope=%s mirrored=%s', (scope, mirrored) => {

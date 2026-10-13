@@ -16,6 +16,7 @@ import {
   smcV2PremiumDiscountZones,
   type SmcV2Options,
 } from './smart-money-concepts-v2-model';
+import { drawAlignedStructureBackground } from './smart-money-concepts-v3-trend';
 
 function toggle(key: string, label: string, section: string, value = true): ParamDef {
   return { key, label, type: 'boolean', default: value, section };
@@ -416,16 +417,28 @@ function drawSmcV2(
     internalTrendBear: string;
     swingTrendBull: string;
     swingTrendBear: string;
+    alignedTrendBackground: boolean;
+    alignedTrendBullColor: string;
+    alignedTrendBearColor: string;
+    alignedTrendOpacity: number;
   },
   candles: readonly Candle[],
 ): void {
+  if (display.alignedTrendBackground) {
+    drawAlignedStructureBackground(rc, data.barStates, {
+      bullish: display.alignedTrendBullColor,
+      bearish: display.alignedTrendBearColor,
+      opacity: display.alignedTrendOpacity,
+    });
+  }
   // Pine plots trend colors before updating structure bias on this bar.
   for (let index = rc.from; index <= rc.to && index < candles.length; index++) {
     const previous = data.barStates[index - 1];
     const colorFor = (scope: 'internal' | 'swing') => scope === 'internal'
       ? (previous?.internalBias === 1 ? display.internalTrendBull : display.internalTrendBear)
       : (previous?.bias === 1 ? display.swingTrendBull : display.swingTrendBear);
-    const backgroundScope = display.internalTrend === 'background' ? 'internal' : display.swingTrend === 'background' ? 'swing' : null;
+    const backgroundScope = display.alignedTrendBackground ? null
+      : display.internalTrend === 'background' ? 'internal' : display.swingTrend === 'background' ? 'swing' : null;
     const candleScope = display.internalTrend === 'candles' ? 'internal' : display.swingTrend === 'candles' ? 'swing' : null;
     if (!backgroundScope && !candleScope) break;
     const { ctx, ts, ps } = rc;
@@ -558,6 +571,7 @@ function drawSmcV2(
 export function createSmcIndicator(
   identity: { id: string; name: string; title: string; order: number },
   calculate: typeof calculateSmartMoneyConceptsV2 = (candles, options) => calculateSmartMoneyConceptsV2(candles, options),
+  features: { alignedTrendBackground?: boolean } = {},
 ): IndicatorDef {
 const def: IndicatorDef = {
   id: identity.id,
@@ -570,6 +584,12 @@ const def: IndicatorDef = {
       colorParam(`${scope}TrendBull`, 'Bullish', '#089981', 'Trend colors'),
       colorParam(`${scope}TrendBear`, 'Bearish', '#f23645', 'Trend colors'),
     ]),
+    ...(features.alignedTrendBackground ? [
+      toggle('showAlignedTrendBackground', 'Tô nền khi Internal và Swing đồng pha', 'Nền xu hướng đồng pha', false),
+      colorParam('alignedTrendBullColor', 'Màu nền cùng tăng', '#089981', 'Nền xu hướng đồng pha'),
+      colorParam('alignedTrendBearColor', 'Màu nền cùng giảm', '#f23645', 'Nền xu hướng đồng pha'),
+      numberParam('alignedTrendOpacity', 'Độ đậm nền (%)', 'int', 15, 'Nền xu hướng đồng pha', 0, 100, 1),
+    ] : []),
     ...(['D', 'W', 'M'] as const).flatMap(frame => [
       selection(`period${frame}Style`, `${frame} line style`, 'solid', [['solid', 'Solid'], ['dashed', 'Dashed'], ['dotted', 'Dotted']], 'Period levels'),
       colorParam(`period${frame}Color`, `${frame} color`, '#2157f3', 'Period levels'),
@@ -741,6 +761,10 @@ const def: IndicatorDef = {
       internalTrendBear: String(params.internalTrendBear ?? '#f23645'),
       swingTrendBull: String(params.swingTrendBull ?? '#089981'),
       swingTrendBear: String(params.swingTrendBear ?? '#f23645'),
+      alignedTrendBackground: features.alignedTrendBackground === true && params.showAlignedTrendBackground === true,
+      alignedTrendBullColor: String(params.alignedTrendBullColor ?? '#089981'),
+      alignedTrendBearColor: String(params.alignedTrendBearColor ?? '#f23645'),
+      alignedTrendOpacity: Number(params.alignedTrendOpacity ?? 15),
     };
     const requestedFvg = analysisOptions.showFairValueGaps && analysisOptions.fvgTimeframe !== 'chart';
     let data = calculate(chart.getCandles(), {

@@ -2,6 +2,12 @@
 
 Select **SMC V3 · Super SMC** in the indicator list (`smart-money-concepts-v3`). Swing structure is enabled by default; V2 remains available with its original calculation.
 
+### Aligned Internal / Swing background
+
+Enable **Nền xu hướng đồng pha → Tô nền khi Internal và Swing đồng pha** (off by default) to shade only bars where V3's Internal and Swing structure biases agree. Both biases come from the **same chart timeframe**, with default pivot lengths 5 (Internal) and 50 (Swing); they are *structure-size proxies*, not independent 5m/1h or other MTF signals. Matching bullish biases paint the configured green background, matching bearish biases paint red; opposite or neutral biases paint nothing. Color and opacity (0–100%) are configurable. The background uses each bar's causal V3 bias, including a BOS/CHoCH on that bar, and changes on an updating live candle may change until it closes.
+
+When enabled, aligned shading takes priority over the legacy Internal/Swing trend **background** settings to prevent overlapping fills. Legacy **candles** trend coloring remains independent. Disabling aligned shading restores the previous trend background behavior. V2 exposes no aligned-background option and is unchanged.
+
 V3 uses the same confirmed raw pivots as V2, but keeps independent protected levels for Internal and Swing, using their respective pivot lengths:
 
 - The first confirmed high and low initialize the structure.
