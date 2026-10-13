@@ -7,10 +7,10 @@ V3 uses the same confirmed raw pivots as V2, but keeps independent protected lev
 - The first confirmed high and low initialize the structure.
 - A new raw pivot does not replace an unbroken structure level.
 - After a high is broken, a newer confirmed higher high becomes the next high target; the low side is symmetric.
-- Breaking a structure high promotes the latest confirmed low if it is newer than the protected low. Breaking a structure low promotes the latest confirmed high in the same way.
+- Breaking a structure high finds the lowest confirmed pivot low since that high, and promotes it only when newer than the current protected low. Breaking a structure low mirrors this with the highest confirmed pivot high. Each break searches only pivots confirmed up to that bar.
 - Breaks use strict `high > level` / `low < level`. Equal touches do not count. BOS/CHoCH classification still depends on the prior trend.
 
-For example, a bullish break of 100 promotes a confirmed pullback at 95. A subsequent minor low at 99 does not become protected until another bullish structure break. Trading below 99 alone produces no Swing CHoCH; trading below 95 does.
+For example, after a high at 100, confirmed pullback lows at 90 and then 95 leave 90 as the main wave low. Breaking 100 protects 90, so a move below 95 alone is not a CHoCH. The next bullish structure break can protect a newer pullback in its own leg.
 
 Both Internal and Swing use protected pivots and strict wick breaks. Their state and trend biases are independent. Internal confluence remains an optional filter; matching a Swing price does not suppress an Internal break. Settings, rendering, timeframe requests, equal levels, FVG and order-block filtering/mitigation are shared. Both scopes' order blocks use V3's protected break origin. Internal and Swing connectors link their own V3 structural pivots and appear only when a structural anchor changes. Strong/Weak, Fibonacci and Premium/Discount use trailing extremes seeded/reset by V3 structural pivots; raw candidate pivots do not reset the range. Extremes still extend with price between promotions. Pivot labels continue to show raw pivots. An anchor promoted later becomes available at the promotion bar, without retroactively changing earlier ranges or connectors.
 

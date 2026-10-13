@@ -39,6 +39,51 @@ describe('SMC V3 protected structure', () => {
     expect(policy(next, minor, bar(102, 98), 7)).toMatchObject([{ type: 'CHoCH', price: 99 }]);
   });
 
+  it.each([false, true])('protects the main wave extreme instead of the latest minor pivot, mirrored=%s', mirrored => {
+    const policy = createProtectedStructurePolicy('internal');
+    const flip = (point: SmcV2Pivot, high: boolean) =>
+      mirrored ? pivot(200 - point.price, point.index, high) : point;
+    const step = (high: SmcV2Pivot, low: SmcV2Pivot, candle: Candle, index: number) =>
+      mirrored ? policy(flip(low, true), flip(high, false), bar(200 - candle.low, 200 - candle.high), index)
+        : policy(high, low, candle, index);
+    const high = pivot(100, 1, true), oldLow = pivot(80, 0);
+    const deepestLow = pivot(90, 3), recentLow = pivot(95, 5);
+    expect(step(high, oldLow, bar(99, 81), 2)).toEqual([]);
+    expect(step(high, deepestLow, bar(99, 91), 4)).toEqual([]);
+    expect(step(high, recentLow, bar(99, 96), 6)).toEqual([]);
+    expect(step(high, recentLow, bar(101, 96), 7)).toMatchObject([{ type: 'BOS', price: 100 }]);
+    expect(step(high, recentLow, bar(99, 94), 8)).toEqual([]);
+    expect(step(high, recentLow, bar(99, 89), 9)).toMatchObject([{
+      type: 'CHoCH', price: mirrored ? 110 : 90, originIndex: 3,
+    }]);
+  });
+
+  it('starts the opposite wave at the newly protected pivot after a break', () => {
+    const policy = createProtectedStructurePolicy('internal');
+    const high = pivot(100, 1, true), oldLow = pivot(80, 0);
+    const olderHigh = pivot(99, 4, true), mainLow = pivot(90, 6), newHigh = pivot(98, 8, true);
+    expect(policy(high, oldLow, bar(99, 81), 2)).toEqual([]);
+    expect(policy(olderHigh, oldLow, bar(99, 81), 5)).toEqual([]);
+    expect(policy(newHigh, mainLow, bar(99, 91), 9)).toEqual([]);
+    expect(policy(newHigh, mainLow, bar(101, 91), 10)).toMatchObject([{ type: 'BOS', price: 100 }]);
+    expect(policy(newHigh, mainLow, bar(99, 89), 11)).toMatchObject([{ type: 'CHoCH', price: 90 }]);
+    expect(policy(newHigh, mainLow, bar(99, 91), 12)).toMatchObject([{
+      type: 'CHoCH', price: 98, originIndex: 8,
+    }]);
+  });
+
+  it('does not replace the main low with a shallower pivot in the same wave', () => {
+    const policy = createProtectedStructurePolicy('internal');
+    const high = pivot(99, 4, true), mainLow = pivot(89, 7), minorLow = pivot(95, 9);
+    expect(policy(high, mainLow, bar(98, 90), 8)).toEqual([]);
+    expect(policy(high, minorLow, bar(98, 96), 10)).toEqual([]);
+    expect(policy(high, minorLow, bar(100, 96), 11)).toMatchObject([{ type: 'BOS', price: 99 }]);
+    expect(policy(high, minorLow, bar(98, 94), 12)).toEqual([]);
+    expect(policy(high, minorLow, bar(98, 88), 13)).toMatchObject([{
+      type: 'CHoCH', price: 89, originIndex: 7,
+    }]);
+  });
+
   it('uses protected Internal structure while sharing raw pivots and auxiliary calculations', () => {
     const options = { ...defaultParams(v2), swingLength: 2, internalLength: 1, equalLength: 2,
       showSwing: true, showSwingPivots: true, showInternalPivots: true } as unknown as SmcV2Options;

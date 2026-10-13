@@ -16,10 +16,26 @@ export function createProtectedStructurePolicy(
 ): SmcStructurePolicy {
   let high: ProtectedPivot | null = null;
   let low: ProtectedPivot | null = null;
+  const confirmedHighs: SmcV2Pivot[] = [];
+  const confirmedLows: SmcV2Pivot[] = [];
   let bias: -1 | 0 | 1 = 0;
   const protect = (pivot: SmcV2Pivot): ProtectedPivot => ({ ...pivot, crossed: false });
+  const remember = (pivots: SmcV2Pivot[], candidate: SmcV2Pivot | null): void => {
+    if (candidate && pivots[pivots.length - 1]?.index !== candidate.index) pivots.push(candidate);
+  };
+  const extremeSince = (pivots: SmcV2Pivot[], after: number, lowest: boolean): SmcV2Pivot | null => {
+    let extreme: SmcV2Pivot | null = null;
+    for (const pivot of pivots) {
+      if (pivot.index > after && (!extreme || (lowest ? pivot.price < extreme.price : pivot.price > extreme.price))) {
+        extreme = pivot;
+      }
+    }
+    return extreme;
+  };
 
   return (candidateHigh, candidateLow, candle, index) => {
+    remember(confirmedHighs, candidateHigh);
+    remember(confirmedLows, candidateLow);
     if (candidateHigh && (!high || (high.crossed && candidateHigh.index > high.index && candidateHigh.price > high.price))) {
       high = protect(candidateHigh);
     }
@@ -39,8 +55,10 @@ export function createProtectedStructurePolicy(
       }
       events.push({ originIndex: pivot.index, index, price: pivot.price, scope,
         direction: bullish ? 'bullish' : 'bearish', type: bias === (bullish ? -1 : 1) ? 'CHoCH' : 'BOS' });
-      const candidate = bullish ? candidateLow : candidateHigh;
       const opposite = bullish ? low : high;
+      // A break protects the extreme confirmed pivot of this structural wave.
+      const candidate = extremeSince(bullish ? confirmedLows : confirmedHighs,
+        pivot.index, bullish);
       if (candidate && (!opposite || candidate.index > opposite.index)) {
         if (bullish) low = protect(candidate);
         else high = protect(candidate);
