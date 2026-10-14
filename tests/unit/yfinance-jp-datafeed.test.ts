@@ -144,6 +144,7 @@ describe('YFinanceJapanDatafeed', () => {
   });
 
   it.each([
+    ['nikkei', '^N225'], ['NIKKEI225', '^N225'], ['Nikkei 225', '^N225'], ['n225', '^N225'], ['^n225', '^N225'],
     ['btc', 'BTC-USD'], ['BTC/USD', 'BTC-USD'], ['BTC-USD', 'BTC-USD'],
     ['usdyen', 'JPY=X'], ['USD/JPY', 'JPY=X'], ['USDJPY=X', 'JPY=X'],
     ['xauusd', 'GC=F'], ['XAU/USD', 'GC=F'], ['GC=F', 'GC=F'],

@@ -125,6 +125,8 @@ class SymbolTests(unittest.TestCase):
         fake = FakeYFinance(sample_frame())
         gateway = YFinanceJapanGateway(fake)
         for alias, symbol in [("btc", "BTC-USD"), ("BTC/USD", "BTC-USD"),
+                              ("nikkei", "^N225"), ("NIKKEI225", "^N225"),
+                              ("Nikkei 225", "^N225"), ("n225", "^N225"), ("^n225", "^N225"),
                               ("usdyen", "JPY=X"), ("USD/JPY", "JPY=X"),
                               ("xauusd", "GC=F"), ("XAU/USD", "GC=F")]:
             with self.subTest(alias=alias):

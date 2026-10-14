@@ -98,6 +98,7 @@ interface MultiHistoryPayload {
 export function normalizeYFinanceJapanSymbol(value: string): string {
   const upper = value.trim().toUpperCase();
   const aliases: Record<string, string> = {
+    NIKKEI: '^N225', NIKKEI225: '^N225', 'NIKKEI 225': '^N225', N225: '^N225', '^N225': '^N225',
     BTC: 'BTC-USD', BTCUSD: 'BTC-USD', 'BTC/USD': 'BTC-USD', 'BTC-USD': 'BTC-USD',
     USDYEN: 'JPY=X', USDJPY: 'JPY=X', 'USD/JPY': 'JPY=X', 'USDJPY=X': 'JPY=X', 'JPY=X': 'JPY=X',
     XAUUSD: 'GC=F', 'XAU/USD': 'GC=F', 'XAUUSD=X': 'GC=F', GOLD: 'GC=F', 'GC=F': 'GC=F',
@@ -311,7 +312,7 @@ export class YFinanceJapanDatafeed implements Datafeed {
     );
     const coverage = await this.cache.coverage(YFINANCE_JP_HISTORY_SOURCE, normalizedSymbol, interval);
     const missing = missingHistoryCoverage(coverage, requested).filter((gap) => (
-      !normalizedSymbol.endsWith('.T')
+      !(normalizedSymbol.endsWith('.T') || normalizedSymbol === '^N225')
       || interval === '1d'
       || isCalendarInterval(interval)
       || overlapsTokyoTradingSession(gap)
@@ -363,7 +364,7 @@ export class YFinanceJapanDatafeed implements Datafeed {
       to: range.to,
     };
     if (available.from > available.to) return [];
-    if (normalized.endsWith('.T') && interval !== '1d' && !isCalendarInterval(interval)
+    if ((normalized.endsWith('.T') || normalized === '^N225') && interval !== '1d' && !isCalendarInterval(interval)
       && !overlapsTokyoTradingSession(available)) return [];
     const remote = await this.fetchHistory(normalized, interval, pageSize, available);
     await this.persistHistory(normalized, interval, remote);

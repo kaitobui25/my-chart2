@@ -52,6 +52,7 @@ SCANNER_PAGE_SIZE = 250
 SCANNER_HISTORY_BATCH_SIZE = 250
 SCANNER_HISTORY_THREADS = 8
 SYMBOL_ALIASES = {
+    "NIKKEI": "^N225", "NIKKEI225": "^N225", "NIKKEI 225": "^N225", "N225": "^N225", "^N225": "^N225",
     "BTC": "BTC-USD", "BTCUSD": "BTC-USD", "BTC/USD": "BTC-USD", "BTC-USD": "BTC-USD",
     "USDYEN": "JPY=X", "USDJPY": "JPY=X", "USD/JPY": "JPY=X", "USDJPY=X": "JPY=X", "JPY=X": "JPY=X",
     "XAUUSD": "GC=F", "XAU/USD": "GC=F", "XAUUSD=X": "GC=F", "GOLD": "GC=F", "GC=F": "GC=F",
@@ -76,6 +77,7 @@ class SymbolItem:
 
 
 GLOBAL_SYMBOLS = (
+    SymbolItem("^N225", "Nikkei 225", "JPX Index"),
     SymbolItem("BTC-USD", "Bitcoin / US Dollar", "Crypto"),
     SymbolItem("JPY=X", "USD/JPY — US Dollar / Japanese Yen", "Forex"),
     SymbolItem("GC=F", "Gold Futures (USD) — XAUUSD alternative", "COMEX Futures"),
@@ -101,7 +103,7 @@ def normalize_symbol(raw: str) -> str:
     if value.endswith(".T"):
         value = value[:-2]
     if not JP_CODE_RE.fullmatch(value):
-        raise ValueError("Unsupported Yahoo symbol: use a TSE code, BTC, USDJPY, or XAUUSD (Gold Futures)")
+        raise ValueError("Unsupported Yahoo symbol: use a TSE code, NIKKEI225 (^N225), BTC, USDJPY, or XAUUSD (Gold Futures)")
     return f"{value}.T"
 
 
@@ -422,7 +424,7 @@ class YFinanceJapanGateway:
         frame = ticker.history(**self._history_kwargs(interval, adjusted, from_time, to_time))
         candles = frame_to_candles(frame)
         if interval == "4h":
-            candles = aggregate_four_hour(candles, continuous=not normalized.endswith(".T"))
+            candles = aggregate_four_hour(candles, continuous=not (normalized.endswith(".T") or normalized == "^N225"))
         if from_time is not None:
             candles = [item for item in candles if item.time >= from_time]
         if to_time is not None:
@@ -524,7 +526,7 @@ class YFinanceJapanGateway:
                 )
                 candles = frame_to_candles(frame)
                 if interval == "4h":
-                    candles = aggregate_four_hour(candles, continuous=not symbol.endswith(".T"))
+                    candles = aggregate_four_hour(candles, continuous=not (symbol.endswith(".T") or symbol == "^N225"))
                 if candles:
                     output[symbol] = candles[-1]
             except Exception:
