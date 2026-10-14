@@ -1849,6 +1849,11 @@ class Tile implements ReplayParticipant {
       replayTime: this.indicatorReplayTime,
       replayInterval: replaySession?.snapshot().baseInterval ?? null,
       feed: currentFeed().feed,
+      sector17Code: jpxSectorMetadata.peekSector(this.symbol)?.sector17Code ?? null,
+      async getSector17(symbol) {
+        const sector = await jpxSectorMetadata.getSector(symbol);
+        return sector ? { code: sector.sector17Code, name: sector.sector17Name } : null;
+      },
     }));
     this.chart.setIndicatorCandleSource(async (timeframe, range) => {
       const intervals: Record<string, string> = {
@@ -3127,6 +3132,7 @@ class Tile implements ReplayParticipant {
     void jpxSectorMetadata.get(this.symbol).then(metadata => {
       if (generation === this.metadataGeneration && key === `${activeProvider}:${this.symbol}`) {
         this.chart.setLegendMetadata(metadata);
+        refreshIndicatorLibrary();
         if (!metadata) this.metadataKey = '';
       }
     });
@@ -4279,6 +4285,14 @@ function refreshIndicatorLibrary(): void {
   for (const row of rows) {
     const id = row.dataset.indicatorId ?? '';
     const category = row.dataset.indicatorCategory ?? '';
+    const eligibility = getIndicator(id)?.available;
+    if (eligibility) {
+      const disabled = !activeTile || !eligibility(activeTile.chart);
+      row.classList.toggle('disabled', disabled);
+      row.style.opacity = disabled ? '0.45' : '';
+      row.setAttribute('aria-disabled', String(disabled));
+      row.querySelectorAll<HTMLButtonElement>('button').forEach(control => { control.disabled = disabled; });
+    }
     const matchesFilter = indicatorFilter === 'all'
       || (indicatorFilter === 'favorites' ? indicatorFavorites.has(id) : category === indicatorFilter);
     row.hidden = !matchesFilter || (!!query && !(row.dataset.indicatorSearch ?? '').includes(query));

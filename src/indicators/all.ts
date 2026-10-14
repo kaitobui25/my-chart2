@@ -5,6 +5,7 @@ import institutionalFlow from './external/institutional-flow';
 import lntt from './external/lntt';
 import pe from './external/pe';
 import nikkei225 from './external/nikkei-225';
+import topix17 from './external/topix-17';
 
 /**
  * Bundled indicators are imported explicitly so the public bundle always
@@ -14,6 +15,7 @@ const bundled: IndicatorDef[] = [
   ...builtinIndicators,
   pe,
   nikkei225,
+  topix17,
   institutionalFlow,
   dividend,
   lntt,

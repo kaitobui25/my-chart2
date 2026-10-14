@@ -46,6 +46,8 @@ export interface IndicatorDef {
   /** Display name. */
   name: string;
   category: IndicatorCategory;
+  /** Optional host-context eligibility for instrument-specific indicators. */
+  available?(chart: L2Chart): boolean;
   /** Parameters exposed by generated settings controls. */
   params?: ParamDef[];
   /** Description of the calculation exposed to data consumers. */

@@ -6,6 +6,8 @@ export interface IndicatorMarketContext {
   replayTime: number | null;
   replayInterval?: string | null;
   feed: Datafeed | null;
+  getSector17?(symbol: string): Promise<{ code: string; name: string } | null>;
+  sector17Code?: string | null;
 }
 const chartMarkets = new WeakMap<L2Chart, () => IndicatorMarketContext>();
 

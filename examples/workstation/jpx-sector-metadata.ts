@@ -11,7 +11,8 @@ export class JpxSectorMetadata {
   private expires = 0;
   private retryAfter = 0;
   constructor(private readonly fetchImpl: typeof fetch = fetch) {}
-  async get(symbol: string): Promise<{ text: string; title: string } | null> {
+  peekSector(symbol: string): JpxSector | null { return this.catalog?.records[symbol] ?? null; }
+  async getSector(symbol: string): Promise<JpxSector | null> {
     if (!/^(?:\d{4}|\d{3}[A-Z]|\d[A-Z]\d{2})\.T$/.test(symbol)) return null;
     if (Date.now() >= this.expires && Date.now() >= this.retryAfter) {
       if (!this.request) {
@@ -30,6 +31,11 @@ export class JpxSectorMetadata {
     }
     const record = this.catalog?.records[symbol];
     if (!record || !/^\d{4}$/.test(record.sector33Code) || !/^\d{2}$/.test(record.sector17Code)) return null;
+    return record;
+  }
+  async get(symbol: string): Promise<{ text: string; title: string } | null> {
+    const record = await this.getSector(symbol);
+    if (!record) return null;
     return {
       text: `33: ${record.sector33Code} · 17: ${record.sector17Code}`,
       title: `${record.name}\n33 ngành: ${record.sector33Name}\nTOPIX-17: ${record.sector17Name}\nJPX · ${this.catalog!.asOf}\n${this.catalog!.sourceUrl}\nPhân loại theo snapshot hiện có, không theo ngày Replay.`,
