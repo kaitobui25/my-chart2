@@ -1,6 +1,7 @@
 import bollinger from './bollinger';
 import ema from './ema';
 import superEma from './super-ema';
+import darvasBox from './darvas-box';
 import macd from './macd';
 import rsi from './rsi';
 import sma from './sma';
@@ -18,6 +19,7 @@ export const builtinIndicators: readonly IndicatorDef[] = Object.freeze([
   sma,
   ema,
   superEma,
+  darvasBox,
   bollinger,
   visibleRangeExtrema,
   smartMoneyConcepts,
