@@ -30,16 +30,14 @@ describe('ReplayClock', () => {
     expect(clock.snapshot().phase).toBe('paused');
   });
 
-  it('cycles through 1x 2x 5x 10x', () => {
+  it('cycles through every integer speed from 1x to 10x', () => {
     const clock = new ReplayClock(() => undefined);
     clock.load([100, 200], 0);
-    expect(clock.cycleSpeed()).toBe(2);
-    expect(clock.cycleSpeed()).toBe(5);
-    expect(clock.cycleSpeed()).toBe(10);
+    for (let speed = 2; speed <= 10; speed++) expect(clock.cycleSpeed()).toBe(speed);
     expect(clock.cycleSpeed()).toBe(1);
   });
 
-  it.each([1, 2, 5, 10])('pauses with one toggle and resumes at %sx', (speed) => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])('pauses with one toggle and resumes at %sx', (speed) => {
     vi.useFakeTimers();
     const clock = new ReplayClock(() => undefined);
     clock.load(Array.from({ length: 100 }, (_, index) => index * 100), 0);

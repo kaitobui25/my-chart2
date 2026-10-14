@@ -11,7 +11,7 @@ export interface ReplayClockSnapshot {
 export type ReplayClockStep = (cursor: number, currentTime: number) => void;
 export type ReplayClockChange = (snapshot: ReplayClockSnapshot) => void;
 
-const SPEEDS = [1, 2, 5, 10] as const;
+const SPEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 export class ReplayClock {
   private timeline: number[] = [];
