@@ -91,6 +91,7 @@ const DEFAULT_CHART_CHROME: Readonly<ChartChromeOptions> = Object.freeze({
 });
 
 export interface BarLabel {
+  position?: 'above' | 'below';
   time: number;
   text: string;
   color?: string;
@@ -2340,9 +2341,12 @@ export class L2Chart {
       const label = this.barLabels.get(candle.time);
       if (!label) continue;
       const x = this.timeScale.xForIndex(index);
+      const anchor = label.position === 'above'
+        ? pane.priceScale.yFor(candle.high) - this.barLabelGap - this.barLabelFontSize
+        : pane.priceScale.yFor(candle.low) + this.barLabelGap;
       const y = Math.max(
         0,
-        Math.min(pane.height - this.barLabelFontSize - 2, pane.priceScale.yFor(candle.low) + this.barLabelGap),
+        Math.min(pane.height - this.barLabelFontSize - 2, anchor),
       );
       ctx.fillStyle = label.color ?? this.theme.textDim;
       ctx.fillText(label.text, x, y);

@@ -1,5 +1,8 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import type { BarLabel } from '../../src/core/chart';
+import { bindReplaySettings } from './replay/replay-settings';
+import { buildReplaySessionCountdown } from './replay/replay-session-countdown';
 import { setIndicatorMarketContext } from '../../src/indicators/runtime-context';
 import { showHistoryEndNotice } from './history-notice';
 import { restoreWorkspaceIndicatorSettings } from './workspace-indicator-settings';
@@ -262,6 +265,7 @@ interface UiPreferences {
   rightPanelVisible: boolean;
   symbols: string[];
   replayDayLabels: boolean;
+  replaySessionCountdown: boolean;
   replayDayLabelOpacity: number;
   replayDayLabelGap: number;
   replayDayLabelFontSize: number;
@@ -492,6 +496,7 @@ const defaultUiPreferences: UiPreferences = {
   rightPanelVisible: false,
   symbols: [...DEFAULT_SYMBOLS],
   replayDayLabels: false,
+  replaySessionCountdown: true,
   replayDayLabelOpacity: 0.7,
   replayDayLabelGap: 10,
   replayDayLabelFontSize: 8,
@@ -506,6 +511,7 @@ if (!Array.isArray(uiPreferences.symbols)) {
   uiPreferences.symbols = [...DEFAULT_SYMBOLS];
 }
 uiPreferences.replayDayLabels = uiPreferences.replayDayLabels === true;
+uiPreferences.replaySessionCountdown = uiPreferences.replaySessionCountdown !== false;
 uiPreferences.replayDayLabelOpacity = Math.min(
   1,
   Math.max(0.2, Number(uiPreferences.replayDayLabelOpacity) || 0.7),
@@ -2703,6 +2709,13 @@ class Tile implements ReplayParticipant {
     return this.getHistorySummary();
   }
 
+  getReplaySessionCountdown(): BarLabel[] {
+    return buildReplaySessionCountdown(
+      this.chart.getCandles().map(candle => candle.time), this.history.map(candle => candle.time),
+      this.interval, activeProvider, this.symbol,
+    );
+  }
+
   setHistoryRange(range: HistoryRange, interval?: string): HistoryRange | null {
     const from = Math.floor(range.from);
     const to = Math.floor(range.to);
@@ -3120,6 +3133,7 @@ class Tile implements ReplayParticipant {
       }
       this.history = [...historyByTime.values()].sort((a, b) => a.time - b.time);
       this.chart.prependData(older.map((candle) => ({ ...candle })));
+      if (this.replayActive) refreshReplayDayLabels(this);
       if (activeTile === this) syncRangeUi();
     } catch (error) {
       this.historyPageRetryAfter = Date.now() + 5000;
@@ -3295,6 +3309,9 @@ function refreshReplayDayLabels(changedTile?: Tile): void {
       gap: uiPreferences.replayDayLabelGap,
       fontSize: uiPreferences.replayDayLabelFontSize,
     });
+    if (tile !== target && uiPreferences.replaySessionCountdown && replayPhase !== 'idle') {
+      tile.chart.setBarLabels(tile.getReplaySessionCountdown(), { opacity: 0.85, gap: 5, fontSize: 9 });
+    }
   }
 }
 
@@ -3648,6 +3665,11 @@ const replayPlay = document.getElementById('replay-play') as HTMLButtonElement;
 const replayStep = document.getElementById('replay-step') as HTMLButtonElement;
 const replaySpeed = document.getElementById('replay-speed') as HTMLButtonElement;
 const replayStop = document.getElementById('replay-stop') as HTMLButtonElement;
+bindReplaySettings(replayStop, () => uiPreferences.replaySessionCountdown, (enabled) => {
+  uiPreferences.replaySessionCountdown = enabled;
+  saveUiPreferences();
+  refreshReplayDayLabels();
+});
 
 const REPLAY_PLAY_ICON = lucideIcon(Play);
 const REPLAY_PAUSE_ICON = lucideIcon(Pause);
