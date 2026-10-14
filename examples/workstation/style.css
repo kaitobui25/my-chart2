@@ -836,6 +836,7 @@ body.light .l2chart-pane-resizer.dragging::after {
   box-shadow: 0 8px 24px #0004;
 }
 .replay-settings-popup label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.replay-settings-popup label + label { margin-top: 12px; }
 
 #replay-btn {
   display: flex;

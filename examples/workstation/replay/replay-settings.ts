@@ -1,6 +1,6 @@
 /** Native popover handles outside clicks, Escape and focus without a modal. */
 export function bindReplaySettings(
-  after: HTMLElement, enabled: () => boolean, onChange: (enabled: boolean) => void,
+  after: HTMLElement, settings: readonly { label: string; enabled(): boolean; onChange(enabled: boolean): void }[],
 ): void {
   const button = document.createElement('button');
   button.type = 'button'; button.id = 'replay-settings-button';
@@ -13,13 +13,16 @@ export function bindReplaySettings(
   popup.id = 'replay-settings-popup'; popup.className = 'replay-settings-popup';
   popup.setAttribute('popover', 'auto'); popup.setAttribute('role', 'dialog');
   popup.setAttribute('aria-label', 'Cài đặt Replay');
-  const label = document.createElement('label');
-  const checkbox = document.createElement('input');
-  checkbox.type = 'checkbox'; checkbox.checked = enabled();
-  label.append(checkbox, ' Hiện số đếm cuối ngày'); popup.append(label);
-  checkbox.addEventListener('change', () => onChange(checkbox.checked));
+  const controls = settings.map(setting => {
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox'; checkbox.checked = setting.enabled();
+    label.append(checkbox, ` ${setting.label}`); popup.append(label);
+    checkbox.addEventListener('change', () => setting.onChange(checkbox.checked));
+    return { checkbox, setting };
+  });
   button.addEventListener('click', () => {
-    checkbox.checked = enabled();
+    for (const { checkbox, setting } of controls) checkbox.checked = setting.enabled();
     const bounds = button.getBoundingClientRect();
     popup.style.left = `${Math.max(8, Math.min(innerWidth - 280, bounds.right - 260))}px`;
     popup.style.top = `${bounds.bottom + 8}px`;

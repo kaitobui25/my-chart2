@@ -106,13 +106,11 @@ function patchCandleLoadIsolation(original: string): string {
     lines(
       '        this.chart.setIntervalSec(step);',
       '        this.history = candles.map((candle) => ({ ...candle }));',
-      '        this.chart.setData(this.history.map((candle) => ({ ...candle })));',
     ),
     lines(
       '        this.chart.setIntervalSec(step);',
       '        this.history = candles.map((candle) => ({ ...candle }));',
       '        this.historyDatasetKey = datasetKey;',
-      '        this.chart.setData(this.history.map((candle) => ({ ...candle })));',
     ),
   );
 

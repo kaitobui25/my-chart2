@@ -1,6 +1,7 @@
 import type { Candle } from '../../src/library';
 import { nextIntervalStart } from '../../src/interval';
 import { ReplayClock } from '../shared/replay/replay-clock';
+import { captureLogicalViewport, restoreLogicalViewport } from '../shared/replay/replay-viewport';
 import type { ExcelAssistantSource } from './assistant-context';
 import type { JapanTimeframe } from './japan-market-config';
 
@@ -201,15 +202,12 @@ export class ExcelReplayController {
   }
 
   private captureViewport(): ReplayViewport {
-    const { barSpacing, rightIndex } = this.deps.chart.timeScale;
-    return { barSpacing, rightIndex };
+    return captureLogicalViewport(this.deps.chart.timeScale);
   }
 
   private restoreViewport(viewport: ReplayViewport): void {
-    const scale = this.deps.chart.timeScale;
-    scale.barSpacing = viewport.barSpacing;
     // Use TimeScale's clamp so a truncated Replay cannot scroll into unlimited empty future space.
-    scale.scroll((scale.rightIndex - viewport.rightIndex) * viewport.barSpacing);
+    restoreLogicalViewport(this.deps.chart.timeScale, viewport);
     this.deps.chart.invalidate();
   }
 

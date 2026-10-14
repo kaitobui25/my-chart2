@@ -1,5 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import { captureReplayViewport, restoreReplayViewport, type ReplayViewport } from '../shared/replay/replay-viewport';
 import type { BarLabel } from '../../src/core/chart';
 import { bindReplaySettings } from './replay/replay-settings';
 import { buildReplaySessionCountdown } from './replay/replay-session-countdown';
@@ -266,6 +267,7 @@ interface UiPreferences {
   symbols: string[];
   replayDayLabels: boolean;
   replaySessionCountdown: boolean;
+  preserveReplayZoom: boolean;
   replayDayLabelOpacity: number;
   replayDayLabelGap: number;
   replayDayLabelFontSize: number;
@@ -497,6 +499,7 @@ const defaultUiPreferences: UiPreferences = {
   symbols: [...DEFAULT_SYMBOLS],
   replayDayLabels: false,
   replaySessionCountdown: true,
+  preserveReplayZoom: false,
   replayDayLabelOpacity: 0.7,
   replayDayLabelGap: 10,
   replayDayLabelFontSize: 8,
@@ -512,6 +515,7 @@ if (!Array.isArray(uiPreferences.symbols)) {
 }
 uiPreferences.replayDayLabels = uiPreferences.replayDayLabels === true;
 uiPreferences.replaySessionCountdown = uiPreferences.replaySessionCountdown !== false;
+uiPreferences.preserveReplayZoom = uiPreferences.preserveReplayZoom === true;
 uiPreferences.replayDayLabelOpacity = Math.min(
   1,
   Math.max(0.2, Number(uiPreferences.replayDayLabelOpacity) || 0.7),
@@ -1721,6 +1725,8 @@ class Tile implements ReplayParticipant {
   /** Lich su raw day du duoc giu rieng; replay chi dua phan da mo khoa len chart. */
   private history: Candle[] = [];
   private replayActive = false;
+  private replayViewport: ReplayViewport | null = null;
+  private returningViewport: { viewport: ReplayViewport; symbol: string; interval: string } | null = null;
   private indicatorReplayTime: number | null = null;
   private historyRange: HistoryRange | null = null;
   private initialLoadPromise: Promise<void> = Promise.resolve();
@@ -2750,6 +2756,8 @@ class Tile implements ReplayParticipant {
   }
 
   enterReplay(): void {
+    this.replayViewport = uiPreferences.preserveReplayZoom
+      ? captureReplayViewport(this.chart.timeScale, this.chart.getCandles()) : null;
     candleDataCoordinator.noteDataActivity();
     this.loadToken += 1;
     this.historyPageLoading = false;
@@ -2772,7 +2780,11 @@ class Tile implements ReplayParticipant {
     this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
     this.indicatorReplayTime = currentTime;
     this.chart.setData(data);
-    this.chart.fitContent();
+    if (this.replayViewport) {
+      restoreReplayViewport(this.chart.timeScale, data, this.replayViewport);
+      if (data.length) this.chart.ensureCandlePriceVisible(data[data.length - 1]);
+      this.chart.invalidate();
+    } else this.chart.fitContent();
     this.refreshReplayPeriodProgress(currentTime);
     refreshReplayDayLabels(this);
     const latest = data[data.length - 1];
@@ -2780,9 +2792,13 @@ class Tile implements ReplayParticipant {
   }
 
   updateReplayCandle(candle: Candle, currentTime: number): void {
+    const viewport = this.replayViewport ? captureReplayViewport(this.chart.timeScale, this.chart.getCandles()) : null;
     this.indicatorReplayTime = currentTime;
     this.chart.updateCandle({ ...candle });
-    this.chart.fitPriceScale();
+    if (viewport) {
+      restoreReplayViewport(this.chart.timeScale, this.chart.getCandles(), viewport);
+      this.chart.ensureCandlePriceVisible(candle);
+    } else this.chart.fitPriceScale();
     this.refreshReplayPeriodProgress(currentTime);
     refreshReplayDayLabels(this);
     this.publishReplayCandle(candle);
@@ -2793,6 +2809,9 @@ class Tile implements ReplayParticipant {
   }
 
   leaveReplay(reload: boolean): void {
+    this.returningViewport = this.replayViewport
+      ? { viewport: this.replayViewport, symbol: this.symbol, interval: this.interval } : null;
+    this.replayViewport = null;
     this.indicatorReplayTime = null;
     const wasReplay = this.replayActive;
     this.replayActive = false;
@@ -2805,6 +2824,10 @@ class Tile implements ReplayParticipant {
       return;
     }
     this.chart.setData(this.history.map((candle) => ({ ...candle })));
+    if (this.returningViewport) {
+      restoreReplayViewport(this.chart.timeScale, this.chart.getCandles(), this.returningViewport.viewport);
+      this.chart.invalidate(); this.returningViewport = null;
+    }
     this.latestQuote = null;
     this.chart.setMarketQuote(null);
   }
@@ -2907,6 +2930,10 @@ class Tile implements ReplayParticipant {
     const symbol = this.symbol;
     const interval = this.interval;
     const rangeRequest = this.historyRange ? { ...this.historyRange } : undefined;
+    const returnViewport = this.returningViewport?.symbol === symbol && this.returningViewport.interval === interval
+      ? this.returningViewport.viewport : null;
+    this.returningViewport = null;
+    const retainedHistory = returnViewport ? this.history : [];
     candleDataCoordinator.noteDataActivity();
     let finishCurrentLoad!: () => void;
     this.currentLoadPromise = new Promise<void>((resolve) => {
@@ -2963,8 +2990,16 @@ class Tile implements ReplayParticipant {
       const renderHistory = (candles: Candle[], fitContent: boolean) => {
         this.chart.setIntervalSec(step);
         this.history = candles.map((candle) => ({ ...candle }));
+        if (returnViewport) {
+          const merged = new Map(retainedHistory.map(candle => [candle.time, candle]));
+          for (const candle of this.history) merged.set(candle.time, candle);
+          this.history = [...merged.values()].sort((a, b) => a.time - b.time);
+        }
         this.chart.setData(this.history.map((candle) => ({ ...candle })));
-        if (fitContent) this.chart.fitContent();
+        if (returnViewport) {
+          restoreReplayViewport(this.chart.timeScale, this.chart.getCandles(), returnViewport);
+          this.chart.invalidate();
+        } else if (fitContent) this.chart.fitContent();
         this.publishCandle(this.history[this.history.length - 1], provider.label, false);
       };
 
@@ -3665,11 +3700,12 @@ const replayPlay = document.getElementById('replay-play') as HTMLButtonElement;
 const replayStep = document.getElementById('replay-step') as HTMLButtonElement;
 const replaySpeed = document.getElementById('replay-speed') as HTMLButtonElement;
 const replayStop = document.getElementById('replay-stop') as HTMLButtonElement;
-bindReplaySettings(replayStop, () => uiPreferences.replaySessionCountdown, (enabled) => {
-  uiPreferences.replaySessionCountdown = enabled;
-  saveUiPreferences();
-  refreshReplayDayLabels();
-});
+bindReplaySettings(replayStop, [
+  { label: 'Hiện số đếm cuối ngày', enabled: () => uiPreferences.replaySessionCountdown,
+    onChange(enabled) { uiPreferences.replaySessionCountdown = enabled; saveUiPreferences(); refreshReplayDayLabels(); } },
+  { label: 'Giữ zoom khi chọn nến Replay', enabled: () => uiPreferences.preserveReplayZoom,
+    onChange(enabled) { uiPreferences.preserveReplayZoom = enabled; saveUiPreferences(); } },
+]);
 
 const REPLAY_PLAY_ICON = lucideIcon(Play);
 const REPLAY_PAUSE_ICON = lucideIcon(Pause);
