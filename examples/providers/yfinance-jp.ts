@@ -1,5 +1,6 @@
 import type { Candle } from '../../src/core/types';
 import type { Datafeed, HistoryRange, SymbolSearchResult } from '../../src/datafeed';
+import { overlapsTokyoTradingSession } from './tokyo-trading-session';
 import {
   estimateIntervalBars,
   intervalApproxSeconds,
@@ -137,7 +138,8 @@ function mergeCandles(...groups: Candle[][]): Candle[] {
 }
 
 function formatHistoryDate(time: number): string {
-  return new Date(time * 1000).toISOString().slice(0, 10);
+  return new Date((time + TOKYO_UTC_OFFSET_MINUTES * 60) * 1000)
+    .toISOString().slice(0, 19).replace('T', ' ') + ' JST';
 }
 
 /** Japanese equities, Bitcoin, USD/JPY and gold futures via the local yfinance sidecar. */
@@ -308,7 +310,12 @@ export class YFinanceJapanDatafeed implements Datafeed {
       requestedLimit,
     );
     const coverage = await this.cache.coverage(YFINANCE_JP_HISTORY_SOURCE, normalizedSymbol, interval);
-    const missing = missingHistoryCoverage(coverage, requested);
+    const missing = missingHistoryCoverage(coverage, requested).filter((gap) => (
+      !normalizedSymbol.endsWith('.T')
+      || interval === '1d'
+      || isCalendarInterval(interval)
+      || overlapsTokyoTradingSession(gap)
+    ));
     if (missing.length === 0) return cached.slice(-requestedLimit);
 
     let fetched: Candle[] = [];

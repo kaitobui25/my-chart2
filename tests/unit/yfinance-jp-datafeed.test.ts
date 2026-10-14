@@ -47,6 +47,34 @@ function timestamp(value: string): number {
 }
 
 describe('YFinanceJapanDatafeed', () => {
+  it.each([
+    ['overnight', '6758.T', '2026-09-14T15:30:00+09:00', '2026-09-15T09:00:00+09:00', false],
+    ['lunch', '6758.T', '2026-09-14T11:30:00+09:00', '2026-09-14T12:30:00+09:00', false],
+    ['weekend', '6758.T', '2026-09-18T15:30:00+09:00', '2026-09-21T09:00:00+09:00', false],
+    ['in-session', '6758.T', '2026-09-14T10:00:00+09:00', '2026-09-14T11:00:00+09:00', true],
+    ['crypto overnight', 'BTC-USD', '2026-09-14T15:30:00+09:00', '2026-09-15T09:00:00+09:00', true],
+  ])('handles %s gaps without hiding missing trading data', async (_label, symbol, left, right, shouldFetch) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T18:00:00+09:00'));
+    const from = timestamp(left);
+    const to = timestamp(right);
+    const candles = [from - 900, to].map((time) => ({ time, open: 100, high: 102, low: 99, close: 101 }));
+    const cache = memoryCache();
+    await cache.write(YFINANCE_JP_HISTORY_SOURCE, symbol, '15m', candles);
+    await cache.markCoverage(YFINANCE_JP_HISTORY_SOURCE, symbol, '15m', { from: from - 900, to: from });
+    await cache.markCoverage(YFINANCE_JP_HISTORY_SOURCE, symbol, '15m', { from: to, to: to + 900 });
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ message: 'no price data found' }), { status: 502 }));
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache, fetchImpl });
+    const result = feed.getHistory(symbol, '15m', 100, { from: from - 900, to: to + 900 });
+    if (shouldFetch) {
+      await expect(result).rejects.toThrow(/could not backfill.*JST.*no price data found/);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } else {
+      await expect(result).resolves.toEqual(candles);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -300,6 +328,7 @@ describe('YFinanceJapanDatafeed', () => {
     ['4h', '2026-10-05T09:00:00+09:00', '2026-10-05T13:00:00+09:00', '2026-10-06T09:00:00+09:00'],
   ] as const)('backfills skipped %s candles before publishing the latest candle', async (interval, firstTime, missingTime, latestTime) => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date(latestTime));
     const first = {
       time: timestamp(firstTime),
       open: 100,
@@ -349,6 +378,7 @@ describe('YFinanceJapanDatafeed', () => {
 
   it('retries an unresolved live gap on the next poll', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-06T12:00:00+09:00'));
     const first = {
       time: timestamp('2026-10-06T09:00:00+09:00'),
       open: 100,
@@ -451,6 +481,7 @@ describe('YFinanceJapanDatafeed', () => {
 
   it('recovers the 11:30 close candle across the Tokyo lunch break', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-06T12:30:00+09:00'));
     const first = {
       time: timestamp('2026-10-06T11:29:00+09:00'),
       open: 100,
