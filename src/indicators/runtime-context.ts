@@ -1,4 +1,21 @@
 import { L2Chart } from '../core/chart';
+import type { Datafeed } from '../datafeed';
+
+export interface IndicatorMarketContext {
+  interval: string;
+  replayTime: number | null;
+  replayInterval?: string | null;
+  feed: Datafeed | null;
+}
+const chartMarkets = new WeakMap<L2Chart, () => IndicatorMarketContext>();
+
+/** Host-owned clock and feed; indicators never create their own replay timer. */
+export function setIndicatorMarketContext(chart: L2Chart, context: () => IndicatorMarketContext): void {
+  chartMarkets.set(chart, context);
+}
+export function getIndicatorMarketContext(chart: L2Chart): IndicatorMarketContext | null {
+  return chartMarkets.get(chart)?.() ?? null;
+}
 
 type SymbolListener = (symbol: string) => void;
 type ProviderListener = (provider: string) => void;

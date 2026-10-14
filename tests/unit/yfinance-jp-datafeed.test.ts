@@ -47,6 +47,22 @@ function timestamp(value: string): number {
 }
 
 describe('YFinanceJapanDatafeed', () => {
+  it('ignores an old gap clipped by retention to a closed weekend for Nikkei replay', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T23:00:00+09:00'));
+    const cache = memoryCache();
+    const from = timestamp('2026-08-17T09:00:00+09:00');
+    const to = timestamp('2026-10-08T15:30:00+09:00');
+    const candles = [{ time: from, open: 100, high: 102, low: 99, close: 101 }];
+    await cache.write(YFINANCE_JP_HISTORY_SOURCE, '^N225', '15m', candles);
+    await cache.markCoverage(YFINANCE_JP_HISTORY_SOURCE, '^N225', '15m', { from, to });
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache, fetchImpl });
+    await expect(feed.getHistory('^N225', '15m', 50_000, {
+      from: timestamp('2026-06-29T13:00:00+09:00'), to,
+    })).resolves.toEqual(candles);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('pages backwards through cached history nearest the boundary without fetching', async () => {
     const cache = memoryCache();
     const start = timestamp('2026-08-17T09:00:00+09:00');

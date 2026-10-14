@@ -1,5 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import { setIndicatorMarketContext } from '../../src/indicators/runtime-context';
 import { showHistoryEndNotice } from './history-notice';
 import { restoreWorkspaceIndicatorSettings } from './workspace-indicator-settings';
 import { buildVisibleSmcExport, downloadSmcExport, SMC_IDS } from '../excel-content-addin/smc-export';
@@ -1714,6 +1715,7 @@ class Tile implements ReplayParticipant {
   /** Lich su raw day du duoc giu rieng; replay chi dua phan da mo khoa len chart. */
   private history: Candle[] = [];
   private replayActive = false;
+  private indicatorReplayTime: number | null = null;
   private historyRange: HistoryRange | null = null;
   private initialLoadPromise: Promise<void> = Promise.resolve();
   private currentLoadPromise: Promise<void> = Promise.resolve();
@@ -1830,6 +1832,12 @@ class Tile implements ReplayParticipant {
     this.el.appendChild(chartShell);
     this.chart = new L2Chart(chartEl, { theme: this.resolvedTheme() });
     this.applyPricePrecision();
+    setIndicatorMarketContext(this.chart, () => ({
+      interval: this.interval,
+      replayTime: this.indicatorReplayTime,
+      replayInterval: replaySession?.snapshot().baseInterval ?? null,
+      feed: currentFeed().feed,
+    }));
     this.chart.setIndicatorCandleSource(async (timeframe, range) => {
       const intervals: Record<string, string> = {
         '1': '1m', '3': '3m', '5': '5m', '15': '15m', '30': '30m',
@@ -2749,6 +2757,7 @@ class Tile implements ReplayParticipant {
   setReplayData(candles: readonly Candle[], currentTime: number): void {
     const data = candles.map((candle) => ({ ...candle }));
     this.chart.setIntervalSec(intervalApproxSeconds(this.interval));
+    this.indicatorReplayTime = currentTime;
     this.chart.setData(data);
     this.chart.fitContent();
     this.refreshReplayPeriodProgress(currentTime);
@@ -2758,6 +2767,7 @@ class Tile implements ReplayParticipant {
   }
 
   updateReplayCandle(candle: Candle, currentTime: number): void {
+    this.indicatorReplayTime = currentTime;
     this.chart.updateCandle({ ...candle });
     this.chart.fitPriceScale();
     this.refreshReplayPeriodProgress(currentTime);
@@ -2770,6 +2780,7 @@ class Tile implements ReplayParticipant {
   }
 
   leaveReplay(reload: boolean): void {
+    this.indicatorReplayTime = null;
     const wasReplay = this.replayActive;
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);

@@ -311,12 +311,14 @@ export class YFinanceJapanDatafeed implements Datafeed {
       requestedLimit,
     );
     const coverage = await this.cache.coverage(YFINANCE_JP_HISTORY_SOURCE, normalizedSymbol, interval);
-    const missing = missingHistoryCoverage(coverage, requested).filter((gap) => (
-      !(normalizedSymbol.endsWith('.T') || normalizedSymbol === '^N225')
-      || interval === '1d'
-      || isCalendarInterval(interval)
-      || overlapsTokyoTradingSession(gap)
-    ));
+    const missing = missingHistoryCoverage(coverage, requested).filter((gap) => {
+      if (!(normalizedSymbol.endsWith('.T') || normalizedSymbol === '^N225')
+        || interval === '1d' || isCalendarInterval(interval)) return true;
+      // Retention clipping can turn a gap spanning months into only a weekend.
+      // Check the range Yahoo will actually receive, not the original gap.
+      const remote = remoteHistoryRange(interval, gap);
+      return remote !== null && overlapsTokyoTradingSession(remote);
+    });
     if (missing.length === 0) return cached.slice(-requestedLimit);
 
     let fetched: Candle[] = [];
