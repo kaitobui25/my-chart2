@@ -837,6 +837,10 @@ body.light .l2chart-pane-resizer.dragging::after {
 }
 .replay-settings-popup label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .replay-settings-popup label + label { margin-top: 12px; }
+.l2chart-legend-metadata { font-size: 10px; white-space: nowrap; margin: 0 4px; pointer-events: auto; }
+.l2chart-legend-primary.has-metadata { padding-right: 4px; }
+.l2chart-legend-primary.has-metadata .l2chart-legend-toggle { position: static; }
+.l2chart-legend-primary.has-metadata .l2chart-legend-primary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 #replay-btn {
   display: flex;

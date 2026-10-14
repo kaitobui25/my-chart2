@@ -261,6 +261,7 @@ export class L2Chart {
   private timeTicks: { index: number; label: string; major: boolean }[] = [];
   private watermark = '';
   private legendTitle = '';
+  private legendMetadata: { text: string; title: string } | null = null;
   private legendCollapsed = false;
   private marketQuote: ChartMarketQuote | null = null;
   private sessionsVisible = true;
@@ -557,6 +558,12 @@ export class L2Chart {
 
   setLegendTitle(title: string): void {
     this.legendTitle = title;
+    this.invalidate();
+  }
+
+  /** Optional host-supplied instrument metadata; the engine does no network work. */
+  setLegendMetadata(metadata: { text: string; title: string } | null): void {
+    this.legendMetadata = metadata ? { ...metadata } : null;
     this.invalidate();
   }
 
@@ -2877,7 +2884,7 @@ export class L2Chart {
       const toggleIcon = this.legendCollapsed ? icons.expand : icons.collapse;
       const priceVisible = this.getPriceSeriesRenderVisible();
       const visibilityTitle = tr(priceVisible ? 'Ẩn nến' : 'Hiện nến');
-      html += `<div class="l2chart-legend-row l2chart-legend-primary${this.legendCollapsed ? ' collapsed' : ''}" style="color:${textColor}">` +
+      html += `<div class="l2chart-legend-row l2chart-legend-primary${this.legendCollapsed ? ' collapsed' : ''}${this.legendMetadata ? ' has-metadata' : ''}" style="color:${textColor}">` +
         `<span class="l2chart-legend-primary-text"><b>${esc(this.legendTitle)}</b>&nbsp; ` +
         `<span style="color:${dimColor}">O</span> <span style="color:${color}">${f(c.open)}</span> ` +
         `<span style="color:${dimColor}">H</span> <span style="color:${color}">${f(c.high)}</span> ` +
@@ -2886,6 +2893,7 @@ export class L2Chart {
         `<span style="color:${color}">${chg >= 0 ? '+' : ''}${f(chg)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)</span>`;
       html += `</span>` +
         `<button type="button" class="l2chart-legend-action l2chart-legend-toggle l2chart-legend-price-visibility" data-price-visibility title="${escAttr(visibilityTitle)}" aria-label="${escAttr(visibilityTitle)}" aria-pressed="${!priceVisible}">${priceVisible ? icons.visible : icons.hidden}</button>` +
+        (this.legendMetadata ? `<span class="l2chart-legend-metadata" title="${escAttr(this.legendMetadata.title)}" style="color:${dimColor}">${esc(this.legendMetadata.text)}</span>` : '') +
         `<button type="button" class="l2chart-legend-action l2chart-legend-toggle" data-legend-toggle title="${escAttr(toggleTitle)}" aria-label="${escAttr(toggleTitle)}" aria-expanded="${this.legendCollapsed ? 'false' : 'true'}">${toggleIcon}</button>` +
         `</div>`;
       if (this.legendCollapsed) {

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from aiohttp import web
+from jpx_sectors import JpxSectorRepository
 
 from yfinance_jp_core import (
     SUPPORTED_INTERVALS,
@@ -23,6 +24,14 @@ from yfinance_jp_core import (
 HOST = os.getenv("HOST", "127.0.0.1").strip() or "127.0.0.1"
 PORT = int(os.getenv("PORT", "8760"))
 GATEWAY = YFinanceJapanGateway()
+JPX_SECTORS = JpxSectorRepository()
+
+
+async def sectors_handler(_: web.Request) -> web.Response:
+    try:
+        return _json(await asyncio.to_thread(JPX_SECTORS.get))
+    except Exception as exc:
+        return _json({"message": str(exc)}, 502)
 
 
 def _json(payload: Any, status: int = 200) -> web.Response:
@@ -193,6 +202,7 @@ def create_app() -> web.Application:
     app = web.Application(client_max_size=1024 * 1024)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/symbols", symbols_handler)
+    app.router.add_get("/jpx/sectors", sectors_handler)
     app.router.add_get("/history", history_handler)
     app.router.add_get("/latest", latest_handler)
     app.router.add_get("/scanner/universe", scanner_universe_handler)

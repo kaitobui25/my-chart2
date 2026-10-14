@@ -1,5 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import { jpxSectorMetadata } from './jpx-sector-metadata';
 import { CANDLE_COLOR_PRESETS, candleColorPreset, identifyCandleColorPreset, type CandleColors } from './candle-color-presets';
 import { captureReplayViewport, restoreReplayViewport, type ReplayViewport } from '../shared/replay/replay-viewport';
 import type { BarLabel } from '../../src/core/chart';
@@ -1716,6 +1717,8 @@ class Tile implements ReplayParticipant {
   private realtimeGapLoading = false;
   private loadToken = 0;
   private loading = false;
+  private metadataKey = '';
+  private metadataGeneration = 0;
   private historyPageLoading = false;
   private historyPageExhausted = false;
   private historyPageRetryAfter = 0;
@@ -1958,6 +1961,7 @@ class Tile implements ReplayParticipant {
     this.persistPreferences();
     this.symbol = s;
     this.applyPricePrecision();
+    this.refreshSectorMetadata();
     this.symbolInput.value = s;
     persistTileSymbols();
     savePreferencesFor(this.symbol, currentPreferences);
@@ -2927,6 +2931,7 @@ class Tile implements ReplayParticipant {
     const token = ++this.loadToken;
     const symbol = this.symbol;
     const interval = this.interval;
+    this.refreshSectorMetadata();
     const rangeRequest = this.historyRange ? { ...this.historyRange } : undefined;
     const returnViewport = this.returningViewport?.symbol === symbol && this.returningViewport.interval === interval
       ? this.returningViewport.viewport : null;
@@ -3112,6 +3117,21 @@ class Tile implements ReplayParticipant {
     }
   }
 
+  private refreshSectorMetadata(): void {
+    const key = `${activeProvider}:${this.symbol}`;
+    if (key === this.metadataKey) return;
+    this.metadataKey = key;
+    const generation = ++this.metadataGeneration;
+    this.chart.setLegendMetadata(null);
+    if (String(activeProvider) !== 'yfinance-jp') return;
+    void jpxSectorMetadata.get(this.symbol).then(metadata => {
+      if (generation === this.metadataGeneration && key === `${activeProvider}:${this.symbol}`) {
+        this.chart.setLegendMetadata(metadata);
+        if (!metadata) this.metadataKey = '';
+      }
+    });
+  }
+
   private async loadOlderHistory(): Promise<void> {
     if (
       this.loading
@@ -3238,6 +3258,7 @@ class Tile implements ReplayParticipant {
   }
 
   destroy(): void {
+    this.metadataGeneration++;
     this.loadToken += 1;
     this.replayActive = false;
     this.chart.setReplaySelectionMode(false);
