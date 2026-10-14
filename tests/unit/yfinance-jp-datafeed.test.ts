@@ -47,6 +47,57 @@ function timestamp(value: string): number {
 }
 
 describe('YFinanceJapanDatafeed', () => {
+  it('pages backwards through cached history nearest the boundary without fetching', async () => {
+    const cache = memoryCache();
+    const start = timestamp('2026-08-17T09:00:00+09:00');
+    const candles = Array.from({ length: 897 }, (_, index) => ({
+      time: start + index * 900, open: 100, high: 102, low: 99, close: 101,
+    }));
+    await cache.write(YFINANCE_JP_HISTORY_SOURCE, '6758.T', '15m', candles);
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache, fetchImpl });
+    const first = await feed.getOlderHistory('6758.T', '15m', 200, { from: start, to: candles[397].time - 1 });
+    expect(first).toEqual(candles.slice(197, 397));
+    const second = await feed.getOlderHistory('6758.T', '15m', 200, { from: start, to: first[0].time - 1 });
+    expect(second).toEqual(candles.slice(0, 197));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('stops at Yahoo retention only after checking older local cache', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T18:00:00+09:00'));
+    const cache = memoryCache();
+    const old = { time: timestamp('2026-01-05T09:00:00+09:00'), open: 100, high: 102, low: 99, close: 101 };
+    await cache.write(YFINANCE_JP_HISTORY_SOURCE, '6758.T', '15m', [old]);
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache, fetchImpl });
+    await expect(feed.getOlderHistory('6758.T', '15m', 500, { from: 0, to: old.time + 1 })).resolves.toEqual([old]);
+    await expect(feed.getOlderHistory('6758.T', '15m', 500, { from: 0, to: old.time - 1 })).resolves.toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a backwards page on network failure so it remains retryable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T18:00:00+09:00'));
+    const fetchImpl = vi.fn(async () => { throw new Error('offline'); });
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    await expect(feed.getOlderHistory('6758.T', '15m', 500, {
+      from: timestamp('2026-09-01'), to: timestamp('2026-09-09'),
+    })).rejects.toThrow('Cannot reach');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the end when the remaining retention window contains only a closed weekend', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T18:00:00+09:00'));
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const feed = new YFinanceJapanDatafeed('/yfinance-jp-api', { cache: memoryCache(), fetchImpl });
+    await expect(feed.getOlderHistory('6758.T', '15m', 500, {
+      from: 0, to: timestamp('2026-08-17T08:59:59+09:00'),
+    })).resolves.toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['overnight', '6758.T', '2026-09-14T15:30:00+09:00', '2026-09-15T09:00:00+09:00', false],
     ['lunch', '6758.T', '2026-09-14T11:30:00+09:00', '2026-09-14T12:30:00+09:00', false],

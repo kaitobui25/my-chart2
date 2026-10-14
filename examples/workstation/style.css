@@ -797,6 +797,26 @@ body.light .l2chart-pane-resizer.dragging::after {
 }
 
 /* Bar Replay */
+.history-end-notice {
+  position: absolute;
+  bottom: 36px;
+  left: 12px;
+  z-index: 10;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg, #18212d);
+  color: var(--text, #d8e1ed);
+  font-size: 12px;
+  pointer-events: none;
+  animation: history-notice-fade 3.5s forwards;
+}
+
+@keyframes history-notice-fade {
+  0%, 85.7% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 #replay-wrap {
   display: flex;
   align-items: center;

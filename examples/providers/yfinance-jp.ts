@@ -345,6 +345,31 @@ export class YFinanceJapanDatafeed implements Datafeed {
       .slice(-requestedLimit);
   }
 
+  async getOlderHistory(symbol: string, interval: string, limit: number, range: HistoryRange): Promise<Candle[]> {
+    const normalized = normalizeYFinanceJapanSymbol(symbol);
+    if (!normalized) return [];
+    this.requireInterval(interval);
+    const pageSize = this.normalizeLimit(limit);
+    // Read all older cached bars before applying the page limit: readRange walks
+    // forwards, whereas backwards pagination needs the bars nearest the boundary.
+    const cached = await this.cache.readRange(
+      YFINANCE_JP_HISTORY_SOURCE, normalized, interval, 0, range.to,
+    );
+    if (cached.length > 0) return cached.slice(-pageSize);
+
+    const days = HISTORY_RETENTION_DAYS[interval];
+    const available = days === undefined ? range : {
+      from: Math.max(0, Math.floor(Date.now() / 1000) - days * 86_400 + 60),
+      to: range.to,
+    };
+    if (available.from > available.to) return [];
+    if (normalized.endsWith('.T') && interval !== '1d' && !isCalendarInterval(interval)
+      && !overlapsTokyoTradingSession(available)) return [];
+    const remote = await this.fetchHistory(normalized, interval, pageSize, available);
+    await this.persistHistory(normalized, interval, remote);
+    return remote.slice(-pageSize);
+  }
+
   subscribe(symbol: string, interval: string, onCandle: (candle: Candle) => void): () => void {
     if (this.disposed) return () => undefined;
     const normalizedSymbol = normalizeYFinanceJapanSymbol(symbol);

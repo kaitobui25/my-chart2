@@ -35,6 +35,10 @@ export interface Datafeed {
   /** Optional fast path for rendering persisted history before a remote refresh completes. */
   getCachedHistory?(symbol: string, interval: string, limit?: number, range?: HistoryRange): Promise<Candle[]>;
   getHistory(symbol: string, interval: string, limit?: number, range?: HistoryRange): Promise<Candle[]>;
+  /** Optional cache-first backwards page. Empty means no older history is available;
+   * transient failures must reject so the chart can retry rather than mark the end.
+   */
+  getOlderHistory?(symbol: string, interval: string, limit: number, range: HistoryRange): Promise<Candle[]>;
   /**
    * Stream live updates for the current bar (and new bars).
    * Returns an unsubscribe function.

@@ -13,7 +13,7 @@ function patchOlderHistoryPriority(code: string): string {
     '    const provider = currentFeed();',
     '    if (!provider.feed) return;',
     '    const loadToken = this.loadToken;',
-    '    const oldestTime = this.history[0].time;',
+    '    const oldestTime = this.chart.getCandles()[0].time;',
   );
   const replacement = lines(
     '    ) return;',
@@ -27,9 +27,9 @@ function patchOlderHistoryPriority(code: string): string {
     '      || this.realtimeGapLoading',
     '      || this.historyPageLoading',
     '      || this.historyPageExhausted',
-    '      || this.historyRange',
-    '      || this.replayActive',
-    '      || this.history.length === 0',
+    '      || (this.replayActive && replaySession?.snapshot().phase === \'loading\')',
+    '      || (this.historyRange && !this.replayActive)',
+    '      || this.chart.getCandles().length === 0',
     '      || Date.now() < this.historyPageRetryAfter',
     '      || tiles.some((tile) => tile !== this && tile.loading)',
     '    ) return;',
@@ -38,7 +38,7 @@ function patchOlderHistoryPriority(code: string): string {
     '    const provider = currentFeed();',
     '    if (!provider.feed) return;',
     '    const loadToken = this.loadToken;',
-    '    const oldestTime = this.history[0].time;',
+    '    const oldestTime = this.chart.getCandles()[0].time;',
   );
   if (!code.includes(needle)) {
     throw new Error(`Older-history priority marker is missing: ${needle.slice(0, 120)}`);

@@ -1,5 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import { showHistoryEndNotice } from './history-notice';
 import { restoreWorkspaceIndicatorSettings } from './workspace-indicator-settings';
 import { buildVisibleSmcExport, downloadSmcExport, SMC_IDS } from '../excel-content-addin/smc-export';
 import {
@@ -2730,6 +2731,9 @@ class Tile implements ReplayParticipant {
   enterReplay(): void {
     candleDataCoordinator.noteDataActivity();
     this.loadToken += 1;
+    this.historyPageLoading = false;
+    this.historyPageExhausted = false;
+    this.historyPageRetryAfter = 0;
     this.loading = false;
     this.replayActive = true;
     this.unsubscribe?.();
@@ -2888,6 +2892,7 @@ class Tile implements ReplayParticipant {
     this.historyPageLoading = false;
     this.historyPageExhausted = false;
     this.historyPageRetryAfter = 0;
+    this.chartShellEl.querySelector('.history-end-notice')?.remove();
     let hadRenderableData = this.history.length > 0;
     let renderedCachedHistory = false;
     let cachedSource = activeProvider === 'binance-local' ? 'SQLite' : 'IndexedDB';
@@ -3056,9 +3061,9 @@ class Tile implements ReplayParticipant {
       || this.realtimeGapLoading
       || this.historyPageLoading
       || this.historyPageExhausted
-      || this.historyRange
-      || this.replayActive
-      || this.history.length === 0
+      || (this.replayActive && replaySession?.snapshot().phase === 'loading')
+      || (this.historyRange && !this.replayActive)
+      || this.chart.getCandles().length === 0
       || Date.now() < this.historyPageRetryAfter
     ) return;
 
@@ -3066,7 +3071,7 @@ class Tile implements ReplayParticipant {
     const provider = currentFeed();
     if (!provider.feed) return;
     const loadToken = this.loadToken;
-    const oldestTime = this.history[0].time;
+    const oldestTime = this.chart.getCandles()[0].time;
     const step = intervalApproxSeconds(this.interval);
     const pageSize = historyPageSizeFor(this.interval);
     const to = oldestTime - 1;
@@ -3077,7 +3082,9 @@ class Tile implements ReplayParticipant {
 
     this.historyPageLoading = true;
     try {
-      const loaded = await provider.feed.getHistory(
+      const loadPage = provider.feed.getOlderHistory?.bind(provider.feed)
+        ?? provider.feed.getHistory.bind(provider.feed);
+      const loaded = await loadPage(
         this.symbol,
         this.interval,
         pageSize,
@@ -3085,17 +3092,24 @@ class Tile implements ReplayParticipant {
       );
       if (loadToken !== this.loadToken || providerId !== activeProvider) return;
 
-      const existingTimes = new Set(this.history.map((candle) => candle.time));
-      const older = loaded
+      const existingTimes = new Set(this.chart.getCandles().map((candle) => candle.time));
+      const unique = new Map(loaded.map((candle) => [candle.time, candle]));
+      const older = [...unique.values()]
         .filter((candle) => candle.time < oldestTime && !existingTimes.has(candle.time))
         .sort((a, b) => a.time - b.time);
       if (older.length === 0) {
         this.historyPageExhausted = true;
+        showHistoryEndNotice(this.chartShellEl, provider.label);
         return;
       }
 
-      this.history = [...older.map((candle) => ({ ...candle })), ...this.history];
+      const historyByTime = new Map(this.history.map((candle) => [candle.time, candle]));
+      for (const candle of older) {
+        if (!historyByTime.has(candle.time)) historyByTime.set(candle.time, { ...candle });
+      }
+      this.history = [...historyByTime.values()].sort((a, b) => a.time - b.time);
       this.chart.prependData(older.map((candle) => ({ ...candle })));
+      if (activeTile === this) syncRangeUi();
     } catch (error) {
       this.historyPageRetryAfter = Date.now() + 5000;
       console.warn(`Unable to load older ${provider.label} history`, error);
