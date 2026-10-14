@@ -1,5 +1,6 @@
 import { IndicatorSectionStateStore } from '../excel-content-addin/indicator-section-state';
 import { loadIndicatorHistory } from './indicator-history';
+import { CANDLE_COLOR_PRESETS, candleColorPreset, identifyCandleColorPreset, type CandleColors } from './candle-color-presets';
 import { captureReplayViewport, restoreReplayViewport, type ReplayViewport } from '../shared/replay/replay-viewport';
 import type { BarLabel } from '../../src/core/chart';
 import { bindReplaySettings } from './replay/replay-settings';
@@ -256,10 +257,6 @@ interface ChartTemplate {
   candleColors?: CandleColors;
 }
 
-type CandleColors = Pick<Theme, 'up' | 'down' | 'wickUp' | 'wickDown'> & {
-  line: string;
-  area: string;
-};
 
 interface UiPreferences {
   watchlistVisible: boolean;
@@ -2067,6 +2064,7 @@ class Tile implements ReplayParticipant {
     this.chart.setTheme(this.resolvedTheme());
     const colors = this.getCandleColors();
     this.chart.setPriceSeriesColors({ line: colors.line, area: colors.area });
+    this.chart.setCandleRendering({ hollowUp: colors.hollowUp === true, hollowDown: colors.hollowDown === true });
   }
 
   getCandleColors(): CandleColors {
@@ -5042,7 +5040,7 @@ const indicatorSectionState = new IndicatorSectionStateStore();
 let paramDefId: string | null = null;
 let paramDialogMode: 'indicator' | 'candles' = 'indicator';
 
-const CANDLE_COLOR_FIELDS: { key: keyof CandleColors; label: string }[] = [
+const CANDLE_COLOR_FIELDS: { key: keyof Pick<CandleColors, 'up' | 'down' | 'wickUp' | 'wickDown' | 'line' | 'area'>; label: string }[] = [
   { key: 'up', label: 'Thân tăng' },
   { key: 'down', label: 'Thân giảm' },
   { key: 'wickUp', label: 'Râu tăng' },
@@ -5056,6 +5054,36 @@ function fillCandleStyleFields(colors: CandleColors): void {
   const title = document.createElement('div');
   title.className = 'param-section-title';
   title.innerHTML = '<strong>Màu biểu đồ giá</strong><span>Lưu riêng cho mã chứng khoán đang chọn</span>';
+  const presetLabel = document.createElement('label');
+  presetLabel.textContent = 'Preset màu nến';
+  const preset = document.createElement('select');
+  preset.setAttribute('aria-label', 'Preset màu nến');
+  for (const item of [...CANDLE_COLOR_PRESETS, { id: 'custom', label: 'Tùy chỉnh' }]) {
+    preset.add(new Option(item.label, item.id));
+  }
+  preset.value = identifyCandleColorPreset(colors, defaultCandleColors(), dark);
+  presetLabel.append(preset);
+  preset.addEventListener('change', () => {
+    if (preset.value !== 'custom') fillCandleStyleFields(candleColorPreset(preset.value, defaultCandleColors(), dark));
+  });
+  const preview = document.createElement('div');
+  preview.setAttribute('aria-label', 'Preview màu nến');
+  preview.style.cssText = 'display:flex;gap:24px;padding:12px;justify-content:center';
+  const renderPreview = () => {
+    const values = collectCandleColors();
+    preview.replaceChildren();
+    for (const up of [true, false]) {
+      const candle = document.createElement('span');
+      candle.style.cssText = `display:block;width:12px;height:24px;border:1px solid ${up ? values.up : values.down};position:relative`;
+      candle.style.background = (up ? values.hollowUp : values.hollowDown) ? 'transparent' : up ? values.up : values.down;
+      for (const edge of ['top', 'bottom']) {
+        const wick = document.createElement('span');
+        wick.style.cssText = `position:absolute;left:5px;${edge}:-9px;width:1px;height:8px;background:${up ? values.wickUp : values.wickDown}`;
+        candle.append(wick);
+      }
+      preview.append(candle);
+    }
+  };
   const grid = document.createElement('div');
   grid.className = 'param-colors candle-color-grid';
   for (const field of CANDLE_COLOR_FIELDS) {
@@ -5066,18 +5094,34 @@ function fillCandleStyleFields(colors: CandleColors): void {
     input.type = 'color';
     input.value = colors[field.key];
     input.dataset.candleColor = field.key;
+    input.addEventListener('input', () => {
+      preset.value = identifyCandleColorPreset(collectCandleColors(), defaultCandleColors(), dark); renderPreview();
+    });
     label.append(name, input);
     grid.appendChild(label);
   }
-  paramFields.append(title, grid);
+  const bodies = document.createElement('div');
+  for (const [key, text] of [['hollowUp', 'Thân nến tăng rỗng'], ['hollowDown', 'Thân nến giảm rỗng']] as const) {
+    const label = document.createElement('label');
+    const input = document.createElement('input'); input.type = 'checkbox';
+    input.dataset.candleHollow = key; input.checked = colors[key] === true;
+    input.addEventListener('change', () => {
+      preset.value = identifyCandleColorPreset(collectCandleColors(), defaultCandleColors(), dark); renderPreview();
+    });
+    label.append(input, text); bodies.append(label);
+  }
+  paramFields.append(title, presetLabel, grid, bodies, preview);
+  renderPreview();
 }
 
 function collectCandleColors(): CandleColors {
   const colors = defaultCandleColors();
   for (const input of paramFields.querySelectorAll<HTMLInputElement>('[data-candle-color]')) {
-    const key = input.dataset.candleColor as keyof CandleColors | undefined;
+    const key = input.dataset.candleColor as typeof CANDLE_COLOR_FIELDS[number]['key'] | undefined;
     if (key) colors[key] = input.value;
   }
+  colors.hollowUp = paramFields.querySelector<HTMLInputElement>('[data-candle-hollow="hollowUp"]')?.checked ?? false;
+  colors.hollowDown = paramFields.querySelector<HTMLInputElement>('[data-candle-hollow="hollowDown"]')?.checked ?? false;
   return colors;
 }
 

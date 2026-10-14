@@ -188,18 +188,24 @@ export class CandleSeries extends Series {
           alphaAdjusted = true;
         }
       }
-      if (drawWicks) {
-        ctx.fillStyle = up ? theme.wickUp : theme.wickDown;
-        const yH = ps.yFor(c.high);
-        ctx.fillRect(x, yH, 1, Math.max(1, ps.yFor(c.low) - yH));
-      }
       const yO = ps.yFor(c.open);
       const yC = ps.yFor(c.close);
       const bodyTop = Math.min(yO, yC);
       const bodyHeight = Math.max(1, Math.abs(yO - yC));
       const color = up ? theme.up : theme.down;
       const hollow = up ? this.rendering.hollowUp : this.rendering.hollowDown;
-      if (hollow && bw > 1 && bodyHeight > 1) {
+      const hollowBody = hollow && bw > 1 && bodyHeight > 1;
+      if (drawWicks) {
+        ctx.fillStyle = up ? theme.wickUp : theme.wickDown;
+        const yH = ps.yFor(c.high);
+        const yL = ps.yFor(c.low);
+        if (hollowBody) {
+          const bodyBottom = Math.max(yO, yC);
+          if (bodyTop > yH) ctx.fillRect(x, yH, 1, bodyTop - yH);
+          if (yL > bodyBottom) ctx.fillRect(x, bodyBottom, 1, yL - bodyBottom);
+        } else ctx.fillRect(x, yH, 1, Math.max(1, yL - yH));
+      }
+      if (hollowBody) {
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
         ctx.strokeRect(x - half + 0.5, bodyTop + 0.5, Math.max(1, bw - 1), Math.max(1, bodyHeight - 1));
