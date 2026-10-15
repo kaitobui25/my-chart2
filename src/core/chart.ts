@@ -304,6 +304,7 @@ export class L2Chart {
   private readonly drawingEditListeners = new Set<(id: number) => boolean>();
   private readonly indicatorRemoveListeners = new Set<(id: string) => void>();
   private readonly indicatorSettingsListeners = new Set<(id: string) => void>();
+  private readonly priceSettingsListeners = new Set<(anchor: HTMLElement) => void>();
   private readonly visibleRangeListeners = new Set<(e: VisibleRangeChangeEvent) => void>();
 
   private ro: ResizeObserver;
@@ -783,6 +784,17 @@ export class L2Chart {
     return () => this.indicatorSettingsListeners.delete(cb);
   }
 
+  onPriceSettings(cb: (anchor: HTMLElement) => void): () => void {
+    this.priceSettingsListeners.add(cb);
+    this.invalidate();
+    return () => { this.priceSettingsListeners.delete(cb); this.invalidate(); };
+  }
+
+  setCandleDecorations(decorations: CandleSeries['decorations']): void {
+    this.mainSeries.decorations = decorations;
+    this.invalidate();
+  }
+
   getSelectedIndicatorId(): string | null {
     return this.selectedIndicatorId;
   }
@@ -1132,9 +1144,15 @@ export class L2Chart {
     pane.legendEl = document.createElement('div');
     pane.legendEl.className = this.panes.length === 0 ? 'l2chart-legend l2chart-legend-main' : 'l2chart-legend';
     pane.legendEl.addEventListener('pointerdown', (event) => {
-      if ((event.target as HTMLElement).closest('[data-price-visibility],[data-legend-toggle],[data-indicator-action],[data-indicator-row]')) event.stopPropagation();
+      if ((event.target as HTMLElement).closest('[data-price-settings],[data-price-visibility],[data-legend-toggle],[data-indicator-action],[data-indicator-row]')) event.stopPropagation();
     });
     pane.legendEl.addEventListener('click', (event) => {
+      const settings = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-price-settings]');
+      if (settings) {
+        event.preventDefault(); event.stopPropagation();
+        for (const cb of this.priceSettingsListeners) cb(settings);
+        return;
+      }
       const priceVisibility = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-price-visibility]');
       if (priceVisibility) {
         event.preventDefault();
@@ -2884,7 +2902,7 @@ export class L2Chart {
       const toggleIcon = this.legendCollapsed ? icons.expand : icons.collapse;
       const priceVisible = this.getPriceSeriesRenderVisible();
       const visibilityTitle = tr(priceVisible ? 'Ẩn nến' : 'Hiện nến');
-      html += `<div class="l2chart-legend-row l2chart-legend-primary${this.legendCollapsed ? ' collapsed' : ''}${this.legendMetadata ? ' has-metadata' : ''}" style="color:${textColor}">` +
+      html += `<div class="l2chart-legend-row l2chart-legend-primary${this.legendCollapsed ? ' collapsed' : ''}${this.legendMetadata ? ' has-metadata' : ''}${this.priceSettingsListeners.size ? ' has-price-settings' : ''}" style="color:${textColor}">` +
         `<span class="l2chart-legend-primary-text"><b>${esc(this.legendTitle)}</b>&nbsp; ` +
         `<span style="color:${dimColor}">O</span> <span style="color:${color}">${f(c.open)}</span> ` +
         `<span style="color:${dimColor}">H</span> <span style="color:${color}">${f(c.high)}</span> ` +
@@ -2893,6 +2911,7 @@ export class L2Chart {
         `<span style="color:${color}">${chg >= 0 ? '+' : ''}${f(chg)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)</span>`;
       html += `</span>` +
         `<button type="button" class="l2chart-legend-action l2chart-legend-toggle l2chart-legend-price-visibility" data-price-visibility title="${escAttr(visibilityTitle)}" aria-label="${escAttr(visibilityTitle)}" aria-pressed="${!priceVisible}">${priceVisible ? icons.visible : icons.hidden}</button>` +
+        (this.priceSettingsListeners.size ? '<button type="button" class="l2chart-legend-action l2chart-legend-toggle" data-price-settings title="Cài đặt nến" aria-label="Cài đặt nến" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>' : '') +
         (this.legendMetadata ? `<span class="l2chart-legend-metadata" title="${escAttr(this.legendMetadata.title)}" style="color:${dimColor}">${esc(this.legendMetadata.text)}</span>` : '') +
         `<button type="button" class="l2chart-legend-action l2chart-legend-toggle" data-legend-toggle title="${escAttr(toggleTitle)}" aria-label="${escAttr(toggleTitle)}" aria-expanded="${this.legendCollapsed ? 'false' : 'true'}">${toggleIcon}</button>` +
         `</div>`;

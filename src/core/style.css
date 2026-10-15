@@ -42,6 +42,10 @@
   min-width: 96px;
 }
 
+.l2chart-legend-primary.has-price-settings .l2chart-legend-toggle {
+  position: static;
+}
+
 .l2chart-legend-toggle {
   flex: 0 0 auto;
   position: absolute;

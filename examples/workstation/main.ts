@@ -6,6 +6,7 @@ import { captureReplayViewport, restoreReplayViewport, type ReplayViewport } fro
 import type { BarLabel } from '../../src/core/chart';
 import { bindReplaySettings } from './replay/replay-settings';
 import { buildReplaySessionCountdown } from './replay/replay-session-countdown';
+import { createSessionEndSettings, sessionEndModes, sessionEndTimes, SESSION_END_COLOR, type SessionEndMode } from './session-end-settings';
 import { setIndicatorMarketContext } from '../../src/indicators/runtime-context';
 import { showHistoryEndNotice } from './history-notice';
 import { restoreWorkspaceIndicatorSettings } from './workspace-indicator-settings';
@@ -260,6 +261,7 @@ interface ChartTemplate {
 
 
 interface UiPreferences {
+  sessionEndMode: SessionEndMode;
   watchlistVisible: boolean;
   rightPanelVisible: boolean;
   symbols: string[];
@@ -492,6 +494,7 @@ function writeStoredJson(key: string, value: unknown): void {
 }
 
 const defaultUiPreferences: UiPreferences = {
+  sessionEndMode: 'color',
   watchlistVisible: true,
   rightPanelVisible: false,
   symbols: [...DEFAULT_SYMBOLS],
@@ -535,6 +538,15 @@ uiPreferences.replayDayLabelColors = DEFAULT_REPLAY_DAY_LABEL_COLORS.map((fallba
 function saveUiPreferences(): void {
   writeStoredJson(UI_PREFERENCES_KEY, uiPreferences);
 }
+
+const openSessionEndSettings = createSessionEndSettings(
+  () => Object.prototype.hasOwnProperty.call(sessionEndModes, uiPreferences.sessionEndMode) ? uiPreferences.sessionEndMode : 'color',
+  mode => {
+    uiPreferences.sessionEndMode = mode;
+    saveUiPreferences();
+    for (const tile of tiles) tile.refreshSessionEndMarkers();
+  },
+);
 
 const storedAutoSaveSettings = readStoredJson<Partial<AutoSaveSettings>>(AUTO_SAVE_SETTINGS_KEY, {});
 const autoSaveSettings: AutoSaveSettings = {
@@ -1747,6 +1759,7 @@ class Tile implements ReplayParticipant {
   private inlineTextDrawingId: number | null = null;
   private marketEl!: HTMLSpanElement;
   private countdownTimer: number | null = null;
+  private sessionEndCache: { history: readonly Candle[]; length: number; key: string; times: number[] } | null = null;
   private latestQuote: MarketQuote | null = null;
   private pricePrecision: number | null = null;
   private candleColors: CandleColors | null;
@@ -1888,6 +1901,7 @@ class Tile implements ReplayParticipant {
     }
 
     this.chart.on('data', () => {
+      this.refreshSessionEndMarkers();
       for (const ind of this.active.values()) ind.recompute();
     });
     this.chart.onVisibleRangeChange(({ from, dataLength }) => {
@@ -1936,6 +1950,7 @@ class Tile implements ReplayParticipant {
       setActiveTile(this);
       openParamDialog(id);
     });
+    this.chart.onPriceSettings(anchor => openSessionEndSettings(anchor));
     this.el.addEventListener('pointerdown', () => setActiveTile(this));
 
     for (const [id, params] of Object.entries(initialPreferences.indicatorParams ?? {})) {
@@ -2727,6 +2742,21 @@ class Tile implements ReplayParticipant {
       this.chart.getCandles().map(candle => candle.time), this.history.map(candle => candle.time),
       this.interval, activeProvider, this.symbol,
     );
+  }
+
+  refreshSessionEndMarkers(): void {
+    const mode = Object.prototype.hasOwnProperty.call(sessionEndModes, uiPreferences.sessionEndMode) ? uiPreferences.sessionEndMode : 'color';
+    if (mode === 'off') { this.chart.setCandleDecorations(new Map()); return; }
+    const key = `${activeProvider}:${this.symbol}:${this.interval}`;
+    const cache = this.sessionEndCache;
+    if (!cache || cache.history !== this.history || cache.length !== this.history.length || cache.key !== key) {
+      this.sessionEndCache = { history: this.history, length: this.history.length, key,
+        times: sessionEndTimes(this.history.map(candle => candle.time), this.interval, activeProvider, this.symbol) };
+    }
+    this.chart.setCandleDecorations(new Map(this.sessionEndCache!.times.map(time => [time, {
+      color: mode === 'color' || mode === 'both' ? SESSION_END_COLOR : undefined,
+      arrowColor: mode === 'arrow' || mode === 'both' ? SESSION_END_COLOR : undefined,
+    }])));
   }
 
   setHistoryRange(range: HistoryRange, interval?: string): HistoryRange | null {

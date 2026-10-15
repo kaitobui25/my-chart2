@@ -90,6 +90,8 @@ export class OverlaySeries extends Series {
 
 /** The main OHLC series of a chart. Reads candles owned by the chart (no copy). */
 export class CandleSeries extends Series {
+  /** Timestamp keyed decorations; never change source prices or autoscaling. */
+  decorations: ReadonlyMap<number, { color?: string; arrowColor?: string }> = new Map();
   mode: PriceSeriesMode = 'candles';
   lineColor: string | null = null;
   areaColor: string | null = null;
@@ -192,11 +194,12 @@ export class CandleSeries extends Series {
       const yC = ps.yFor(c.close);
       const bodyTop = Math.min(yO, yC);
       const bodyHeight = Math.max(1, Math.abs(yO - yC));
-      const color = up ? theme.up : theme.down;
+      const decoration = this.decorations.get(c.time);
+      const color = decoration?.color ?? (up ? theme.up : theme.down);
       const hollow = up ? this.rendering.hollowUp : this.rendering.hollowDown;
       const hollowBody = hollow && bw > 1 && bodyHeight > 1;
       if (drawWicks) {
-        ctx.fillStyle = up ? theme.wickUp : theme.wickDown;
+        ctx.fillStyle = decoration?.color ?? (up ? theme.wickUp : theme.wickDown);
         const yH = ps.yFor(c.high);
         const yL = ps.yFor(c.low);
         if (hollowBody) {
@@ -212,6 +215,15 @@ export class CandleSeries extends Series {
       } else {
         ctx.fillStyle = color;
         ctx.fillRect(x - half, bodyTop, bw, bodyHeight);
+      }
+      if (decoration?.arrowColor) {
+        const tip = Math.max(17, ps.yFor(c.high) - 20);
+        ctx.strokeStyle = decoration.arrowColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, tip - 12); ctx.lineTo(x, tip);
+        ctx.moveTo(x - 4, tip - 5); ctx.lineTo(x, tip); ctx.lineTo(x + 4, tip - 5);
+        ctx.stroke();
       }
     }
     if (alphaAdjusted) ctx.globalAlpha = baseAlpha;
