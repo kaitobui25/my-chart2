@@ -1,16 +1,15 @@
 # L2Chart AI Assistant
 
-The workstation assistant is provider-neutral at the chart layer. Phase 1A connects the local assistant sidecar directly to ChatGPT through the dedicated LAMlongchart Chrome extension, while the sidecar also retains the optional Codex CLI provider used by the Excel add-in.
+The workstation assistant uses Codex CLI through the local assistant sidecar. The Excel add-in supports both Codex CLI and ChatGPT through the dedicated LAMlongchart Chrome extension.
 
 ## Start
 
 1. Install dependencies once with `npm install`.
 2. Run `npm run dev`.
-3. In Chrome, open `chrome://extensions`, enable Developer mode, and load `examples/chatgpt-extension` as an unpacked extension.
-4. Keep Chrome signed in to ChatGPT.
-5. Reload the workstation after the extension is loaded or reloaded.
+3. Install Codex CLI and sign in with your ChatGPT account.
+4. Open the workstation's AI panel. Use `/status` to check the Codex connection and quota.
 
-`npm run dev` starts the loopback-only assistant sidecar on `127.0.0.1:8788` and the workstation. ChatGPT does not require Codex CLI, Chat On Steroids runtime, MCP server, or a public tunnel. Codex CLI is only required when the Codex provider is selected.
+`npm run dev` starts the loopback-only assistant sidecar on `127.0.0.1:8788` and the workstation. Workstation chat requires Codex CLI; no browser extension, MCP server, or public tunnel is needed. For the Excel add-in's ChatGPT provider, load `examples/chatgpt-extension` as an unpacked Chrome extension and keep Chrome signed in to ChatGPT.
 
 ## Design
 

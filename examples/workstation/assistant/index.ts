@@ -9,10 +9,10 @@ import type {
   ReasoningEffort,
 } from './types';
 
-const STORAGE_KEY = 'l2chart.assistant.settings.v1';
+const STORAGE_KEY = 'l2chart.assistant.codex.settings.v1';
 const MAX_CONVERSATION_MESSAGES = 10;
 const ALL_REASONING_EFFORTS: ReasoningEffort[] = [
-  'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro',
+  'low', 'medium', 'high', 'xhigh',
 ];
 const REASONING_LABELS: Record<ReasoningEffort, string> = {
   none: 'Instant',
@@ -61,10 +61,14 @@ function createElement<K extends keyof HTMLElementTagNameMap>(
 
 function formatAssistantStatus(payload: AssistantStatusResponse): string {
   const lines = [
-    payload.bridgeConnected === false ? 'ChatGPT Bridge: offline' : 'ChatGPT Bridge: connected',
-    'Model: ' + (payload.selected.model || 'ChatGPT current'),
+    'Codex CLI: connected',
+    'Model: ' + (payload.selected.model || 'Codex default'),
     'Reasoning: ' + payload.selected.reasoningEffort,
   ];
+  if (payload.account?.planType) lines.push('Plan: ' + payload.account.planType);
+  for (const bucket of [payload.rateLimits.primary, payload.rateLimits.secondary]) {
+    if (bucket?.remainingPercent != null) lines.push(`${bucket.slot}: ${bucket.remainingPercent}% remaining`);
+  }
   if (payload.conversationId) lines.push('Conversation: ' + payload.conversationId);
   if (payload.detail) lines.push(payload.detail);
   return lines.join('\n');
@@ -77,7 +81,7 @@ function mountAssistant(): void {
   if (!tabs || !rightPanel || !dock || document.getElementById('assistant-view')) return;
 
   const saved = readSettings();
-  let reasoningEffort: ReasoningEffort = ALL_REASONING_EFFORTS.includes(saved.reasoningEffort ?? 'medium')
+  let reasoningEffort: ReasoningEffort = saved.reasoningEffort && ALL_REASONING_EFFORTS.includes(saved.reasoningEffort)
     ? saved.reasoningEffort as ReasoningEffort
     : 'medium';
   let model = saved.model?.trim() ?? '';
@@ -115,7 +119,7 @@ function mountAssistant(): void {
     <div class="assistant-head">
       <div>
         <strong>AI Chart Assistant</strong>
-        <span id="assistant-status">Đang kiểm tra ChatGPT Bridge…</span>
+        <span id="assistant-status">Đang kiểm tra Codex…</span>
       </div>
       <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
     </div>
@@ -237,7 +241,7 @@ function mountAssistant(): void {
     const options: HTMLOptionElement[] = [];
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
-    defaultOption.textContent = 'ChatGPT current';
+    defaultOption.textContent = 'Codex default';
     options.push(defaultOption);
 
     for (const item of modelOptions) {
@@ -263,9 +267,9 @@ function mountAssistant(): void {
     modelsLoading = true;
     setBusy(busy);
     try {
-      const response = await client.options();
+      const response = await client.options('codex');
       modelOptions = Array.isArray(response.models) ? response.models : [];
-      modelSelect.title = `${modelOptions.length} model từ ChatGPT`;
+      modelSelect.title = `${modelOptions.length} model từ Codex`;
     } catch (error) {
       modelOptions = [];
       modelSelect.title = error instanceof Error ? error.message : String(error);
@@ -333,7 +337,7 @@ function mountAssistant(): void {
     void (async () => {
       setBusy(true);
       try {
-        const response = await client.newConversation({ model: model || null, reasoningEffort });
+        const response = await client.newConversation({ provider: 'codex', model: model || null, reasoningEffort });
         if (response.selection && ALL_REASONING_EFFORTS.includes(response.selection.reasoningEffort)) {
           reasoningEffort = response.selection.reasoningEffort;
           renderReasoningOptions(
@@ -344,8 +348,8 @@ function mountAssistant(): void {
         }
         conversation = [];
         messages.replaceChildren();
-        appendMessage('assistant', 'Đã mở cuộc trò chuyện ChatGPT mới cho chart hiện tại.');
-        setConnectionStatus('ChatGPT connected', true);
+        appendMessage('assistant', 'Đã mở cuộc trò chuyện Codex mới cho chart hiện tại.');
+        setConnectionStatus('Codex connected', true);
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
         appendMessage('assistant', 'Lỗi tạo chat mới: ' + text);
@@ -364,12 +368,12 @@ function mountAssistant(): void {
     setBusy(true);
     const thinking = appendThinking();
     try {
-      const response = await client.status({ model: model || null, reasoningEffort });
+      const response = await client.status({ provider: 'codex', model: model || null, reasoningEffort });
       thinking.remove();
       appendMessage('assistant', formatAssistantStatus(response));
       setConnectionStatus(
-        response.bridgeConnected === false ? 'ChatGPT Bridge offline' : 'ChatGPT connected',
-        response.bridgeConnected !== false,
+        'Codex connected',
+        true,
       );
     } catch (error) {
       thinking.remove();
@@ -415,7 +419,7 @@ function mountAssistant(): void {
         client,
         bridge: window.__L2CHART_ASSISTANT__!,
         context,
-        provider: 'chatgpt',
+        provider: 'codex',
         message,
         model: model || null,
         reasoningEffort,
@@ -434,7 +438,7 @@ function mountAssistant(): void {
         { role: 'assistant', content: answer },
       ];
       conversation = nextConversation.slice(-MAX_CONVERSATION_MESSAGES);
-      setConnectionStatus('ChatGPT connected', true);
+      setConnectionStatus('Codex connected', true);
     } catch (error) {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
@@ -475,9 +479,9 @@ function mountAssistant(): void {
     attributeFilter: ['class', 'hidden'],
   });
 
-  void client.health().then((health) => {
+  void client.health('codex').then((health) => {
     setConnectionStatus(
-      health.assistantAvailable ? 'ChatGPT connected' : health.detail,
+      health.assistantAvailable ? 'Codex connected' : health.detail,
       health.assistantAvailable,
     );
   }).catch((error) => {
@@ -486,7 +490,7 @@ function mountAssistant(): void {
   void loadModelOptions();
 
   currentContext();
-  appendMessage('assistant', 'Sẵn sàng. LAM gửi structured chart context trực tiếp tới ChatGPT; dùng /status để xem bridge.');
+  appendMessage('assistant', 'Sẵn sàng. LAM gửi dữ liệu chart tới Codex; dùng /status để xem kết nối và quota.');
 }
 
 if (document.readyState === 'loading') {
