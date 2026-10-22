@@ -101,9 +101,11 @@ const replayControls = bindExcelReplayControls({
   },
   onPlayPause: () => replay?.togglePlayback(),
   onStep: () => replay?.step(),
+  onStepBack: () => replay?.stepBack(),
+  onRewind: () => replay?.toggleRewindSelection(),
   onSpeed: () => replay?.cycleSpeed(),
   onStop: () => replay?.stop(),
-  onCancelSelection: () => replay?.stop(),
+  onCancelSelection: () => replay?.cancelSelection(),
 });
 replay = new ExcelReplayController({
   chart,

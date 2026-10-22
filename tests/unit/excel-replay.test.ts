@@ -57,6 +57,43 @@ function setup(
 afterEach(() => vi.useRealTimers());
 
 describe('Excel Replay', () => {
+  it.each(['sheet', 'market'] as const)('rewinds %s one bar and to a selected candle without losing the original data', (source) => {
+    vi.useFakeTimers();
+    const h = setup(source, 100_000, true);
+    h.replay.stepBack();
+    expect(h.getVisible()).toEqual(sample);
+    h.replay.begin();
+    h.replay.selectStart(2);
+    h.replay.togglePlayback();
+    h.replay.stepBack();
+    expect(h.replay.snapshot()).toMatchObject({ phase: 'paused', cursor: 1 });
+    expect(h.getVisible()).toEqual(sample.slice(0, 2));
+    vi.advanceTimersByTime(2000);
+    expect(h.getVisible()).toHaveLength(2);
+    h.replay.step();
+    h.replay.toggleRewindSelection();
+    expect(h.isSelecting()).toBe(true);
+    expect(h.replay.selectStart(2)).toBe(false);
+    expect(h.replay.selectStart(-1)).toBe(false);
+    expect(h.isSelecting()).toBe(true);
+    h.replay.cancelSelection();
+    expect(h.replay.snapshot()).toMatchObject({ phase: 'paused', cursor: 2 });
+    h.replay.toggleRewindSelection();
+    h.replay.toggleRewindSelection();
+    expect(h.isSelecting()).toBe(false);
+    h.replay.toggleRewindSelection();
+    expect(h.replay.selectStart(0)).toBe(true);
+    expect(h.getVisible()).toEqual(sample.slice(0, 1));
+    h.replay.stepBack();
+    expect(h.replay.snapshot().cursor).toBe(0);
+    h.replay.step();
+    expect(h.getVisible()).toEqual(sample.slice(0, 2));
+    h.replay.stop();
+    expect(h.getVisible()).toEqual(sample);
+    expect(h.market.resume).toHaveBeenCalledTimes(source === 'market' ? 1 : 0);
+    h.replay.dispose();
+  });
+
   it('reveals exactly one new bar per step and restores complete Sheet source', () => {
     const h = setup();
     expect(h.replay.begin()).toBe(true);

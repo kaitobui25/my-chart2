@@ -117,6 +117,9 @@ export class ExcelReplayController {
   }
 
   selectStart(index: number): boolean {
+    if (this.selecting && this.clock.snapshot().cursor >= 0) {
+      return this.rewindTo(index);
+    }
     if (!this.selecting || !Number.isInteger(index) || index < 0 || index >= this.candles.length - 1) {
       if (this.selecting) return this.fail('Chọn một nến trước nến cuối để bắt đầu.');
       return false;
@@ -144,6 +147,52 @@ export class ExcelReplayController {
     if (this.selecting) return;
     if (this.clock.snapshot().phase === 'playing') this.clock.pause();
     this.clock.step();
+  }
+
+  stepBack(): void {
+    if (this.selecting || this.clock.snapshot().phase === 'idle') return;
+    this.clock.pause();
+    this.rewindTo(this.clock.snapshot().cursor - 1);
+  }
+
+  toggleRewindSelection(): void {
+    if (this.clock.snapshot().phase === 'idle') return;
+    if (this.selecting) {
+      this.cancelSelection();
+      return;
+    }
+    this.clock.pause();
+    this.selecting = true;
+    this.error = null;
+    this.deps.chart.setReplaySelectionMode(true);
+    this.emit();
+  }
+
+  cancelSelection(): void {
+    if (!this.selecting) return;
+    if (this.clock.snapshot().phase === 'idle') {
+      this.stop();
+      return;
+    }
+    this.selecting = false;
+    this.error = null;
+    this.deps.chart.setReplaySelectionMode(false);
+    this.emit();
+  }
+
+  private rewindTo(index: number): boolean {
+    const cursor = this.clock.snapshot().cursor;
+    if (!Number.isInteger(index) || index < 0 || index >= cursor) return false;
+    const viewport = this.preserveZoom ? this.captureViewport() : null;
+    this.selecting = false;
+    this.error = null;
+    this.deps.chart.setReplaySelectionMode(false);
+    this.deps.chart.setData(this.candles.slice(0, index + 1).map((candle) => ({ ...candle })));
+    if (viewport) this.restoreViewport(viewport);
+    else this.deps.chart.scrollToLatest();
+    this.deps.chart.ensureCandlePriceVisible(this.candles[index]);
+    this.clock.load(this.candles.map((candle) => candle.time), index);
+    return true;
   }
 
   cycleSpeed(): void {

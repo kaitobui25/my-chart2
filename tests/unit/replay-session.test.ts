@@ -110,6 +110,92 @@ function sourceCandles(): Candle[] {
 }
 
 describe('SyncedReplaySession', () => {
+  it('rewinds to a clicked candle and can cancel selection without changing the cursor', async () => {
+    const participant = new TestParticipant('BTCUSDT', '15m', utc('2026-08-07T10:30:00Z'));
+    const feed: Datafeed = {
+      name: 'Test',
+      getHistory: vi.fn(async () => sourceCandles()),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant],
+      getFeed: () => ({ feed, label: 'Test', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: () => undefined,
+    });
+    session.beginSelection();
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(session.snapshot().phase).toBe('paused'));
+    session.step();
+    session.step();
+    session.toggleRewindSelection();
+    expect(participant.selecting).toBe(true);
+    session.toggleRewindSelection();
+    expect(participant.selecting).toBe(false);
+    expect(session.snapshot().cursor).toBe(3);
+    session.togglePlayback();
+    session.toggleRewindSelection();
+    const selection = vi.spyOn(participant, 'getReplaySelectionTime');
+    selection.mockReturnValue(utc('2026-08-07T11:00:00Z'));
+    session.selectStart(participant, 3);
+    expect(session.snapshot().phase).toBe('selecting');
+    selection.mockReturnValue(utc('2026-08-07T10:30:00Z'));
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(session.snapshot().phase).toBe('paused'));
+    expect(participant.selecting).toBe(false);
+    expect(participant.data).toEqual(sourceCandles().slice(0, 2));
+    session.step();
+    expect(participant.data).toEqual(sourceCandles().slice(0, 3));
+    session.toggleRewindSelection();
+    selection.mockReturnValue(utc('2026-08-07T10:15:00Z'));
+    session.selectStart(participant, 0);
+    expect(session.snapshot().cursor).toBe(0);
+    expect(participant.data).toEqual(sourceCandles().slice(0, 1));
+    session.stop(false);
+  });
+
+  it('rewinds one candle, rebuilds higher timeframe OHLC, and stops at the first candle', async () => {
+    const participant = new TestParticipant('BTCUSDT', '15m', utc('2026-08-07T10:30:00Z'));
+    const hourly = new TestParticipant('BTCUSDT', '1h', utc('2026-08-07T10:30:00Z'));
+    const feed: Datafeed = {
+      name: 'Test',
+      getHistory: vi.fn(async () => sourceCandles()),
+      subscribe: () => () => undefined,
+    };
+    const session = new SyncedReplaySession({
+      getParticipants: () => [participant, hourly],
+      getFeed: () => ({ feed, label: 'Test', utcOffsetMinutes: 0 }),
+      claimMarketSource: () => undefined,
+      releaseMarketSource: () => undefined,
+      publishRawCandle: () => undefined,
+      onStateChange: () => undefined,
+    });
+    session.beginSelection();
+    session.selectStart(participant, 1);
+    await vi.waitFor(() => expect(session.snapshot().phase).toBe('paused'));
+    session.step();
+    session.step();
+    expect(session.snapshot().cursor).toBe(3);
+    session.stepBack();
+    expect(session.snapshot().cursor).toBe(2);
+    expect(participant.data).toEqual(sourceCandles().slice(0, 3));
+    session.togglePlayback();
+    session.stepBack();
+    expect(session.snapshot().phase).toBe('paused');
+    expect(session.snapshot().cursor).toBe(1);
+    expect(hourly.data[hourly.data.length - 1]).toMatchObject({ high: 105, low: 98, close: 104 });
+    expect(hourly.replayTime).toBe(participant.replayTime);
+    session.stepBack();
+    session.stepBack();
+    expect(session.snapshot().cursor).toBe(0);
+    expect(participant.data).toEqual(sourceCandles().slice(0, 1));
+    session.step();
+    expect(participant.data).toEqual(sourceCandles().slice(0, 2));
+    session.stop(false);
+  });
+
   it('groups visible charts by the active symbol without letting other symbols block replay', () => {
     const selectedTime = utc('2026-08-07T10:30:00Z');
     const activeDaily = new TestParticipant('HPG', '1d', selectedTime);

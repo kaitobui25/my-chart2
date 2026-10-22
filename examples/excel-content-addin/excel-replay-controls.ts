@@ -13,6 +13,8 @@ export interface ReplayControlsActions {
   onToggle(): void;
   onPlayPause(): void;
   onStep(): void;
+  onStepBack(): void;
+  onRewind(): void;
   onSpeed(): void;
   onStop(): void;
   onCancelSelection(): void;
@@ -32,6 +34,8 @@ export function bindExcelReplayControls(
   const controls = requiredElement<HTMLElement>(root, '#replay-controls');
   const actionRow = requiredElement<HTMLElement>(root, '#replay-actions');
   const playPause = requiredButton(root, '#replay-play-pause');
+  const back = requiredButton(root, '#replay-back');
+  const rewind = requiredButton(root, '#replay-rewind');
   const step = requiredButton(root, '#replay-step');
   const speed = requiredButton(root, '#replay-speed');
   const stop = requiredButton(root, '#replay-stop');
@@ -42,6 +46,8 @@ export function bindExcelReplayControls(
 
   const onToggle = () => actions.onToggle();
   const onPlayPause = () => actions.onPlayPause();
+  const onBack = () => actions.onStepBack();
+  const onRewind = () => actions.onRewind();
   const onStep = () => actions.onStep();
   const onSpeed = () => actions.onSpeed();
   const onStop = () => actions.onStop();
@@ -66,6 +72,8 @@ export function bindExcelReplayControls(
   toggle.addEventListener('click', onToggle);
   playPause.addEventListener('click', onPlayPause);
   step.addEventListener('click', onStep);
+  back.addEventListener('click', onBack);
+  rewind.addEventListener('click', onRewind);
   speed.addEventListener('click', onSpeed);
   stop.addEventListener('click', onStop);
   cancel.addEventListener('click', onCancel);
@@ -84,11 +92,16 @@ export function bindExcelReplayControls(
       toggle.setAttribute('aria-pressed', String(phase !== 'idle'));
       toggle.setAttribute('aria-expanded', String(phase !== 'idle'));
       controls.hidden = phase === 'idle' && !error;
-      actionRow.hidden = !active;
+      const rewinding = selecting && snapshot.cursor >= 0;
+      actionRow.hidden = !active && !rewinding;
+      back.disabled = selecting || snapshot.cursor <= 0;
+      rewind.disabled = snapshot.cursor <= 0;
+      rewind.setAttribute('aria-pressed', String(rewinding));
+      speed.disabled = selecting;
       cancel.hidden = !selecting;
 
-      playPause.disabled = !hasNext && phase !== 'playing';
-      step.disabled = !hasNext;
+      playPause.disabled = selecting || (!hasNext && phase !== 'playing');
+      step.disabled = selecting || !hasNext;
       const playing = phase === 'playing';
       const playLabel = playing ? 'Tạm dừng Replay' : 'Phát Replay';
       playPause.textContent = playing ? 'Tạm dừng' : 'Phát';
@@ -104,7 +117,9 @@ export function bindExcelReplayControls(
       if (error) {
         status.textContent = error;
       } else if (selecting) {
-        status.textContent = 'Chọn nến bắt đầu trên biểu đồ · Esc để hủy';
+        status.textContent = rewinding
+          ? 'Ch\u1ecdn n\u1ebfn tr\u01b0\u1edbc \u0111\u00f3 tr\u00ean bi\u1ec3u \u0111\u1ed3 \u00b7 Esc \u0111\u1ec3 h\u1ee7y'
+          : 'Chọn nến bắt đầu trên biểu đồ · Esc để hủy';
       } else if (active) {
         const progress = `${Math.max(0, snapshot.cursor + 1).toLocaleString('vi-VN')}/${snapshot.total.toLocaleString('vi-VN')} nến`;
         const time = formatReplayTime(snapshot.currentTime);
@@ -120,6 +135,8 @@ export function bindExcelReplayControls(
       toggle.removeEventListener('click', onToggle);
       playPause.removeEventListener('click', onPlayPause);
       step.removeEventListener('click', onStep);
+      back.removeEventListener('click', onBack);
+      rewind.removeEventListener('click', onRewind);
       speed.removeEventListener('click', onSpeed);
       stop.removeEventListener('click', onStop);
       cancel.removeEventListener('click', onCancel);

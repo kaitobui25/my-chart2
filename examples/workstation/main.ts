@@ -2782,7 +2782,7 @@ class Tile implements ReplayParticipant {
   }
 
   getReplaySelectionTime(index: number, utcOffsetMinutes: number): number | null {
-    const candle = this.history[index];
+    const candle = (this.replayActive ? this.chart.getCandles() : this.history)[index];
     return candle ? nextIntervalStart(candle.time, this.interval, utcOffsetMinutes) : null;
   }
 
@@ -3752,6 +3752,8 @@ const replayLabel = document.getElementById('replay-label')!;
 const replayControls = document.getElementById('replay-controls')!;
 const replayStatus = document.getElementById('replay-status')!;
 const replayPlay = document.getElementById('replay-play') as HTMLButtonElement;
+const replayRewind = document.getElementById('replay-rewind') as HTMLButtonElement;
+const replayBack = document.getElementById('replay-back') as HTMLButtonElement;
 const replayStep = document.getElementById('replay-step') as HTMLButtonElement;
 const replaySpeed = document.getElementById('replay-speed') as HTMLButtonElement;
 const replayStop = document.getElementById('replay-stop') as HTMLButtonElement;
@@ -3813,7 +3815,7 @@ function refreshReplayUi(): void {
     ? ''
     : new Date(replay.currentTime * 1000).toLocaleString(getLocale() === 'vi' ? 'vi-VN' : 'en-US');
   replayStatus.textContent = selecting
-    ? 'Chọn nến trên một chart'
+    ? (replay.total > 0 ? 'Chọn nến để lùi replay' : 'Chọn nến trên một chart')
     : loading
       ? 'Đang tải raw candles...'
       : `${replay.cursor + 1}/${replay.total}${timeLabel ? ` · ${timeLabel}` : ''}`;
@@ -3828,6 +3830,9 @@ function refreshReplayUi(): void {
   replaySpeed.title = 'Đổi tốc độ replay (Shift + ↑)';
   replaySpeed.setAttribute('aria-label', replaySpeed.title);
   replayPlay.disabled = selecting || loading || finished;
+  replayRewind.disabled = loading || (selecting && replay.total === 0);
+  replayRewind.classList.toggle('active', selecting && replay.total > 0);
+  replayBack.disabled = selecting || loading || replay.cursor <= 0;
   replayStep.disabled = selecting || loading || finished;
   replaySpeed.disabled = selecting || loading;
   const speedLabel = `${replay.speed}×`;
@@ -3877,6 +3882,8 @@ replayBtn.addEventListener('click', async () => {
   session.beginSelection();
 });
 replayPlay.addEventListener('click', () => replaySession?.togglePlayback());
+replayRewind.addEventListener('click', () => replaySession?.toggleRewindSelection());
+replayBack.addEventListener('click', () => replaySession?.stepBack());
 replayStep.addEventListener('click', () => replaySession?.step());
 replaySpeed.addEventListener('click', () => replaySession?.cycleSpeed());
 replayStop.addEventListener('click', () => replaySession?.stop(true));

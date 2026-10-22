@@ -146,12 +146,14 @@ export class SyncedReplaySession {
   private participantsPrepared = false;
   private projections = new Map<ReplayParticipant, ReplayProjection>();
   private sourceCandles: Candle[] = [];
+  private displaySeeds = new Map<ReplayParticipant, Candle[]>();
   private baseInterval: string | null = null;
   private symbol: string | null = null;
   private sourceLabel = 'Replay';
   private utcOffsetMinutes = 0;
   private error: string | null = null;
   private loadToken = 0;
+  private selectingRewind = false;
   private marketSourceClaimed = false;
 
   constructor(private readonly environment: ReplaySessionEnvironment) {
@@ -202,10 +204,44 @@ export class SyncedReplaySession {
     return true;
   }
 
+  toggleRewindSelection(): void {
+    if (this.selectingRewind) {
+      this.selectingRewind = false;
+      for (const participant of this.participants) participant.setReplaySelecting(false);
+      this.phase = 'paused';
+      this.emitChange();
+      return;
+    }
+    if (this.phase !== 'paused' && this.phase !== 'playing') return;
+    this.clock.pause();
+    this.selectingRewind = true;
+    this.phase = 'selecting';
+    for (const participant of this.participants) participant.setReplaySelecting(true);
+    this.emitChange();
+  }
+
   selectStart(participant: ReplayParticipant, index: number): void {
     if (this.phase !== 'selecting' || !this.participants.includes(participant)) return;
     const selectedTime = participant.getReplaySelectionTime(index, this.utcOffsetMinutesFromCurrentFeed());
     if (selectedTime === null) return;
+    if (this.selectingRewind) {
+      const currentTime = this.clock.snapshot().currentTime;
+      if (currentTime === null || selectedTime >= currentTime) return;
+      this.selectingRewind = false;
+      for (const target of this.participants) target.setReplaySelecting(false);
+      if (this.baseInterval) {
+        let cursor = -1;
+        for (let i = 0; i < this.sourceCandles.length; i += 1) {
+          if (nextIntervalStart(this.sourceCandles[i].time, this.baseInterval, this.utcOffsetMinutes) > selectedTime) break;
+          cursor = i;
+        }
+        if (cursor >= 0) {
+          this.phase = 'paused';
+          this.rewindTo(cursor);
+          return;
+        }
+      }
+    }
     void this.startAt(selectedTime);
   }
 
@@ -220,12 +256,40 @@ export class SyncedReplaySession {
     this.clock.step();
   }
 
+  stepBack(): void {
+    if (this.phase !== 'paused' && this.phase !== 'playing') return;
+    this.clock.pause();
+    const cursor = this.clock.snapshot().cursor - 1;
+    this.rewindTo(cursor);
+  }
+
+  private rewindTo(cursor: number): void {
+    if (cursor < 0 || !this.baseInterval) return;
+    const timeline = this.sourceCandles.map((candle) => nextIntervalStart(
+      candle.time, this.baseInterval!, this.utcOffsetMinutes,
+    ));
+    const currentTime = timeline[cursor];
+    for (const participant of this.participants) {
+      const projection = this.projections.get(participant);
+      if (!projection) continue;
+      const projected = projection.reset(this.sourceCandles.slice(0, cursor + 1));
+      participant.setReplayData(
+        mergeReplayInitialCandles(this.displaySeeds.get(participant) ?? [], projected),
+        currentTime,
+      );
+      participant.setReplayStatus(`replay · ${cursor + 1}/${this.sourceCandles.length}`);
+    }
+    this.publishSourceCandle(cursor, currentTime);
+    this.clock.load(timeline, cursor);
+  }
+
   cycleSpeed(): void {
     if (this.phase !== 'paused' && this.phase !== 'playing') return;
     this.clock.cycleSpeed();
   }
 
   stop(reload = true): void {
+    this.selectingRewind = false;
     this.loadToken += 1;
     this.releaseMarketSource();
     this.phase = 'idle';
@@ -237,6 +301,7 @@ export class SyncedReplaySession {
     this.participantsPrepared = false;
     this.participants = [];
     this.projections.clear();
+    this.displaySeeds.clear();
     this.sourceCandles = [];
     this.baseInterval = null;
     this.symbol = null;
@@ -339,6 +404,7 @@ export class SyncedReplaySession {
 
       this.sourceCandles = source;
       this.projections.clear();
+    this.displaySeeds.clear();
       const revealed = source.slice(0, startCursor + 1);
       const initialStates = this.participants.map((participant) => {
         const projection = new ReplayProjection(participant.interval, this.utcOffsetMinutes);
@@ -358,6 +424,7 @@ export class SyncedReplaySession {
       for (let index = 0; index < initialStates.length; index += 1) {
         const { participant, projection, projected } = initialStates[index];
         this.projections.set(participant, projection);
+        this.displaySeeds.set(participant, seeds[index]);
         participant.setReplayData(
           mergeReplayInitialCandles(seeds[index], projected),
           timeline[startCursor],
@@ -416,6 +483,7 @@ export class SyncedReplaySession {
     this.participantsPrepared = false;
     this.participants = [];
     this.projections.clear();
+    this.displaySeeds.clear();
     this.sourceCandles = [];
     this.baseInterval = null;
     this.symbol = null;
