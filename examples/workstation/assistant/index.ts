@@ -611,6 +611,11 @@ function mountAssistant(): void {
   void checkHealth();
   void loadModelOptions();
 
+  window.addEventListener('assistant-runtime-restarted', () => {
+    void checkHealth();
+    void loadModelOptions();
+  });
+
   currentContext();
   for (const message of conversation) appendMessage(message.role, message.content);
   if (!conversation.length) appendMessage('assistant', `${providerLabel(provider)} · Dùng /status để xem kết nối và quota.`);

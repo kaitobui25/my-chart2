@@ -40,3 +40,23 @@ test('does not close a formerly owned chat tab after the user navigates to Plugi
   await vm.runInContext('closeOwnedTab({tabId: 42})', context)
   assert.deepEqual(removed, [])
 })
+
+test('extension reload happens only after its command result is acknowledged', async () => {
+  const { context } = backgroundHarness()
+  const events = []
+  context.chrome.runtime.reload = () => events.push('reload')
+  context.report = async () => { events.push('reported') }
+  vm.runInContext('postResult = report', context)
+  await vm.runInContext('executeAndReport({id:"restart-1",type:"reload_extension"})', context)
+  assert.deepEqual(events, ['reported', 'reload'])
+})
+
+test('does not reload the extension if reporting its command result fails', async () => {
+  const { context } = backgroundHarness()
+  let reloaded = false
+  context.chrome.runtime.reload = () => { reloaded = true }
+  context.report = async () => { throw new Error('bridge unavailable') }
+  vm.runInContext('postResult = report', context)
+  await vm.runInContext('executeAndReport({id:"restart-2",type:"reload_extension"})', context)
+  assert.equal(reloaded, false)
+})

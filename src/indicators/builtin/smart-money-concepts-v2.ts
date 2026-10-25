@@ -1,4 +1,4 @@
-import type { IndicatorDef, ParamDef } from '../registry';
+import type { IndicatorDef, ParamDef, Params } from '../registry';
 import type { RenderContext } from '../../core/series';
 import type { Candle } from '../../core/types';
 import type {
@@ -567,6 +567,40 @@ function drawSmcV2(
   });
 }
 
+/** Canonical calculation settings shared by chart rendering and read-only queries. */
+export function smcAnalysisOptions(params: Params, intervalSeconds: number): SmcV2Options {
+  return {
+    swingLength: Number(params.swingLength),
+    internalLength: Number(params.internalLength),
+    internalConfluence: params.internalConfluence === true,
+    equalLength: Number(params.equalLength),
+    equalThreshold: Number(params.equalThreshold),
+    showInternalPivots: params.showInternalPivots === true,
+    showSwingPivots: params.showSwingPivots === true,
+    showInternal: params.showInternal === true,
+    showSwing: params.showSwing === true,
+    showStrongWeak: params.showStrongWeak === true,
+    showPremiumDiscount: params.showPremiumDiscount === true,
+    showFib: params.showFib === true,
+    showEqualLevels: params.showEqualLevels === true,
+    showDailyLevels: params.showDailyLevels === true,
+    showWeeklyLevels: params.showWeeklyLevels === true,
+    showMonthlyLevels: params.showMonthlyLevels === true,
+    showInternalOrderBlocks: params.showInternalOrderBlocks === true,
+    showSwingOrderBlocks: params.showSwingOrderBlocks === true,
+    internalOrderBlockCount: Number(params.internalOrderBlockCount),
+    swingOrderBlockCount: Number(params.swingOrderBlockCount),
+    mitigation: String(params.mitigation) as SmcV2Options['mitigation'],
+    orderBlockFilter: String(params.orderBlockFilter) as SmcV2Options['orderBlockFilter'],
+    showFairValueGaps: params.showFairValueGaps === true,
+    filterFairValueGaps: params.filterFairValueGaps === true,
+    fvgTimeframe: String(params.fvgTimeframe),
+    chartIntervalSeconds: intervalSeconds,
+    chartTimeframe: chartCalendarTimeframe(intervalSeconds),
+    periodUtcOffsetHours: Number(params.periodUtcOffsetHours),
+  };
+}
+
 /** Shared settings, rendering and timeframe lifecycle for the SMC family. */
 export function createSmcIndicator(
   identity: { id: string; name: string; title: string; order: number },
@@ -677,36 +711,7 @@ const def: IndicatorDef = {
     toggle('fibShowLabels', 'Hiển thị nhãn mức Fib', '📐 Fibonacci Retracement'),
   ],
   create(chart, params) {
-    const analysisOptions: SmcV2Options = {
-      swingLength: Number(params.swingLength),
-      internalLength: Number(params.internalLength),
-      internalConfluence: params.internalConfluence === true,
-      equalLength: Number(params.equalLength),
-      equalThreshold: Number(params.equalThreshold),
-      showInternalPivots: params.showInternalPivots === true,
-      showSwingPivots: params.showSwingPivots === true,
-      showInternal: params.showInternal === true,
-      showSwing: params.showSwing === true,
-      showStrongWeak: params.showStrongWeak === true,
-      showPremiumDiscount: params.showPremiumDiscount === true,
-      showFib: params.showFib === true,
-      showEqualLevels: params.showEqualLevels === true,
-      showDailyLevels: params.showDailyLevels === true,
-      showWeeklyLevels: params.showWeeklyLevels === true,
-      showMonthlyLevels: params.showMonthlyLevels === true,
-      showInternalOrderBlocks: params.showInternalOrderBlocks === true,
-      showSwingOrderBlocks: params.showSwingOrderBlocks === true,
-      internalOrderBlockCount: Number(params.internalOrderBlockCount),
-      swingOrderBlockCount: Number(params.swingOrderBlockCount),
-      mitigation: String(params.mitigation) as SmcV2Options['mitigation'],
-      orderBlockFilter: String(params.orderBlockFilter) as SmcV2Options['orderBlockFilter'],
-      showFairValueGaps: params.showFairValueGaps === true,
-      filterFairValueGaps: params.filterFairValueGaps === true,
-      fvgTimeframe: String(params.fvgTimeframe),
-      chartIntervalSeconds: chart.getIntervalSec(),
-      chartTimeframe: chartCalendarTimeframe(chart.getIntervalSec()),
-      periodUtcOffsetHours: Number(params.periodUtcOffsetHours),
-    };
+    const analysisOptions = smcAnalysisOptions(params, chart.getIntervalSec());
     const display = {
       mode: String(params.mode),
       style: String(params.style),

@@ -8,6 +8,8 @@ Model and reasoning settings apply on the next Send or New Chat, rather than imm
 
 The Reasoning dropdown lists only levels reported by the selected model. For ChatGPT current, the extension reads the native Power positions and restores the original setting after inspection. If native capabilities cannot be determined, reasoning stays unavailable instead of offering assumed levels.
 
+The workstation's top-right **…** menu includes **Khởi động lại sidecar và reload extension**. It asks the connected bridge extension to reload, restarts the sidecar through the dev server, waits for the extension to reconnect, then reloads the assistant's options. Active AI requests block this action; local history remains stored. The extension must already support the reload command (reload it manually once after installing this update).
+
 ## Start
 
 1. Install dependencies once with `npm install`.
@@ -37,6 +39,10 @@ On the first question, explicit mentions of another timeframe such as `15m`, `1h
 LAMlongchart retains local chart context for every question so read-only tool calls can be verified and anchored to the visible chart. The model receives candle arrays automatically **only for the first question of the native conversation**. Explicitly named extra timeframes are preloaded only for that first question; for later questions the AI requests data when needed.
 
 Generic language such as "multi-timeframe analysis" does not automatically load every timeframe. If more data is needed, ChatGPT or Codex may request `get_candles` or `get_indicator`; the chart bridge runs those read-only queries and sends back only the new results in the same native conversation. Each model response may request up to two queries, for at most three data rounds. Missing data is reported as an error rather than guessed. Tool-result continuations omit the earlier question and candle snapshot because they are already in the native conversation.
+
+`get_indicator` supports numeric indicators (SMA, EMA, RSI, MACD, Bollinger and the queryable TA suite) and structured Darvas, SMC V1/V2/V3 and Nikkei 225 results. `indicatorCatalog` lists supported IDs; empty `paramsJson` inherits the active chart parameters, with explicit overrides validated against the indicator definition. Bare `smc` resolves the sole active SMC version; multiple active versions require an exact ID. Rendering metadata (`__*`) is excluded from calculation inputs.
+
+Structured queries reuse current chart snapshots when parameters, timeframe and anchor match. Historical queries recalculate the same chart models on the bounded candle prefix; provider timeframe bars must have closed by the query deadline. Darvas returns box bounds/states; SMC returns bounded events, active zones, pivots and derived levels with times and availability notes; Nikkei returns actual `^N225` OHLC aligned to chart buckets, preserving missing sessions as null. Nikkei raw candles remain local and reuse the overlay data where possible. Basic indicators can be calculated even when not attached. Provider-dependent features report unavailable data explicitly; display filters and active zone inventories are not treated as complete historical signal archives. Results are limited to 120 points/events per collection (10 recent SMC bar states), and repeated identical requests are deduplicated within a chat turn.
 
 ## Tests
 

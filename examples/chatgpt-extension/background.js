@@ -350,6 +350,7 @@ async function processCommand(command) {
     throw new Error('invalid_bridge_command');
   }
   const payload = command.payload && typeof command.payload === 'object' ? command.payload : {};
+  if (command.type === 'reload_extension') return { reloading: true };
   if (command.type === 'models') return await processModels(payload);
   if (command.type === 'new_chat') return await processNewChat(payload);
   if (command.type === 'chat_send') return await processChatSend(payload);
@@ -379,6 +380,7 @@ async function executeAndReport(command) {
   try {
     const data = await processCommand(command);
     await postResult(command.id, { ok: true, data });
+    if (command.type === 'reload_extension') chrome.runtime.reload();
   } catch (error) {
     await postResult(command.id, {
       ok: false,

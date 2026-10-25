@@ -25,6 +25,7 @@ function compactContext(context) {
     candleCount: source.candleCount,
     candles: Array.isArray(source.candles) ? source.candles.slice(-240) : [],
     indicators: Array.isArray(source.indicators) ? source.indicators : [],
+    indicatorCatalog: source.indicatorCatalog ?? [],
     quote: source.quote ?? null,
     additionalTimeframes: Array.isArray(source.additionalTimeframes)
       ? source.additionalTimeframes.map(item => ({
@@ -51,6 +52,7 @@ function chartMetadata(context) {
     visibleRange: source.visibleRange,
     candleCount: source.candleCount,
     indicators: Array.isArray(source.indicators) ? source.indicators : [],
+    indicatorCatalog: source.indicatorCatalog ?? [],
     quote: source.quote ?? null
   }
 }
@@ -91,6 +93,7 @@ export function buildPrompt({ message, context, toolResults = [], structuredResp
       `Current chart: ${context?.symbol ?? 'unknown'} ${context?.timeframe ?? ''}.`,
       'No candle OHLCV data is attached to this turn. Use earlier data only if it still matches the current chart and question.',
       'If fresh candles or indicator values are needed, request get_candles or get_indicator using the chart tool format established in this conversation. Do not guess missing data.',
+      'For indicator value/signal questions, configuration alone is insufficient: request get_indicator using an exact id from indicatorCatalog. paramsJson:"{}" uses the active chart parameters. Darvas, SMC and Nikkei return structured results; respect their limitations.',
       `User question: ${String(message ?? '').trim()}`,
       'Current chart metadata JSON (no candles):',
       JSON.stringify(chartMetadata(context)),
@@ -107,6 +110,10 @@ export function buildPrompt({ message, context, toolResults = [], structuredResp
     '',
     'Read-only chart data tools: get_candles(timeframe, limit) and get_indicator(timeframe, id, limit, paramsJson).',
     'Call these only if the current context and supplied tool results cannot answer the question.',
+    'Indicator configuration is not indicator output. For questions about indicator values, levels, signals, boxes or market structure, call get_indicator before drawing conclusions unless matching verified results are already available.',
+    'Use indicatorCatalog for supported ids. Darvas: darvas-box; SMC: smart-money-concepts, smart-money-concepts-v2, smart-money-concepts-v3; Nikkei 225: nikkei-225. Use the exact active SMC version.',
+    'An empty paramsJson object uses the active chart parameters, or defaults if the indicator is not attached. Explicit parameters override those values.',
+    'Structured indicators return boxes, structures, zones or comparison candles rather than numeric line series. Respect limitations, display settings and provider availability; unavailable is not the same as no signal.',
     'To request data, output ONLY a JSON object with message:"" and requests:[{tool,timeframe,id,limit,paramsJson}].',
     'Use timeframe "current" for the chart timeframe; valid alternatives: 1m,3m,5m,15m,30m,1h,2h,4h,1d,1w,1M.',
     'For get_candles set id:"" and paramsJson:"{}". For get_indicator use an indicator id such as rsi, ema, sma, macd, bollinger; paramsJson is a JSON object encoded as a string (for example {"length":14}).',

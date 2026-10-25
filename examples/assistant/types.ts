@@ -52,6 +52,7 @@ export interface AssistantChartContext {
   candleCount: number;
   candles: AssistantCandle[];
   indicators: AssistantIndicator[];
+  indicatorCatalog?: Array<{ id: string; name: string }>;
   quote: AssistantQuote | null;
   additionalTimeframes: AssistantTimeframeContext[];
 }

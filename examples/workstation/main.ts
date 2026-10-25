@@ -632,6 +632,31 @@ function setupToolbarOverflow(): void {
   wrap.append(button, menu);
   toolbar.appendChild(wrap);
 
+  const restartAssistant = document.createElement('button');
+  restartAssistant.id = 'assistant-restart-runtime';
+  restartAssistant.type = 'button';
+  restartAssistant.textContent = 'Khởi động lại sidecar và reload extension';
+  const restartStatus = document.createElement('span');
+  restartStatus.setAttribute('role', 'status');
+  const restartSection = document.createElement('section');
+  restartSection.className = 'toolbar-more-settings';
+  restartSection.append(restartAssistant, restartStatus);
+  restartAssistant.addEventListener('click', async () => {
+    restartAssistant.disabled = true;
+    restartStatus.textContent = 'Đang khởi động lại…';
+    try {
+      const response = await fetch('/assistant-api/maintenance/restart', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error ?? 'Không thể khởi động lại AI.');
+      restartStatus.textContent = 'Đã khởi động lại sidecar và reload extension.';
+      window.dispatchEvent(new Event('assistant-runtime-restarted'));
+    } catch (error) {
+      restartStatus.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      restartAssistant.disabled = false;
+    }
+  });
+
   const autoSaveSection = document.createElement('section');
   autoSaveSection.className = 'toolbar-more-settings toolbar-more-auto-save';
   const autoSaveTitle = document.createElement('button');
@@ -843,6 +868,7 @@ function setupToolbarOverflow(): void {
     menu.replaceChildren();
     renderAutoSaveSettings();
     menu.appendChild(autoSaveSection);
+    menu.appendChild(restartSection);
     for (const entry of entries) {
       if (!overflowed.has(entry.id)) continue;
       const row = document.createElement('div');
@@ -3314,12 +3340,17 @@ const tiles: Tile[] = [];
 let activeTile: Tile | null = null;
 
 window.__L2CHART_ASSISTANT__ = createAssistantBridge({
+  getIndicatorSnapshot(id) {
+    return activeTile?.active.get(id)?.getDebugSnapshot?.();
+  },
   getPrimarySource() {
     const tile = activeTile;
     if (!tile) return null;
     return {
       symbol: tile.symbol,
       timeframe: tile.interval,
+      intervalSeconds: tile.chart.getIntervalSec(),
+      utcOffsetMinutes: providerCalendarOffsetMinutes(activeProvider),
       mode: tile.mode,
       replay: { ...tile.getReplayInfo() },
       historyRange: tile.getHistoryRange(),

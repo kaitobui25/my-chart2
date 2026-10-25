@@ -26,6 +26,9 @@ export function createExcelAssistantBridge(
     return state ? `${state.phase}:${state.cursor}:${state.currentTime}:${state.source}` : 'idle';
   };
   const bridge = createAssistantBridge({
+    getIndicatorSnapshot(id) {
+      return dependencies.indicators.debugSnapshots(new Set([id]))[0]?.snapshot;
+    },
     getPrimarySource() {
       const candles = dependencies.chart.getCandles();
       if (candles.length === 0) return null;
@@ -35,6 +38,8 @@ export function createExcelAssistantBridge(
       return {
         symbol: source === 'market' ? dependencies.getSymbol() : 'Excel range',
         timeframe: source === 'market' ? dependencies.getTimeframe() : 'sheet',
+        intervalSeconds: dependencies.chart.getIntervalSec(),
+        utcOffsetMinutes: source === 'market' ? 540 : 0,
         mode: 'candles',
         replay: { ...(replay() ?? { phase: 'idle' }), source },
         historyRange: { from: first.time, to: last.time },

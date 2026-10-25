@@ -196,6 +196,17 @@ async function handleChat(request, response) {
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://${HOST}:${PORT}`)
   try {
+    if (request.method === 'POST' && url.pathname === '/maintenance/restart') {
+      if (!isLoopbackRequest(request) || request.headers.origin
+        || request.headers['x-l2chart-maintenance'] !== '1') {
+        return sendJson(response, 403, { error: 'Local dev server access only.' })
+      }
+      if (activeRequests.size) return sendJson(response, 409, { error: 'AI đang trả lời. Hãy chờ hoàn tất rồi thử lại.' })
+      const handle = chatGptBridge.dispatch('reload_extension', {}, { timeoutMs: 15000 })
+      await handle.promise
+      response.once('finish', () => setTimeout(() => process.exit(0), 150))
+      return sendJson(response, 200, { ok: true })
+    }
     if (url.pathname.startsWith('/bridge/')) {
       if (!isLoopbackRequest(request)) {
         return sendBridgeJson(request, response, 403, { error: 'Loopback access only.', code: 'FORBIDDEN' })

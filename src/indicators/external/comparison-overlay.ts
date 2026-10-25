@@ -169,7 +169,7 @@ return {
     return {
       recompute,
       getDebugSnapshot: () => ({ result: aligned, calculation: {
-        symbol: instrument?.symbol, alignedEma, rawInterval, rawCount: raw.length, status: overlay.legendText, color, opacity,
+        symbol: instrument?.symbol, alignedEma, rawInterval, rawCandles: raw, rawCount: raw.length, status: overlay.legendText, color, opacity,
         replayTime: getIndicatorMarketContext(chart)?.replayTime,
       } }),
       remove() { removed = true; generation++; resolution++; unsubscribers.forEach(unsubscribe => unsubscribe()); clearInterval(timer); chart.removeSeries(overlay); },

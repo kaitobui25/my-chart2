@@ -183,6 +183,36 @@ function installProxy(
       sendJson(res, 403, { error: 'Cross-site requests are not allowed', code: 'FORBIDDEN' });
       return;
     }
+    if (req.method === 'POST' && req.url === '/maintenance/restart') {
+      try {
+        const response = await fetch(`${SIDECAR_TARGET}/maintenance/restart`, {
+          method: 'POST', headers: { 'x-l2chart-maintenance': '1' },
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (!response.ok) {
+          sendJson(res, response.status, await response.json());
+          return;
+        }
+        for (let attempt = 0; attempt < 40; attempt++) {
+          if (await sidecarHealthState() === 'offline') break;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const state = await ensureSidecar(server);
+        if (state !== 'ready') throw new Error('Không thể khởi động lại sidecar.');
+        for (let attempt = 0; attempt < 50; attempt++) {
+          const health = await fetch(`${SIDECAR_TARGET}/health?provider=chatgpt`, { signal: AbortSignal.timeout(900) });
+          if ((await health.json()).bridgeConnected) {
+            sendJson(res, 200, { ok: true });
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        throw new Error('Sidecar đã khởi động lại nhưng extension chưa kết nối.');
+      } catch (error) {
+        sendJson(res, 503, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     const state = await ensureSidecar(server);
     if (state !== 'ready') {
       sendJson(res, 503, state === 'stale'

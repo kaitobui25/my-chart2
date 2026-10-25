@@ -8,7 +8,10 @@ import type {
   AssistantTimeframeContext,
 } from './types';
 import { ASSISTANT_TIMEFRAMES, loadAssistantCandles } from './candle-query';
-import { queryIndicator } from './indicator-query';
+import { queryIndicator, indicatorId, indicatorCatalog, resolveIndicatorParams, STRUCTURED_INDICATORS } from './indicator-query';
+import { queryStructuredIndicator } from './structured-indicator-query';
+import type { IndicatorDebugSnapshot, Params } from '../../src/indicators/registry';
+import { intervalApproxSeconds, nextIntervalStart } from '../../src/interval';
 
 const MAX_PRIMARY_CANDLES = 240;
 const PRIMARY_CONTEXT_BUFFER = 12;
@@ -58,6 +61,8 @@ const APPROX_INTERVAL_SECONDS: Record<string, number> = {
 export interface AssistantPrimarySource {
   symbol: string;
   timeframe: string;
+  intervalSeconds?: number;
+  utcOffsetMinutes?: number;
   mode: string;
   replay: Record<string, unknown>;
   historyRange: { from: number; to: number } | null;
@@ -70,6 +75,7 @@ export interface AssistantPrimarySource {
 export interface AssistantBridgeDependencies {
   getPrimarySource(): AssistantPrimarySource | null;
   getDatafeed(): Datafeed | null;
+  getIndicatorSnapshot?(id: string): IndicatorDebugSnapshot | undefined;
 }
 
 function toAssistantCandle(candle: Candle): AssistantCandle {
@@ -124,6 +130,11 @@ function candleRange(candles: readonly AssistantCandle[]): { from: number; to: n
   return { from: candles[0].time, to: candles[candles.length - 1].time };
 }
 
+// Rendering metadata is not part of an indicator's declared calculation parameters.
+function chartParams(params: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(params).filter(([key]) => !key.startsWith('__')));
+}
+
 export function buildPrimaryContext(source: AssistantPrimarySource): AssistantChartContext {
   const candles = visibleSlice(source.candles, source.visibleIndices).map(toAssistantCandle);
   const visibleCandles = source.visibleIndices && source.candles.length > 0
@@ -144,7 +155,8 @@ export function buildPrimaryContext(source: AssistantPrimarySource): AssistantCh
     visibleRange: candleRange(visibleCandles),
     candleCount: candles.length,
     candles,
-    indicators: source.indicators,
+    indicators: source.indicators.map(item => ({ id: item.id, params: chartParams(item.params) })),
+    indicatorCatalog,
     quote: source.quote,
     additionalTimeframes: [],
   };
@@ -261,6 +273,14 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
       if (!source || source.symbol !== anchor.symbol || source.timeframe !== anchor.timeframe) {
         throw new Error('Chart changed while AI was requesting data. Please ask again.');
       }
+      const assertCurrent = () => {
+        const current = dependencies.getPrimarySource();
+        if (!current || current.symbol !== anchor.symbol || current.timeframe !== anchor.timeframe
+          || JSON.stringify(current.replay) !== JSON.stringify(anchor.replay)) {
+          throw new Error('Chart/Replay changed while loading data. Please ask again.');
+        }
+      };
+      assertCurrent();
       const timeframe = request.timeframe === 'current' || !request.timeframe
         ? anchor.timeframe : request.timeframe;
       if (timeframe !== 'sheet' && !ASSISTANT_TIMEFRAMES.has(timeframe)) {
@@ -271,14 +291,25 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
       const until = anchor.visibleRange?.to
         ?? anchor.candles[anchor.candles.length - 1]?.time;
       if (!Number.isFinite(until)) throw new Error('No chart timestamp available.');
-      let params: Record<string, unknown> = {};
+      let requestedParams: Record<string, unknown> = {};
       if (request.tool === 'get_indicator' && request.paramsJson) {
         if (request.paramsJson.length > 1000) throw new Error('Indicator params too large.');
         const parsed: unknown = JSON.parse(request.paramsJson);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           throw new Error('Indicator params must be a JSON object.');
         }
-        params = parsed as Record<string, unknown>;
+        requestedParams = parsed as Record<string, unknown>;
+      }
+      let id = indicatorId(request.id);
+      let params: Params = {};
+      if (request.tool === 'get_indicator') {
+        if (request.id.trim().toLowerCase() === 'smc') {
+          const smc = anchor.indicators.filter(item => item.id.startsWith('smart-money-concepts'));
+          if (smc.length > 1) throw new Error('Multiple SMC versions are active. Request an exact indicator id.');
+          if (smc.length === 1) id = smc[0].id;
+        }
+        const selected = anchor.indicators.find(item => item.id === id);
+        params = resolveIndicatorParams(id, { ...selected?.params, ...requestedParams });
       }
       const calculationCount = request.tool === 'get_indicator'
         ? Math.min(2000, Math.max(500, limit + 3 * Math.max(
@@ -297,6 +328,7 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
             return loadAssistantCandles(feed, anchor.symbol, timeframe, until, calculationCount);
           })();
       if (!candles.length) throw new Error(`No candles available for ${timeframe}.`);
+      assertCurrent();
       if (request.tool === 'get_candles') {
         return {
           request, ok: true,
@@ -307,7 +339,29 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
         };
       }
       if (request.tool !== 'get_indicator') throw new Error('Unknown data request.');
-      const data = queryIndicator({ id: request.id, params, candles, limit });
+      const intervalSeconds = timeframe === source.timeframe && source.intervalSeconds
+        ? source.intervalSeconds : intervalApproxSeconds(timeframe);
+      const active = source.indicators.find(item => item.id === id);
+      const sameParams = active && JSON.stringify(resolveIndicatorParams(id, chartParams(active.params))) === JSON.stringify(params);
+      const snapshot = STRUCTURED_INDICATORS.has(id) && timeframe === source.timeframe && sameParams
+        ? dependencies.getIndicatorSnapshot?.(id) : undefined;
+      const lastTime = source.candles[source.candles.length - 1]?.time;
+      const candleEnd = timeframe === 'sheet' ? until! + intervalSeconds
+        : nextIntervalStart(until!, timeframe, source.utcOffsetMinutes ?? 0);
+      const deadline = anchor.replay.phase && anchor.replay.phase !== 'idle'
+        ? Math.min(candleEnd, Number(anchor.replay.currentTime) || until!) : candleEnd;
+      const data = STRUCTURED_INDICATORS.has(id)
+        ? await queryStructuredIndicator({
+            id, params, candles, timeframe, intervalSeconds, limit, deadline, snapshot,
+            reuseSnapshot: !!snapshot && until === lastTime,
+            async loadCandles(symbol, tf, count) {
+              const feed = dependencies.getDatafeed();
+              if (!feed) throw new Error('No market datafeed for indicator provider candles.');
+              return loadAssistantCandles(feed, symbol ?? anchor.symbol, tf, deadline, count);
+            },
+          })
+        : queryIndicator({ id, params, candles, limit });
+      assertCurrent();
       return { request, ok: true, data: { symbol: anchor.symbol, timeframe, until, ...data } };
     } catch (error) {
       return { request, ok: false, error: error instanceof Error ? error.message : String(error) };
