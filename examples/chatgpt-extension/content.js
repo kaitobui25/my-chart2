@@ -47,6 +47,11 @@
     return editors.length === 1 ? editors[0] : null;
   }
 
+  function loggedOut() {
+    return [...document.querySelectorAll('form[data-logged-out], form[action="/unauth-mweb/conversation"]')]
+      .some(visible);
+  }
+
   function primarySlotControls() {
     const form = composer()?.closest('form');
     if (!form) return [];
@@ -183,7 +188,7 @@
         'section[data-testid^="conversation-turn"], [data-turn-key], ' +
         '[data-content-search-turn-key], [data-chatgpt-search-turn-key]'
       );
-      const body = node.querySelector('.markdown, [data-message-content]') || node;
+      const body = node.querySelector('.markdown, [data-message-content], [data-markdown-text-style="assistant-message"]') || node;
       const text = String(body.innerText || body.textContent || '').trim().slice(0, 128_000);
       if (!text) continue;
       const id = messageIdOf(node)
@@ -196,7 +201,7 @@
       if (!id || seen.has(id)) continue;
       seen.add(id);
       const completed = Boolean(
-        turn?.querySelector?.('button[data-testid="copy-turn-action-button"]')
+        turn?.querySelector?.('button[data-testid="copy-turn-action-button"], button[aria-label="Regenerate response"]')
         || node.querySelector?.('button[data-testid="copy-turn-action-button"]')
       );
       messages.push({ id, text, completed });
@@ -719,6 +724,9 @@
     if (!message || typeof message !== 'object') return { ok: false, error: 'invalid_command' };
     if (message.type === 'l2chart:ping') {
       return { ok: true, conversationId: conversationId() };
+    }
+    if (['l2chart:prepare', 'l2chart:models', 'l2chart:status', 'l2chart:send'].includes(message.type) && loggedOut()) {
+      return { ok: false, error: 'chatgpt_login_required' };
     }
     if (message.type === 'l2chart:prepare') return await handlePrepare(message.payload ?? {});
     if (message.type === 'l2chart:models') {

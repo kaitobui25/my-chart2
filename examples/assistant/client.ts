@@ -85,7 +85,9 @@ export class AssistantApiClient {
     const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
       throw new AssistantApiError(
-        typeof payload.error === 'string' ? payload.error : `AI request failed (${response.status}).`,
+        payload.code === 'CHATGPT_LOGIN_REQUIRED'
+          ? 'ChatGPT Web chưa đăng nhập. Hãy đăng nhập chatgpt.com trong trình duyệt đang chạy LAM ChatGPT Bridge, rồi thử lại.'
+          : typeof payload.error === 'string' ? payload.error : `AI request failed (${response.status}).`,
         response.status,
         typeof payload.code === 'string' ? payload.code : 'ASSISTANT_ERROR',
       );

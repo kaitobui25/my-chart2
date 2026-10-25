@@ -48,7 +48,9 @@ function isChatUrl(url) {
     const parsed = new URL(url);
     return (
       ['chatgpt.com', 'chat.openai.com'].includes(parsed.hostname)
-      && !parsed.pathname.startsWith('/share/')
+      && (parsed.pathname === '/'
+        || /^\/(?:g\/[^/]+\/)?c\/[0-9a-f-]{8,64}\/?$/i.test(parsed.pathname)
+        || /^\/g\/[^/]+\/?$/i.test(parsed.pathname))
     );
   } catch {
     return false;
@@ -130,6 +132,7 @@ async function createFreshTab(payload = {}) {
 
 async function closeOwnedTab(binding) {
   if (!Number.isInteger(binding?.tabId)) return;
+  if (!await tabById(binding.tabId)) return;
   try {
     await chrome.tabs.remove(binding.tabId);
   } catch {
