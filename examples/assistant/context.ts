@@ -288,8 +288,12 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
       }
       const limit = Number.isInteger(request.limit) && request.limit > 0
         ? Math.min(120, request.limit) : 30;
-      const until = anchor.visibleRange?.to
+      const anchorUntil = anchor.visibleRange?.to
         ?? anchor.candles[anchor.candles.length - 1]?.time;
+      if (request.beforeTime != null && (!Number.isSafeInteger(request.beforeTime) || request.beforeTime <= 0)) {
+        throw new Error('Invalid historical cursor. Use a positive Unix timestamp in seconds.');
+      }
+      const until = request.beforeTime == null ? anchorUntil : Math.min(anchorUntil ?? NaN, request.beforeTime - 1);
       if (!Number.isFinite(until)) throw new Error('No chart timestamp available.');
       let requestedParams: Record<string, unknown> = {};
       if (request.tool === 'get_indicator' && request.paramsJson) {
@@ -318,11 +322,13 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
             .map(([, value]) => Number(value) || 0),
         )))
         : limit;
-      const candles = timeframe === anchor.timeframe
+      const localCandles = timeframe === anchor.timeframe
         ? (request.tool === 'get_candles'
             ? source.candles.filter(candle => candle.time <= until).slice(-limit)
             : source.candles.filter(candle => candle.time <= until))
-        : await (async () => {
+        : [];
+      const candles = timeframe === anchor.timeframe && (localCandles.length || request.beforeTime == null || timeframe === 'sheet')
+        ? localCandles : await (async () => {
             const feed = dependencies.getDatafeed();
             if (!feed) throw new Error('No datafeed for additional timeframes.');
             return loadAssistantCandles(feed, anchor.symbol, timeframe, until, calculationCount);
@@ -348,8 +354,9 @@ export function createAssistantBridge(dependencies: AssistantBridgeDependencies)
       const lastTime = source.candles[source.candles.length - 1]?.time;
       const candleEnd = timeframe === 'sheet' ? until! + intervalSeconds
         : nextIntervalStart(until!, timeframe, source.utcOffsetMinutes ?? 0);
-      const deadline = anchor.replay.phase && anchor.replay.phase !== 'idle'
+      const replayDeadline = anchor.replay.phase && anchor.replay.phase !== 'idle'
         ? Math.min(candleEnd, Number(anchor.replay.currentTime) || until!) : candleEnd;
+      const deadline = Math.min(replayDeadline, request.beforeTime ?? Infinity);
       const data = STRUCTURED_INDICATORS.has(id)
         ? await queryStructuredIndicator({
             id, params, candles, timeframe, intervalSeconds, limit, deadline, snapshot,

@@ -69,6 +69,8 @@ export interface AssistantDataRequest {
   id: string;
   limit: number;
   paramsJson: string;
+  /** Exclusive pagination cursor in Unix seconds; omitted/null means the chart anchor. */
+  beforeTime?: number | null;
 }
 
 export interface AssistantDataResult {

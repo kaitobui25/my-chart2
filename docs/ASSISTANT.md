@@ -46,6 +46,8 @@ Structured queries reuse current chart snapshots when parameters, timeframe and 
 
 ## Tests
 
+Historical tool requests may include `beforeTime` (exclusive Unix seconds; null/omitted uses the chart anchor). This cursor is bounded by the visible/replay anchor. Nikkei responses distinguish `history.availableRange`/`availableCount` from the limited `values` page and expose `nextBeforeTime` for older pages. Monthly OHLC summaries describe available aligned chart history, including partial months and missing coverage; they do not imply complete provider history. Older requested windows outside chart memory can be loaded from the datafeed. A 120-point page must never be described as the full available history.
+
 ChatGPT Web model/reasoning discovery is cached in the extension's persistent local storage for 24 hours. Opening more charts or restarting the extension reuses that result without loading ChatGPT again. Concurrent requests share one inspection. A temporary inspection tab opens in the background and closes afterward. Failed inspections are also remembered for 24 hours to avoid repeatedly opening tabs; after signing in or changing accounts/models, use the workstation assistant's ↻ button to refresh immediately. Sending a message still validates the requested reasoning against the live web UI and requires a ChatGPT tab.
 
 ```bash

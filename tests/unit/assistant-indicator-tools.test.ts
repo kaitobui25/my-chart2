@@ -159,6 +159,45 @@ describe('structured AI indicator data', () => {
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Chart/Replay changed') });
   });
 
+  it('reports older Nikkei history separately from page size and pages without overlap', async () => {
+    const raw = bars(600).map((bar, i) => ({ ...bar, time: Date.UTC(2025, 0, 1) / 1000 + i * 86400 }));
+    const h = harness({ indicators: [{ id: 'nikkei-225', params: {} }],
+      snapshot: { result: [], calculation: { rawCandles: raw, rawInterval: '1d' } } });
+    Object.assign(h.source, { timeframe: '1d', intervalSeconds: 86400, candles: raw, visibleIndices: { from: 0, to: 599 } });
+    const anchor = h.bridge.getContext()!;
+    const result = await h.bridge.queryData(h.request('nikkei', {}, 120), anchor);
+    expect(result.ok).toBe(true);
+    const first = result.data as { history: { availableCount: number; availableRange: { from: number }; nextBeforeTime: number; monthly: { period: string }[] }; values: { chartTime: number }[] };
+    expect(first.values).toHaveLength(120);
+    expect(first.history.availableCount).toBe(600);
+    expect(first.history.availableRange.from).toBe(raw[0].time);
+    expect(first.history.monthly[0].period).toBe('2025-01');
+    const older = await h.bridge.queryData({ ...h.request('nikkei', {}, 120), beforeTime: first.history.nextBeforeTime }, anchor);
+    expect(older.ok).toBe(true);
+    const second = older.data as typeof first;
+    expect(second.values).toHaveLength(120);
+    expect(second.values[second.values.length - 1].chartTime).toBe(raw[479].time);
+    expect(second.values.every(point => point.chartTime < first.history.nextBeforeTime)).toBe(true);
+    const future = await h.bridge.queryData({ ...h.request('nikkei', {}, 120), beforeTime: raw[599].time + 1000000 }, anchor);
+    expect((future.data as typeof first).values).toEqual(first.values);
+  });
+
+  it('fetches an older requested window when both chart memory and Nikkei snapshot are newer', async () => {
+    const old = bars(200).map(bar => ({ ...bar, time: bar.time - 365 * 86400 }));
+    const getHistory = vi.fn(async () => old);
+    const feed: Datafeed = { name: 'mock', getHistory, subscribe: () => () => undefined };
+    const h = harness({ feed, indicators: [{ id: 'nikkei-225', params: {} }],
+      snapshot: { result: [], calculation: { rawCandles: bars(), rawInterval: '1h' } } });
+    const beforeTime = old[199].time + 3600;
+    const result = await h.bridge.queryData({ ...h.request('nikkei', {}, 120), beforeTime }, h.bridge.getContext()!);
+    expect(result.ok).toBe(true);
+    const values = (result.data as { values: { chartTime: number }[] }).values;
+    expect(values).toHaveLength(120);
+    expect(values.every(point => point.chartTime < beforeTime)).toBe(true);
+    expect(getHistory).toHaveBeenCalledTimes(2);
+    expect(getHistory.mock.calls[1]).toEqual(expect.arrayContaining(['^N225', '1h']));
+  });
+
   it.each(['codex', 'chatgpt'] as const)('executes real indicator tools through the %s turn loop', async provider => {
     const h = harness({ indicators: [{ id: 'darvas-box', params: {} }, { id: 'smart-money-concepts-v3', params: {} }] });
     const chat = vi.fn(async (payload: ChatRequest) => {

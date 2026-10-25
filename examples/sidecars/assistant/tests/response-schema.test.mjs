@@ -24,3 +24,11 @@ test('allows a plain native ChatGPT response and parses native JSON requests', (
   assert.deepEqual(parseNativeResponse('RSI is 58.'), { message: 'RSI is 58.' })
   assert.deepEqual(parseNativeResponse('{"message":"ok","requests":[]}'), { message: 'ok' })
 })
+
+test('preserves a historical cursor and rejects invalid cursors', () => {
+  const request = { tool: 'get_indicator', timeframe: 'current', id: 'nikkei-225', limit: 120, paramsJson: '{}', beforeTime: 1735689600 }
+  assert.deepEqual(parseResponse(JSON.stringify({ message: '', requests: [request] })).requests, [request])
+  for (const beforeTime of [-1, 1.5, '2025-01-01']) {
+    assert.throws(() => parseResponse(JSON.stringify({ message: '', requests: [{ ...request, beforeTime }] })), /not valid JSON/)
+  }
+})

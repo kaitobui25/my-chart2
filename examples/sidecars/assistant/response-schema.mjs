@@ -11,9 +11,10 @@ export const ASSISTANT_RESPONSE_SCHEMA = {
           timeframe: { type: 'string' },
           id: { type: 'string' },
           limit: { type: 'integer' },
-          paramsJson: { type: 'string' }
+          paramsJson: { type: 'string' },
+          beforeTime: { type: ['integer', 'null'] }
         },
-        required: ['tool', 'timeframe', 'id', 'limit', 'paramsJson'],
+        required: ['tool', 'timeframe', 'id', 'limit', 'paramsJson', 'beforeTime'],
         additionalProperties: false
       }
     }
@@ -31,7 +32,9 @@ function validatedRequests(requests) {
     if (typeof item.id !== 'string' || item.id.length > 80) return null
     if (!Number.isInteger(item.limit) || item.limit < 1 || item.limit > 120) return null
     if (typeof item.paramsJson !== 'string' || item.paramsJson.length > 1000) return null
-    result.push({ tool: item.tool, timeframe: item.timeframe, id: item.id, limit: item.limit, paramsJson: item.paramsJson })
+    if (item.beforeTime != null && (!Number.isSafeInteger(item.beforeTime) || item.beforeTime <= 0)) return null
+    result.push({ tool: item.tool, timeframe: item.timeframe, id: item.id, limit: item.limit, paramsJson: item.paramsJson,
+      ...(item.beforeTime != null ? { beforeTime: item.beforeTime } : {}) })
   }
   return result
 }

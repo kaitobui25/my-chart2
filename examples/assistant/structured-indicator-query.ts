@@ -57,7 +57,8 @@ async function queryNikkei(args: StructuredIndicatorArgs) {
   const { snapshot, timeframe, candles, deadline, limit } = args;
   let raw = snapshot?.calculation.rawCandles as readonly Candle[] | undefined;
   let rawInterval = String(snapshot?.calculation.rawInterval ?? timeframe);
-  if (!raw?.length) {
+  const outsideSnapshot = raw?.length && (raw[raw.length - 1].time < candles[0].time || raw[0].time > candles[candles.length - 1].time);
+  if (!raw?.length || outsideSnapshot) {
     if (!args.loadCandles) throw new Error('Nikkei 225 data is unavailable: no market datafeed.');
     // Use intrabars only for a replay cursor inside a larger candle.
     const partial = deadline < nextIntervalStart(candles[candles.length - 1].time, timeframe, 540);
@@ -65,14 +66,40 @@ async function queryNikkei(args: StructuredIndicatorArgs) {
     raw = await args.loadCandles('^N225', rawInterval, 2000);
   }
   const projected = projectComparisonCandles(raw, rawInterval, timeframe, deadline);
-  const aligned = alignComparisonCandles(candles, projected, timeframe).slice(-limit);
-  if (!aligned.some(Boolean)) throw new Error('Nikkei 225 has no closed candles aligned to this chart range.');
+  const history = alignComparisonCandles(candles, projected, timeframe);
+  const aligned = history.slice(-limit);
+  const monthly = new Map<string, { period: string; from: number; to: number; count: number; open: number; high: number; low: number; close: number }>();
+  let available = 0;
+  let firstTime: number | null = null;
+  let lastTime: number | null = null;
+  for (const bar of history) {
+    if (!bar) continue;
+    available++;
+    firstTime ??= bar.time;
+    lastTime = bar.time;
+    const period = new Date((bar.time + 540 * 60) * 1000).toISOString().slice(0, 7);
+    const bucket = monthly.get(period);
+    if (bucket) {
+      bucket.high = Math.max(bucket.high, bar.high); bucket.low = Math.min(bucket.low, bar.low);
+      bucket.close = bar.close; bucket.to = bar.time; bucket.count++;
+    } else monthly.set(period, { period, from: bar.time, to: bar.time, count: 1, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+  }
+  if (!available) throw new Error('Nikkei 225 has no closed candles aligned to this chart range.');
+  const pageStart = candles.length - aligned.length;
   return {
     id: args.id, params: args.params, kind: 'comparison', comparisonSymbol: '^N225',
     source: snapshot?.calculation.status ?? 'market datafeed', rawInterval,
     coverage: { requested: aligned.length, available: aligned.filter(Boolean).length },
+    history: {
+      availableCount: available, availableRange: { from: firstTime, to: lastTime },
+      returnedRange: { from: candles[pageStart].time, to: candles[candles.length - 1].time },
+      hasMore: pageStart > 0, nextBeforeTime: pageStart > 0 ? candles[pageStart].time : null,
+      monthly: [...monthly.values()].slice(-120), monthlyTruncated: monthly.size > 120,
+      scope: 'Loaded chart history up to the query anchor; monthly OHLC aggregates available aligned bars, not necessarily complete calendar months.',
+    },
     values: aligned.map((bar, i) => ({ chartTime: candles[candles.length - aligned.length + i].time, candle: bar })),
-    limitations: ['Prices are actual Nikkei index values; the chart overlay uses an independent visual scale. Missing sessions remain null.'],
+    limitations: ['The point limit is a response page size, not a history availability limit. Use history.nextBeforeTime as beforeTime to read older points. Monthly summaries cover the available loaded history.',
+      'Prices are actual Nikkei index values; the chart overlay uses an independent visual scale. Missing sessions remain null.'],
   };
 }
 
