@@ -2,6 +2,8 @@
 
 The workstation and Excel add-in support Codex CLI and ChatGPT Web through the local assistant sidecar. The workstation defaults to Codex; use the Provider selector to switch to ChatGPT Web. Settings and conversations stay separate for each provider.
 
+The workstation's **Lịch sử** button opens a local archive for both providers. Messages survive page reloads and New Chat; selecting an archived entry is read-only and does not replace the active AI session. Workstation history is stored separately from Excel, limited to 40 conversations and 100 messages per conversation (8,000 characters per message).
+
 ## Start
 
 1. Install dependencies once with `npm install`.

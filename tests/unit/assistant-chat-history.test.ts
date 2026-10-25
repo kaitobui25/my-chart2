@@ -11,6 +11,28 @@ function memoryStorage() {
 }
 
 describe('Excel assistant chat history', () => {
+  it('isolates Workstation chats from Excel and restores active entries after reload', () => {
+    const local = memoryStorage();
+    const session = memoryStorage();
+    const excel = new AssistantChatHistory(local, session);
+    const workstation = new AssistantChatHistory(local, session, 'l2chart.workstation.assistant');
+    excel.append('codex', 'user', 'Excel question');
+    workstation.append('codex', 'user', 'Workstation question');
+    workstation.append('codex', 'assistant', 'Workstation answer');
+    workstation.append('chatgpt', 'user', 'Web question');
+    expect(excel.list()).toHaveLength(1);
+    expect(workstation.list()).toHaveLength(2);
+    expect(workstation.activeId('codex')).not.toBe(excel.activeId('codex'));
+    const reloaded = new AssistantChatHistory(local, session, 'l2chart.workstation.assistant');
+    expect(reloaded.get(reloaded.activeId('codex'))?.messages).toEqual([
+      { role: 'user', content: 'Workstation question' },
+      { role: 'assistant', content: 'Workstation answer' },
+    ]);
+    const priorId = reloaded.activeId('codex');
+    reloaded.newChat('codex');
+    expect(reloaded.get(priorId)?.messages).toHaveLength(2);
+    expect(reloaded.get(reloaded.activeId('codex'))).toBeNull();
+  });
   it('archives both providers independently and preserves past chats after New Chat', () => {
     const local = memoryStorage();
     const session = memoryStorage();

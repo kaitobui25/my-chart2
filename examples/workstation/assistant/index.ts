@@ -1,6 +1,8 @@
 import './style.css';
 import { AssistantApiClient } from './client';
 import { runAssistantTurn } from '../../assistant/chat-runner';
+import { AssistantChatHistory } from '../../excel-content-addin/assistant-chat-history';
+import { AssistantHistoryView } from './history-view';
 import type {
   AssistantChartContext,
   AssistantConversationMessage,
@@ -99,8 +101,12 @@ function mountAssistant(): void {
   let busy = false;
   let modelsLoading = true;
   let modelOptions: AssistantModelOption[] = [];
-  let conversation: AssistantConversationMessage[] = [];
+  const history = new AssistantChatHistory(undefined, undefined, 'l2chart.workstation.assistant');
   const transcripts = new Map<AssistantProvider, AssistantConversationMessage[]>();
+  for (const source of ['codex', 'chatgpt'] as const) {
+    transcripts.set(source, history.get(history.activeId(source))?.messages ?? []);
+  }
+  let conversation: AssistantConversationMessage[] = transcripts.get(provider) ?? [];
   let connectionGeneration = 0;
 
   const dockToggle = createElement('button', 'workspace-dock-button');
@@ -132,7 +138,10 @@ function mountAssistant(): void {
         <strong>AI Chart Assistant</strong>
         <span id="assistant-status">Đang kiểm tra Codex…</span>
       </div>
-      <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
+      <div class="assistant-header-actions">
+        <button id="assistant-history-toggle" type="button" aria-expanded="false" aria-controls="assistant-history">Lịch sử</button>
+        <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
+      </div>
     </div>
     <div class="assistant-settings">
       <label class="assistant-provider-setting">Provider
@@ -181,6 +190,28 @@ function mountAssistant(): void {
   const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
   const form = view.querySelector<HTMLFormElement>('#assistant-form')!;
   const client = new AssistantApiClient();
+  const historyToggle = view.querySelector<HTMLButtonElement>('#assistant-history-toggle')!;
+  const settings = view.querySelector<HTMLElement>('.assistant-settings')!;
+  const historyView = new AssistantHistoryView(history, () => setHistoryOpen(false));
+  historyView.element.id = 'assistant-history';
+  view.insertBefore(historyView.element, messages);
+  function setHistoryOpen(open: boolean): void {
+    historyToggle.setAttribute('aria-expanded', String(open));
+    messages.hidden = open;
+    form.hidden = open;
+    settings.hidden = open;
+    historyView.element.hidden = !open;
+    if (open) historyView.showList();
+    else historyToggle.focus({ preventScroll: true });
+  }
+  historyToggle.addEventListener('click', () => setHistoryOpen(Boolean(historyView.element.hidden)));
+  historyView.element.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setHistoryOpen(false);
+    }
+  });
 
   const setConnectionStatus = (text: string, connected: boolean) => {
     status.textContent = text;
@@ -335,6 +366,7 @@ function mountAssistant(): void {
   };
 
   const openAssistant = () => {
+    setHistoryOpen(false);
     if (rightPanel.hidden) document.getElementById('right-panel-toggle')?.click();
     tabs.querySelectorAll<HTMLButtonElement>('button[data-right-tab]').forEach((button) => {
       button.classList.remove('active');
@@ -409,6 +441,8 @@ function mountAssistant(): void {
           persist();
         }
         conversation = [];
+        history.newChat(provider);
+        setHistoryOpen(false);
         messages.replaceChildren();
         appendMessage('assistant', `Đã mở cuộc trò chuyện ${providerLabel(provider)} mới cho chart hiện tại.`);
         setConnectionStatus(`${providerLabel(provider)} connected`, true);
@@ -425,6 +459,7 @@ function mountAssistant(): void {
 
   async function showStatus(command: string): Promise<void> {
     appendMessage('user', command);
+    history.append(provider, 'user', command);
     input.value = '';
     requestId = null;
     setBusy(true);
@@ -433,6 +468,7 @@ function mountAssistant(): void {
       const response = await client.status({ provider, model: model || null, reasoningEffort });
       thinking.remove();
       appendMessage('assistant', formatAssistantStatus(response, provider));
+      history.append(provider, 'assistant', formatAssistantStatus(response, provider));
       setConnectionStatus(
         provider === 'chatgpt' && response.bridgeConnected === false ? 'ChatGPT Bridge offline' : `${providerLabel(provider)} connected`,
         provider === 'codex' || response.bridgeConnected !== false,
@@ -441,6 +477,7 @@ function mountAssistant(): void {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
       appendMessage('assistant', `Lỗi: ${text}`);
+      history.append(provider, 'assistant', `Lỗi: ${text}`);
       setConnectionStatus(text, false);
     } finally {
       setBusy(false);
@@ -463,6 +500,7 @@ function mountAssistant(): void {
     }
 
     appendMessage('user', message);
+    history.append(provider, 'user', message);
     input.value = '';
     cancelRequested = false;
     setBusy(true);
@@ -494,6 +532,7 @@ function mountAssistant(): void {
       });
       thinking.remove();
       appendMessage('assistant', answer);
+      history.append(provider, 'assistant', answer);
       const nextConversation: AssistantConversationMessage[] = [
         ...conversation,
         { role: 'user', content: message },
@@ -505,6 +544,7 @@ function mountAssistant(): void {
       thinking.remove();
       const text = error instanceof Error ? error.message : String(error);
       appendMessage('assistant', `Lỗi: ${text}`);
+      history.append(provider, 'assistant', `Lỗi: ${text}`);
       setConnectionStatus(text, false);
     } finally {
       thinking.remove();
@@ -545,7 +585,8 @@ function mountAssistant(): void {
   void loadModelOptions();
 
   currentContext();
-  appendMessage('assistant', `${providerLabel(provider)} · Sẵn sàng. Dùng /status để xem kết nối và quota.`);
+  for (const message of conversation) appendMessage(message.role, message.content);
+  if (!conversation.length) appendMessage('assistant', `${providerLabel(provider)} · Sẵn sàng. Dùng /status để xem kết nối và quota.`);
 }
 
 if (document.readyState === 'loading') {

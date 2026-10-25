@@ -21,6 +21,7 @@
 .assistant-head { justify-content: space-between; }
 .assistant-head > div { display: grid; gap: 3px; min-width: 0; }
 .assistant-head strong { font-size: 13px; }
+.assistant-head > .assistant-header-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .assistant-head span { color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #assistant-status { display: flex; align-items: center; gap: 6px; }
 #assistant-status::before {
@@ -144,6 +145,37 @@ body.light .assistant-settings select { color-scheme: light; }
 }
 
 .assistant-message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.assistant-history[hidden],
+.assistant-messages[hidden],
+.assistant-form[hidden],
+.assistant-settings[hidden] { display: none !important; }
+
+.assistant-history {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+.assistant-history-header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.assistant-history-header strong { flex: 1; font-size: 12px; }
+.assistant-history button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.assistant-history button:hover { background: var(--surface-hover); }
+.assistant-history-items { display: flex; flex-direction: column; gap: 10px; overflow: auto; min-height: 0; }
+.assistant-history-entry { display: grid; gap: 5px; text-align: left; }
+.assistant-history-entry strong,
+.assistant-history-entry span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.assistant-history-entry small { color: var(--text-dim); font-size: 10px; }
+.assistant-history-entry span { font-size: 11px; }
 
 .assistant-message-thinking {
   width: max-content;

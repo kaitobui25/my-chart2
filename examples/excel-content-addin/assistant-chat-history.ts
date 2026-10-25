@@ -1,7 +1,5 @@
 import type { AssistantConversationMessage, AssistantProvider } from '../assistant/types';
 
-const HISTORY_KEY = 'l2chart.excel.assistant.history.v1';
-const ACTIVE_KEY = 'l2chart.excel.assistant.history.active.v1.';
 const MAX_CHATS = 40;
 const MAX_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH = 8000;
@@ -51,26 +49,27 @@ export class AssistantChatHistory {
   constructor(
     private readonly storage: StorageReader | null = browserStorage('local'),
     private readonly session: SessionReader | null = browserStorage('session'),
+    private readonly namespace = 'l2chart.excel.assistant',
   ) {}
 
   activeId(provider: AssistantProvider): string {
     if (this.fallbackIds[provider]) return this.fallbackIds[provider];
     let existing: string | null = null;
-    try { existing = this.session?.getItem(ACTIVE_KEY + provider) ?? null; } catch { /* optional */ }
+    try { existing = this.session?.getItem(`${this.namespace}.history.active.v1.${provider}`) ?? null; } catch { /* optional */ }
     const id = existing && ID_PATTERN.test(existing) ? existing : crypto.randomUUID();
     this.fallbackIds[provider] = id;
-    try { this.session?.setItem(ACTIVE_KEY + provider, id); } catch { /* optional */ }
+    try { this.session?.setItem(`${this.namespace}.history.active.v1.${provider}`, id); } catch { /* optional */ }
     return id;
   }
 
   newChat(provider: AssistantProvider): void {
     delete this.fallbackIds[provider];
-    try { this.session?.removeItem(ACTIVE_KEY + provider); } catch { /* optional */ }
+    try { this.session?.removeItem(`${this.namespace}.history.active.v1.${provider}`); } catch { /* optional */ }
   }
 
   list(): AssistantHistoryEntry[] {
     try {
-      const raw = this.storage?.getItem(HISTORY_KEY);
+      const raw = this.storage?.getItem(`${this.namespace}.history.v1`);
       return raw ? validEntries(JSON.parse(raw)) : [];
     } catch {
       return [];
@@ -106,6 +105,6 @@ export class AssistantChatHistory {
       entries.pop();
       serialized = JSON.stringify({ version: 1, entries });
     }
-    try { this.storage?.setItem(HISTORY_KEY, serialized); } catch { /* storage is optional */ }
+    try { this.storage?.setItem(`${this.namespace}.history.v1`, serialized); } catch { /* storage is optional */ }
   }
 }
