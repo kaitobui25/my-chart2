@@ -4,6 +4,10 @@ The workstation and Excel add-in support Codex CLI and ChatGPT Web through the l
 
 The workstation's **Lịch sử** button opens a local archive for both providers. Messages survive page reloads and New Chat; selecting an archived entry is read-only and does not replace the active AI session. Workstation history is stored separately from Excel, limited to 40 conversations and 100 messages per conversation (8,000 characters per message).
 
+Model and reasoning settings apply on the next Send or New Chat, rather than immediately when a dropdown changes. With **ChatGPT current**, the bridge retains the native model and applies the requested reasoning through its Power control. It verifies the selected effort before sending; an unsupported or unconfirmed effort returns an error without sending the prompt.
+
+The Reasoning dropdown lists only levels reported by the selected model. For ChatGPT current, the extension reads the native Power positions and restores the original setting after inspection. If native capabilities cannot be determined, reasoning stays unavailable instead of offering assumed levels.
+
 ## Start
 
 1. Install dependencies once with `npm install`.
@@ -35,6 +39,8 @@ LAMlongchart retains local chart context for every question so read-only tool ca
 Generic language such as "multi-timeframe analysis" does not automatically load every timeframe. If more data is needed, ChatGPT or Codex may request `get_candles` or `get_indicator`; the chart bridge runs those read-only queries and sends back only the new results in the same native conversation. Each model response may request up to two queries, for at most three data rounds. Missing data is reported as an error rather than guessed. Tool-result continuations omit the earlier question and candle snapshot because they are already in the native conversation.
 
 ## Tests
+
+ChatGPT Web model/reasoning discovery is cached in the extension's persistent local storage for 24 hours. Opening more charts or restarting the extension reuses that result without loading ChatGPT again. Concurrent requests share one inspection. A temporary inspection tab opens in the background and closes afterward. Failed inspections are also remembered for 24 hours to avoid repeatedly opening tabs; after signing in or changing accounts/models, use the workstation assistant's ↻ button to refresh immediately. Sending a message still validates the requested reasoning against the live web UI and requires a ChatGPT tab.
 
 ```bash
 node --test examples/sidecars/assistant/tests/*.test.mjs

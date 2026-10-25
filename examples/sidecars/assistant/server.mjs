@@ -241,7 +241,7 @@ const server = http.createServer(async (request, response) => {
       const provider = assistantProvider(url.searchParams.get('provider'))
       const payload = provider === 'codex'
         ? await getCodexOptions({ runtimeRoot: RUNTIME_ROOT })
-        : await chatGptProvider.options()
+        : await chatGptProvider.options({ refresh: url.searchParams.get('refresh') === '1' })
       return sendJson(response, 200, payload)
     }
     if (request.method === 'POST' && url.pathname === '/status') {

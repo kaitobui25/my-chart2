@@ -31,6 +31,7 @@ export class AssistantPanelView {
   private thinking: HTMLElement | null = null;
 
   constructor() {
+    this.reasoning.title = 'Áp dụng và xác nhận trên provider khi gửi câu hỏi.';
     this.renderReasoningOptions(ALL_REASONING_EFFORTS, 'medium');
   }
 
@@ -137,13 +138,14 @@ export class AssistantPanelView {
   }
 
   setBusy(busy: boolean, cancellable = false): void {
-    this.send.disabled = busy;
+    const reasoningUnavailable = !this.reasoning.value;
+    this.send.disabled = busy || reasoningUnavailable;
     this.cancel.hidden = !busy || !cancellable;
     this.cancel.disabled = !cancellable;
-    this.fresh.disabled = busy;
+    this.fresh.disabled = busy || reasoningUnavailable;
     this.provider.disabled = busy;
     this.model.disabled = busy;
-    this.reasoning.disabled = busy;
+    this.reasoning.disabled = busy || reasoningUnavailable;
     this.historyToggle.disabled = busy;
   }
 
@@ -177,7 +179,15 @@ export class AssistantPanelView {
     efforts: readonly ReasoningEffort[],
     selected: ReasoningEffort,
   ): void {
-    const available = efforts.length > 0 ? efforts : ALL_REASONING_EFFORTS;
+    const available = efforts;
+    if (!available.length) {
+      const unknown = document.createElement('option');
+      unknown.value = '';
+      unknown.textContent = 'Chưa xác định được';
+      this.reasoning.replaceChildren(unknown);
+      this.reasoning.disabled = true;
+      return;
+    }
     this.reasoning.replaceChildren(...available.map((effort) => {
       const option = document.createElement('option');
       option.value = effort;

@@ -87,7 +87,9 @@ export class AssistantApiClient {
       throw new AssistantApiError(
         payload.code === 'CHATGPT_LOGIN_REQUIRED'
           ? 'ChatGPT Web chưa đăng nhập. Hãy đăng nhập chatgpt.com trong trình duyệt đang chạy LAM ChatGPT Bridge, rồi thử lại.'
-          : typeof payload.error === 'string' ? payload.error : `AI request failed (${response.status}).`,
+          : ['REQUESTED_REASONING_UNAVAILABLE', 'REASONING_CONTROL_UNAVAILABLE', 'MODEL_SELECTION_NOT_CONFIRMED'].includes(String(payload.code))
+            ? 'Chưa xác nhận được mức Reasoning đã chọn trên ChatGPT Web. Tin nhắn chưa được gửi; hãy chọn mức được model hỗ trợ rồi thử lại.'
+            : typeof payload.error === 'string' ? payload.error : `AI request failed (${response.status}).`,
         response.status,
         typeof payload.code === 'string' ? payload.code : 'ASSISTANT_ERROR',
       );
@@ -99,8 +101,8 @@ export class AssistantApiClient {
     return this.request(`/health?provider=${encodeURIComponent(provider)}`);
   }
 
-  options(provider: AssistantProvider = 'chatgpt'): Promise<AssistantOptionsResponse> {
-    return this.request(`/options?provider=${encodeURIComponent(provider)}`);
+  options(provider: AssistantProvider = 'chatgpt', refresh = false): Promise<AssistantOptionsResponse> {
+    return this.request(`/options?provider=${encodeURIComponent(provider)}${refresh ? '&refresh=1' : ''}`);
   }
 
   status(payload: {

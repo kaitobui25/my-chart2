@@ -46,7 +46,7 @@ export class ExcelAssistantController {
   private conversation: AssistantConversationMessage[] = [];
   private codexThreadId: string | null = null;
   private modelOptions: CodexModelOption[] = [];
-  private defaultReasoningEfforts: ReasoningEffort[] = [...ALL_REASONING_EFFORTS];
+  private defaultReasoningEfforts: ReasoningEffort[] = [];
   private provider: AssistantProvider = EXCEL_ASSISTANT_CONFIG.defaultProvider;
   private model = '';
   private reasoningEffort: ReasoningEffort = EXCEL_ASSISTANT_CONFIG.defaultReasoningEffort;
@@ -61,6 +61,8 @@ export class ExcelAssistantController {
 
   constructor(private readonly bridge: AssistantBridge) {
     this.restoreSettings();
+    this.view.renderReasoningOptions([], this.reasoningEffort);
+    this.view.setBusy(false);
     this.view.provider.value = this.provider;
     this.bindEvents();
     if (this.provider === 'codex') this.restoreCodexTranscript();
@@ -234,8 +236,8 @@ export class ExcelAssistantController {
       this.defaultReasoningEfforts = Array.isArray(response.reasoningEfforts)
         ? response.reasoningEfforts.filter(isReasoningEffort)
         : [...ALL_REASONING_EFFORTS];
-      if (this.defaultReasoningEfforts.length === 0) {
-        this.defaultReasoningEfforts = [...ALL_REASONING_EFFORTS];
+      if (!this.defaultReasoningEfforts.includes(this.reasoningEffort) && response.currentReasoningEffort) {
+        this.reasoningEffort = response.currentReasoningEffort;
       }
       if (this.model && !this.modelOptions.some((option) => option.id === this.model)) {
         this.model = '';
@@ -243,7 +245,7 @@ export class ExcelAssistantController {
     } catch {
       if (provider !== this.provider || generation !== this.providerGeneration) return;
       this.modelOptions = [];
-      this.defaultReasoningEfforts = [...ALL_REASONING_EFFORTS];
+      this.defaultReasoningEfforts = provider === 'codex' ? ['low', 'medium', 'high', 'xhigh'] : [];
     }
     this.view.setModels(this.modelOptions, this.model, provider);
     this.applyModelSelection(this.model, false);
@@ -259,7 +261,7 @@ export class ExcelAssistantController {
     this.model = '';
     this.reasoningEffort = EXCEL_ASSISTANT_CONFIG.defaultReasoningEffort;
     this.modelOptions = [];
-    this.defaultReasoningEfforts = [...ALL_REASONING_EFFORTS];
+    this.defaultReasoningEfforts = [];
     this.conversation = [];
     if (this.provider === 'codex') {
       this.restoreCodexTranscript();
@@ -293,11 +295,12 @@ export class ExcelAssistantController {
         ? preferred
         : supported[0] ?? EXCEL_ASSISTANT_CONFIG.defaultReasoningEffort;
     this.view.renderReasoningOptions(supported, this.reasoningEffort);
+    this.view.setBusy(this.busy, this.requestId !== null);
     if (persist) this.persistSettings();
   }
 
   private async newConversation(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || !this.view.reasoning.value) return;
     this.setBusy(true, false);
     try {
       const response = await this.client.newConversation({
@@ -338,6 +341,7 @@ export class ExcelAssistantController {
       await this.showStatus(message);
       return;
     }
+    if (!this.view.reasoning.value) return;
 
     const baseContext = this.bridge.getContext();
     if (!baseContext) {

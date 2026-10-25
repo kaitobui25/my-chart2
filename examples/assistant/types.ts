@@ -93,6 +93,7 @@ export interface AssistantModelOption {
 export interface AssistantOptionsResponse {
   models: AssistantModelOption[];
   reasoningEfforts: ReasoningEffort[];
+  currentReasoningEffort?: ReasoningEffort | null;
 }
 
 /** @deprecated Kept for the Excel demo while the shared assistant API becomes provider-neutral. */

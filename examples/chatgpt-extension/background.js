@@ -220,7 +220,38 @@ function unwrapContent(reply, fallback = 'chatgpt_content_error') {
   throw error;
 }
 
-async function processModels() {
+const MODEL_CACHE_KEY = 'l2chart.chatgpt.models.v1';
+const MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+let modelsInFlight = null;
+
+async function processModels(payload = {}) {
+  if (modelsInFlight) return await modelsInFlight;
+  modelsInFlight = (async () => {
+    const stored = (await chrome.storage.local.get(MODEL_CACHE_KEY))[MODEL_CACHE_KEY];
+    if (payload.refresh !== true && stored && Date.now() < stored.expiresAt) {
+      if (stored.error) throw new Error(stored.error);
+      return stored.data;
+    }
+    try {
+      const data = await inspectModelsTab();
+      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: {
+        data, expiresAt: Date.now() + MODEL_CACHE_TTL_MS
+      } });
+      return data;
+    } catch (error) {
+      // Cache failures too so reopening charts cannot repeatedly open tabs.
+      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: {
+        error: error instanceof Error ? error.message : String(error),
+        expiresAt: Date.now() + MODEL_CACHE_TTL_MS
+      } });
+      throw error;
+    }
+  })();
+  try { return await modelsInFlight; }
+  finally { modelsInFlight = null; }
+}
+
+async function inspectModelsTab() {
   const current = await readBinding();
   let candidate = current && await tabById(current.tabId) ? current : null;
   let temporary = false;
@@ -230,7 +261,8 @@ async function processModels() {
   }
   try {
     const reply = unwrapContent(await sendToContent(candidate.tabId, { type: 'l2chart:models' }, 90_000));
-    return { models: reply.models ?? [] };
+    return { models: reply.models ?? [], reasoningEfforts: reply.reasoningEfforts ?? [],
+      currentReasoningEffort: reply.currentReasoningEffort ?? null };
   } finally {
     if (temporary) await closeOwnedTab(candidate);
   }
@@ -318,7 +350,7 @@ async function processCommand(command) {
     throw new Error('invalid_bridge_command');
   }
   const payload = command.payload && typeof command.payload === 'object' ? command.payload : {};
-  if (command.type === 'models') return await processModels();
+  if (command.type === 'models') return await processModels(payload);
   if (command.type === 'new_chat') return await processNewChat(payload);
   if (command.type === 'chat_send') return await processChatSend(payload);
   if (command.type === 'cancel') return await processCancel(payload);

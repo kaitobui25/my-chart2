@@ -25,10 +25,8 @@ function requestedSelection(model, reasoningEffort) {
     : null
   return {
     model: selectedModel,
-    // "ChatGPT current" means leave the native selection untouched. Sending an
-    // effort without an explicit model forces older extension builds to open the
-    // native model picker, which is unnecessary and brittle.
-    reasoningEffort: selectedModel ? normalizedEffort(reasoningEffort) : null
+    // A missing model preserves the current model, not the requested effort.
+    reasoningEffort: reasoningEffort == null ? null : normalizedEffort(reasoningEffort)
   }
 }
 
@@ -146,13 +144,16 @@ export class ChatGptProvider {
     state.lastSelection = null
   }
 
-  async options() {
-    const handle = this.bridge.dispatch('models', {}, { timeoutMs: Math.min(this.commandTimeoutMs, 60_000) })
+  async options({ refresh = false } = {}) {
+    const handle = this.bridge.dispatch('models', refresh ? { refresh: true } : {}, { timeoutMs: Math.min(this.commandTimeoutMs, 60_000) })
     const payload = await handle.promise
     const models = normalizeChatGptModelCatalog(payload)
     return {
       models,
-      reasoningEfforts: CHATGPT_REASONING_EFFORTS
+      reasoningEfforts: [...new Set((Array.isArray(payload?.reasoningEfforts) ? payload.reasoningEfforts : [])
+        .filter(effort => CHATGPT_REASONING_EFFORTS.includes(effort)))],
+      currentReasoningEffort: CHATGPT_REASONING_EFFORTS.includes(payload?.currentReasoningEffort)
+        ? payload.currentReasoningEffort : null
     }
   }
 

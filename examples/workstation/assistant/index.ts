@@ -90,9 +90,11 @@ function mountAssistant(): void {
   try {
     if (localStorage.getItem(PROVIDER_STORAGE_KEY) === 'chatgpt') provider = 'chatgpt';
   } catch { /* Default to Codex when storage is unavailable. */ }
-  const allowedEfforts = (): ReasoningEffort[] => provider === 'codex' ? CODEX_REASONING_EFFORTS : ALL_REASONING_EFFORTS;
+  let providerReasoningEfforts: ReasoningEffort[] = provider === 'codex' ? CODEX_REASONING_EFFORTS : [];
+  let nativeReasoningEffort: ReasoningEffort | null = null;
+  const allowedEfforts = (): ReasoningEffort[] => providerReasoningEfforts;
   const saved = readSettings(provider);
-  let reasoningEffort: ReasoningEffort = saved.reasoningEffort && allowedEfforts().includes(saved.reasoningEffort)
+  let reasoningEffort: ReasoningEffort = saved.reasoningEffort && ALL_REASONING_EFFORTS.includes(saved.reasoningEffort)
     ? saved.reasoningEffort as ReasoningEffort
     : 'medium';
   let model = saved.model?.trim() ?? '';
@@ -139,6 +141,7 @@ function mountAssistant(): void {
         <span id="assistant-status">Đang kiểm tra Codex…</span>
       </div>
       <div class="assistant-header-actions">
+        <button id="assistant-refresh-options" type="button" title="Làm mới model và reasoning (cache 24 giờ)">↻</button>
         <button id="assistant-history-toggle" type="button" aria-expanded="false" aria-controls="assistant-history">Lịch sử</button>
         <button id="assistant-new" type="button" title="Cuộc trò chuyện mới">New</button>
       </div>
@@ -155,7 +158,7 @@ function mountAssistant(): void {
           <option value="">Đang tải model…</option>
         </select>
       </label>
-      <label>Reasoning
+      <label>Reasoning <small>(áp dụng khi gửi)</small>
         <select id="assistant-reasoning">
           <option value="low">Low</option>
           <option value="medium">Medium</option>
@@ -185,6 +188,7 @@ function mountAssistant(): void {
   const cancel = view.querySelector<HTMLButtonElement>('#assistant-cancel')!;
   const fresh = view.querySelector<HTMLButtonElement>('#assistant-new')!;
   const modelSelect = view.querySelector<HTMLSelectElement>('#assistant-model')!;
+  const refreshOptions = view.querySelector<HTMLButtonElement>('#assistant-refresh-options')!;
   const providerSelect = view.querySelector<HTMLSelectElement>('#assistant-provider')!;
   providerSelect.value = provider;
   const reasoningSelect = view.querySelector<HTMLSelectElement>('#assistant-reasoning')!;
@@ -245,11 +249,14 @@ function mountAssistant(): void {
 
   const setBusy = (value: boolean) => {
     busy = value;
+    const reasoningUnavailable = !reasoningSelect.value;
     input.disabled = value;
-    send.disabled = value || modelsLoading;
-    fresh.disabled = value || modelsLoading;
+    send.disabled = value || modelsLoading || reasoningUnavailable;
+    fresh.disabled = value || modelsLoading || reasoningUnavailable;
     modelSelect.disabled = value || modelsLoading;
-    reasoningSelect.disabled = value || modelsLoading;
+    refreshOptions.disabled = value || modelsLoading;
+    refreshOptions.hidden = provider !== 'chatgpt';
+    reasoningSelect.disabled = value || modelsLoading || reasoningUnavailable;
     providerSelect.disabled = value;
     cancel.disabled = !value || requestId === null;
   };
@@ -258,7 +265,14 @@ function mountAssistant(): void {
     allowed: ReasoningEffort[] = allowedEfforts(),
     preferred: ReasoningEffort = reasoningEffort,
   ) => {
-    const available = allowed.length > 0 ? allowed : allowedEfforts();
+    const available = allowed;
+    if (!available.length) {
+      const pending = document.createElement('option');
+      pending.value = '';
+      pending.textContent = modelsLoading ? 'Đang tải…' : 'Chưa xác định được';
+      reasoningSelect.replaceChildren(pending);
+      return;
+    }
     const next = available.includes(reasoningEffort)
       ? reasoningEffort
       : available.includes(preferred)
@@ -283,9 +297,10 @@ function mountAssistant(): void {
     const selected = selectedModelOption();
     renderReasoningOptions(
       selected?.supportedReasoningEfforts ?? allowedEfforts(),
-      selected?.defaultReasoningEffort ?? reasoningEffort,
+      selected?.defaultReasoningEffort ?? nativeReasoningEffort ?? reasoningEffort,
     );
     persist();
+    setBusy(busy);
   };
 
   const renderModelOptions = () => {
@@ -314,21 +329,29 @@ function mountAssistant(): void {
     applyModelSelection();
   };
 
-  const loadModelOptions = async () => {
+  const loadModelOptions = async (refresh = false) => {
     const selectedProvider = provider;
     const generation = connectionGeneration;
     modelsLoading = true;
     modelOptions = [];
+    providerReasoningEfforts = selectedProvider === 'codex' ? CODEX_REASONING_EFFORTS : [];
+    nativeReasoningEffort = null;
     renderModelOptions();
     setBusy(busy);
     try {
-      const response = await client.options(selectedProvider);
+      const response = await client.options(selectedProvider, refresh);
       if (generation !== connectionGeneration) return;
       modelOptions = Array.isArray(response.models) ? response.models : [];
-      modelSelect.title = `${modelOptions.length} model từ ${providerLabel(provider)}`;
+      if (model && !modelOptions.some(option => option.id === model)) model = '';
+      providerReasoningEfforts = (response.reasoningEfforts ?? []).filter(effort => ALL_REASONING_EFFORTS.includes(effort));
+      nativeReasoningEffort = response.currentReasoningEffort ?? null;
+      modelSelect.title = selectedProvider === 'chatgpt' && !modelOptions.length
+        ? 'Dùng model hiện tại trên ChatGPT Web'
+        : `${modelOptions.length} model từ ${providerLabel(provider)}`;
     } catch (error) {
       if (generation !== connectionGeneration) return;
       modelOptions = [];
+      providerReasoningEfforts = selectedProvider === 'codex' ? CODEX_REASONING_EFFORTS : [];
       modelSelect.title = error instanceof Error ? error.message : String(error);
       setConnectionStatus(modelSelect.title, false);
     } finally {
@@ -405,13 +428,16 @@ function mountAssistant(): void {
   rightPanelObserver.observe(rightPanel, { attributes: true, attributeFilter: ['hidden'] });
 
   modelSelect.addEventListener('change', applyModelSelection);
+  refreshOptions.addEventListener('click', () => void loadModelOptions(true));
   providerSelect.addEventListener('change', () => {
     transcripts.set(provider, conversation);
     persist();
     provider = providerSelect.value === 'chatgpt' ? 'chatgpt' : 'codex';
+    providerReasoningEfforts = provider === 'codex' ? CODEX_REASONING_EFFORTS : [];
+    nativeReasoningEffort = null;
     const settings = readSettings(provider);
     model = settings.model?.trim() ?? '';
-    reasoningEffort = settings.reasoningEffort && allowedEfforts().includes(settings.reasoningEffort)
+    reasoningEffort = settings.reasoningEffort && ALL_REASONING_EFFORTS.includes(settings.reasoningEffort)
       ? settings.reasoningEffort : 'medium';
     conversation = transcripts.get(provider) ?? [];
     messages.replaceChildren();
@@ -492,6 +518,7 @@ function mountAssistant(): void {
       await showStatus(message);
       return;
     }
+    if (!reasoningSelect.value || modelsLoading) return;
 
     const baseContext = currentContext();
     if (!baseContext) {
@@ -586,7 +613,7 @@ function mountAssistant(): void {
 
   currentContext();
   for (const message of conversation) appendMessage(message.role, message.content);
-  if (!conversation.length) appendMessage('assistant', `${providerLabel(provider)} · Sẵn sàng. Dùng /status để xem kết nối và quota.`);
+  if (!conversation.length) appendMessage('assistant', `${providerLabel(provider)} · Dùng /status để xem kết nối và quota.`);
 }
 
 if (document.readyState === 'loading') {

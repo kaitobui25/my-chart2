@@ -460,12 +460,84 @@
     .toLowerCase()
     .replace(/[^\p{L}\p{N}.]/gu, '');
 
+  async function selectCurrentModelEffort(effort, stillCurrent) {
+    if (!EFFORTS.includes(effort)) return { ok: false, error: 'requested_reasoning_unavailable' };
+    const triggers = () => [...(composer()?.closest('form')?.querySelectorAll(
+      '[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort]'
+    ) || [])].filter(visible);
+    const trigger = await waitFor(() => {
+      const nodes = triggers();
+      return nodes.length === 1 ? nodes[0] : null;
+    }, 10_000, stillCurrent);
+    if (!trigger) return { ok: false, error: 'reasoning_control_unavailable' };
+    const ui = pickerAccess(stillCurrent);
+    let selection = null;
+    let closed = false;
+    const changes = [];
+    const panel = () => document.querySelector(PICKER);
+    const selectedModel = () => {
+      const rows = [...(panel()?.querySelectorAll('[role="menuitemradio"][aria-checked="true"]') || [])];
+      return rows.length === 1 ? String(rows[0].textContent || '').trim() : null;
+    };
+    try {
+      if (!visible(panel())) {
+        trigger.focus();
+        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      }
+      const model = await waitFor(() => visible(panel()) && selectedModel(), 3_500, stillCurrent);
+      if (!model) return { ok: false, error: 'model_selection_not_confirmed' };
+      for (let count = 0; count < EFFORTS.length; count += 1) {
+        const nodes = triggers();
+        if (nodes.length !== 1 || selectedModel() !== model || !stillCurrent()) break;
+        const current = nodes[0].getAttribute('data-selected-reasoning-effort');
+        if (current === effort) {
+          selection = { model, reasoningEffort: effort };
+          break;
+        }
+        const position = EFFORTS.indexOf(current);
+        if (position < 0) break;
+        const controls = [...panel().querySelectorAll('[role="menuitem"][aria-keyshortcuts]')]
+          .filter(node => visible(node) && node.getAttribute('aria-keyshortcuts').includes('ArrowRight'));
+        if (controls.length !== 1 || controls[0].getAttribute('aria-disabled') === 'true') break;
+        const key = EFFORTS.indexOf(effort) > position ? 'ArrowRight' : 'ArrowLeft';
+        controls[0].focus();
+        controls[0].dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+        const changed = await waitFor(() => {
+          const updated = triggers();
+          return updated.length === 1 && updated[0].getAttribute('data-selected-reasoning-effort') !== current;
+        }, 2_000, stillCurrent);
+        if (!changed) break;
+        changes.push({ key, effort: current, model });
+      }
+    } finally {
+      // A rejected request must not leave the browser on an intermediate power setting.
+      if (!selection && stillCurrent()) {
+        for (const previous of changes.reverse()) {
+          const controls = [...(panel()?.querySelectorAll('[role="menuitem"][aria-keyshortcuts]') || [])].filter(visible);
+          if (controls.length !== 1) break;
+          const key = previous.key === 'ArrowRight' ? 'ArrowLeft' : 'ArrowRight';
+          controls[0].focus();
+          controls[0].dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+          if (!await waitFor(() => {
+            const nodes = triggers();
+            return nodes.length === 1 && nodes[0].getAttribute('data-selected-reasoning-effort') === previous.effort
+              && selectedModel() === previous.model;
+          }, 2_000, stillCurrent)) break;
+        }
+      }
+      closed = await ui.close();
+    }
+    const after = triggers();
+    return selection && closed && stillCurrent() && after.length === 1
+      && after[0].getAttribute('data-selected-reasoning-effort') === effort
+      ? { ok: true, selection }
+      : { ok: false, error: 'requested_reasoning_unavailable' };
+  }
+
   async function selectModelSettings(model, effort, stillCurrent) {
-    // "ChatGPT current" must not depend on the model picker. The picker is an
-    // optional native control whose DOM/React shape can change independently of
-    // the composer. If no explicit model was requested, keep ChatGPT's current
-    // native selection and continue with Send instead of blocking chat.
-    if (!model) return { ok: true, selection: null };
+    if (!model) return effort
+      ? await selectCurrentModelEffort(effort, stillCurrent)
+      : { ok: true, selection: null };
     const ui = pickerAccess(stillCurrent);
     const original = await ui.open();
     if (!original) {
@@ -543,6 +615,10 @@
   }
 
   async function inspectModels(stillCurrent) {
+    // Current web builds expose Power directly even when React model metadata is unavailable.
+    if (await waitFor(() => composer()?.closest('form')?.querySelector(
+      '[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort]'
+    ), 10_000, stillCurrent)) return await inspectCurrentModelEfforts(stillCurrent);
     const ui = pickerAccess(stillCurrent);
     const original = await ui.open();
     if (!original) {
@@ -577,8 +653,81 @@
       }
       closed = await ui.close();
     }
+    const current = original.choices.find(choice => choice.bucket === original.currentBucket);
     return restored && closed
-      ? { ok: true, models: [...catalog.values()] }
+      ? { ok: true, models: [...catalog.values()],
+          reasoningEfforts: [...new Set(original.choices.filter(choice => choice.available && choice.familyId === current?.familyId).map(choice => choice.effort))],
+          currentReasoningEffort: current?.effort ?? null }
+      : { ok: false, error: 'model_picker_restore_failed' };
+  }
+
+  async function inspectCurrentModelEfforts(stillCurrent) {
+    const triggers = () => [...(composer()?.closest('form')?.querySelectorAll(
+      '[data-composer-navigation-target="reasoning"][data-selected-reasoning-effort]'
+    ) || [])].filter(visible);
+    const nodes = triggers();
+    if (nodes.length !== 1) return { ok: false, error: 'reasoning_control_unavailable' };
+    const panel = () => document.querySelector(PICKER);
+    const ui = pickerAccess(stillCurrent);
+    const read = () => {
+      const menu = panel();
+      const slider = menu?.querySelector('[role="slider"][aria-valuenow][aria-valuemin][aria-valuemax]');
+      const models = [...(menu?.querySelectorAll('[role="menuitemradio"][aria-checked="true"]') || [])];
+      const controls = [...(menu?.querySelectorAll('[role="menuitem"][aria-keyshortcuts]') || [])]
+        .filter(node => visible(node) && node.getAttribute('aria-keyshortcuts').includes('ArrowRight'));
+      const current = triggers();
+      if (!slider || models.length !== 1 || controls.length !== 1 || current.length !== 1) return null;
+      const index = Number(slider.getAttribute('aria-valuenow'));
+      const min = Number(slider.getAttribute('aria-valuemin'));
+      const max = Number(slider.getAttribute('aria-valuemax'));
+      const effort = current[0].getAttribute('data-selected-reasoning-effort');
+      const model = String(models[0].textContent || '').trim();
+      return [index, min, max].every(Number.isInteger) && min >= 0 && max >= min && max - min < 12
+        && index >= min && index <= max && EFFORTS.includes(effort) && model
+        ? { index, min, max, effort, model, control: controls[0] } : null;
+    };
+    const move = async target => {
+      for (let step = 0; step < 12; step += 1) {
+        const before = read();
+        if (!before || !stillCurrent()) return null;
+        if (before.index === target) return before;
+        const key = target > before.index ? 'ArrowRight' : 'ArrowLeft';
+        before.control.focus();
+        before.control.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+        if (!await waitFor(() => {
+          const after = read();
+          return after && after.index !== before.index ? after : null;
+        }, 2_000, stillCurrent)) return null;
+      }
+      return null;
+    };
+    let original = null;
+    let restored = false;
+    let closed = false;
+    const efforts = new Set();
+    let complete = false;
+    try {
+      if (!visible(panel())) {
+        nodes[0].focus();
+        nodes[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      }
+      original = await waitFor(read, 3_500, stillCurrent);
+      if (!original) return { ok: false, error: 'reasoning_control_unavailable' };
+      for (let index = original.min; index <= original.max; index += 1) {
+        const state = await move(index);
+        if (!state || state.model !== original.model) break;
+        efforts.add(state.effort);
+        complete = index === original.max;
+      }
+    } finally {
+      if (original && stillCurrent()) {
+        const state = await move(original.index);
+        restored = state?.model === original.model && state.effort === original.effort;
+      }
+      closed = await ui.close();
+    }
+    return complete && restored && closed
+      ? { ok: true, models: [], reasoningEfforts: [...efforts], currentReasoningEffort: original.effort }
       : { ok: false, error: 'model_picker_restore_failed' };
   }
 

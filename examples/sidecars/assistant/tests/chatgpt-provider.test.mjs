@@ -7,6 +7,20 @@ import {
 
 const CLIENT_SESSION_ID = '11111111-1111-4111-8111-111111111111'
 
+test('options expose only the reasoning levels reported by the native current model', async () => {
+  const provider = new ChatGptProvider({
+    dispatch: () => ({ promise: Promise.resolve({ models: [], reasoningEfforts: ['none', 'medium', 'high', 'invented'], currentReasoningEffort: 'high' }) }),
+  })
+  const options = await provider.options()
+  assert.deepEqual(options.reasoningEfforts, ['none', 'medium', 'high'])
+  assert.equal(options.currentReasoningEffort, 'high')
+})
+
+test('options never fall back to every possible effort when native capabilities are unknown', async () => {
+  const provider = new ChatGptProvider({ dispatch: () => ({ promise: Promise.resolve({ models: [] }) }) })
+  assert.deepEqual((await provider.options()).reasoningEfforts, [])
+})
+
 test('normalizes the native ChatGPT model catalog without inventing efforts', () => {
   const models = normalizeChatGptModelCatalog({
     models: [
@@ -67,7 +81,7 @@ test('binds the first native conversation and reuses it on the next turn', async
   assert.equal(commands[1].payload.conversationId, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee')
 })
 
-test('keeps ChatGPT current independent from the native model picker', async () => {
+test('forwards reasoning independently from the current ChatGPT model', async () => {
   const commands = []
   const bridge = {
     status: () => ({ connected: true }),
@@ -89,12 +103,12 @@ test('keeps ChatGPT current independent from the native model picker', async () 
     clientSessionId: CLIENT_SESSION_ID,
     requestId: 'request-current',
     model: null,
-    reasoningEffort: 'medium',
+    reasoningEffort: 'high',
     prompt: 'test'
   })
   assert.equal(commands[0].type, 'chat_send')
   assert.equal(commands[0].payload.model, null)
-  assert.equal(commands[0].payload.reasoningEffort, null)
+  assert.equal(commands[0].payload.reasoningEffort, 'high')
 })
 
 test('scopes native status reads to the requesting client session', async () => {
