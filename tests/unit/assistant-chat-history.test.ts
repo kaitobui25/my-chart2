@@ -11,6 +11,19 @@ function memoryStorage() {
 }
 
 describe('Excel assistant chat history', () => {
+  it('preserves the native session ID across messages and reloads without assigning it to New Chat', () => {
+    const local = memoryStorage(), session = memoryStorage();
+    const history = new AssistantChatHistory(local, session);
+    const nativeId = crypto.randomUUID();
+    history.append('chatgpt', 'user', 'Question');
+    history.bindSession('chatgpt', nativeId);
+    history.append('chatgpt', 'assistant', 'Answer');
+    expect(new AssistantChatHistory(local, session).list()[0].nativeSessionId).toBe(nativeId);
+    history.newChat('chatgpt');
+    history.append('chatgpt', 'user', 'New question');
+    expect(history.list()[0].nativeSessionId).toBeUndefined();
+    expect(history.list()[1].nativeSessionId).toBe(nativeId);
+  });
   it('isolates Workstation chats from Excel and restores active entries after reload', () => {
     const local = memoryStorage();
     const session = memoryStorage();

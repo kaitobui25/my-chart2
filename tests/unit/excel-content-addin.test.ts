@@ -738,7 +738,7 @@ describe('Excel assistant configuration', () => {
     expect(elements.get('#assistant-history')!.hidden).toBe(false);
     expect(elements.get('#assistant-form')!.hidden).toBe(true);
     expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
-    elements.get('#assistant-history-items')!.children[0].dispatchEvent(new Event('click'));
+    elements.get('#assistant-history-items')!.children[0].children[0].dispatchEvent(new Event('click'));
     expect(elements.get('#assistant-history-items')!.children.length).toBe(2);
     elements.get('#assistant-history-back')!.dispatchEvent(new Event('click'));
     expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
@@ -761,7 +761,7 @@ describe('Excel assistant configuration', () => {
     });
     historyButton.dispatchEvent(new Event('click'));
     expect(elements.get('#assistant-history-items')!.children.length).toBe(1);
-    elements.get('#assistant-history-items')!.children[0].dispatchEvent(new Event('click'));
+    elements.get('#assistant-history-items')!.children[0].children[0].dispatchEvent(new Event('click'));
     expect(elements.get('#assistant-history-items')!.children.length).toBe(2);
     elements.get('#assistant-history-close')!.dispatchEvent(new Event('click'));
     restored.dispose();

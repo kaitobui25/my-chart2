@@ -1,4 +1,5 @@
 import { AssistantChatHistory } from '../../excel-content-addin/assistant-chat-history';
+import { withHistoryActions } from '../../assistant/history-actions';
 
 /** Read-only archive. Opening an entry never changes the active AI conversation. */
 export class AssistantHistoryView {
@@ -42,7 +43,7 @@ export class AssistantHistoryView {
       preview.textContent = entry.messages[entry.messages.length - 1]?.content ?? '';
       button.append(title, details, preview);
       button.addEventListener('click', () => this.showEntry(entry.id));
-      this.items.append(button);
+      this.items.append(withHistoryActions(entry, button));
     }
     if (!this.items.childElementCount) this.items.textContent = 'Chưa có lịch sử trò chuyện.';
     this.items.scrollTop = 0;

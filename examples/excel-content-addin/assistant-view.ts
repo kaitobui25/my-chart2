@@ -1,6 +1,7 @@
 import type { AssistantProvider, CodexModelOption, ReasoningEffort } from '../assistant/types';
 import type { AssistantHistoryEntry } from './assistant-chat-history';
 import { ALL_REASONING_EFFORTS, REASONING_LABELS } from './assistant-config';
+import { withHistoryActions } from '../assistant/history-actions';
 
 export type AssistantMessageRole = 'user' | 'assistant';
 
@@ -110,7 +111,7 @@ export class AssistantPanelView {
       preview.textContent = entry.messages[entry.messages.length - 1]?.content ?? '';
       button.append(title, details, preview);
       button.addEventListener('click', () => onSelect(entry.id));
-      nodes.push(button);
+      nodes.push(withHistoryActions(entry, button));
     }
     if (!nodes.length) {
       const empty = document.createElement('p');

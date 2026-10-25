@@ -4,6 +4,8 @@ The workstation and Excel add-in support Codex CLI and ChatGPT Web through the l
 
 The workstation's **Lịch sử** button opens a local archive for both providers. Messages survive page reloads and New Chat; selecting an archived entry is read-only and does not replace the active AI session. Workstation history is stored separately from Excel, limited to 40 conversations and 100 messages per conversation (8,000 characters per message).
 
+Each archived chat in workstation and Excel has a **…** action showing its native ChatGPT/Codex session ID. Click the ID to copy it; successful copies display a confirmation. IDs are recorded from chat responses for subsequent turns and persist with the archive. Older entries without this metadata show a clearly labeled local history ID instead; that local ID cannot resume a native conversation.
+
 Model and reasoning settings apply on the next Send or New Chat, rather than immediately when a dropdown changes. With **ChatGPT current**, the bridge retains the native model and applies the requested reasoning through its Power control. It verifies the selected effort before sending; an unsupported or unconfirmed effort returns an error without sending the prompt.
 
 The Reasoning dropdown lists only levels reported by the selected model. For ChatGPT current, the extension reads the native Power positions and restores the original setting after inspection. If native capabilities cannot be determined, reasoning stays unavailable instead of offering assumed levels.

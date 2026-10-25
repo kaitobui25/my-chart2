@@ -62,8 +62,10 @@ describe('AI read-only chart data requests', () => {
   });
 
   it('runs a Codex data request and uses the returned data in the next model turn', async () => {
+    const nativeId = crypto.randomUUID();
+    const onSessionId = vi.fn();
     const replies = [
-      { message: '', requests: [request('get_indicator')] },
+      { message: '', requests: [request('get_indicator')], conversationId: nativeId },
       { message: 'RSI was computed from the chart.' },
     ];
     const chat = vi.fn(async (_payload: ChatRequest) => replies.shift()!);
@@ -79,10 +81,12 @@ describe('AI read-only chart data requests', () => {
     const answer = await runAssistantTurn({
       client: { chat } as unknown as AssistantApiClient, bridge, context,
       message: 'Check RSI', conversation: [], provider: 'codex',
+      onSessionId,
       model: null, reasoningEffort: 'medium',
       setRequestId: () => undefined, cancelled: () => false,
     });
     expect(answer).toBe('RSI was computed from the chart.');
+    expect(onSessionId).toHaveBeenCalledWith(nativeId);
     expect(chat).toHaveBeenCalledTimes(2);
     expect(queryData).toHaveBeenCalledOnce();
     expect(chat.mock.calls[1][0].toolResults).toEqual([

@@ -23,6 +23,7 @@ export async function runAssistantTurn(options: {
   reasoningEffort: ReasoningEffort;
   setRequestId(id: string | null): void;
   cancelled(): boolean;
+  onSessionId?(id: string): void;
 }): Promise<string> {
   let latestResults: AssistantDataResult[] = [];
   const queried = new Map<string, Promise<AssistantDataResult>>();
@@ -41,6 +42,7 @@ export async function runAssistantTurn(options: {
       ...(latestResults.length ? { toolResults: latestResults } : {}),
     };
     const reply = await options.client.chat(payload);
+    if (reply.conversationId) options.onSessionId?.(reply.conversationId);
     if (options.cancelled()) throw new Error('Request cancelled.');
     if (!reply.requests?.length) {
       if (!reply.message?.trim()) throw new Error('AI returned an empty answer.');

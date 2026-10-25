@@ -366,6 +366,7 @@ export class ExcelAssistantController {
       if (this.cancelRequested) throw new Error('Request cancelled.');
       this.renderContext(context);
       const answer = await runAssistantTurn({
+        onSessionId: id => this.history.bindSession(this.provider, id),
         client: this.client,
         bridge: this.bridge,
         context,

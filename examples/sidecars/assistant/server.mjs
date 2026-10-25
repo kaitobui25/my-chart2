@@ -186,7 +186,10 @@ async function handleChat(request, response) {
         }, REQUEST_TIMEOUT_MS)
       })
     ])
-    return sendJson(response, 200, provider === 'chatgpt' ? parseNativeResponse(result.message) : result)
+    const conversationId = provider === 'chatgpt'
+      ? chatGptProvider.stateFor(body.clientSessionId).conversationId
+      : await codexProvider.sessionFor(body.clientSessionId)
+    return sendJson(response, 200, { ...(provider === 'chatgpt' ? parseNativeResponse(result.message) : result), conversationId })
   } finally {
     clearTimeout(timeout)
     activeRequests.delete(body.requestId)

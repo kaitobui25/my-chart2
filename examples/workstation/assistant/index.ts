@@ -495,6 +495,7 @@ function mountAssistant(): void {
       thinking.remove();
       appendMessage('assistant', formatAssistantStatus(response, provider));
       history.append(provider, 'assistant', formatAssistantStatus(response, provider));
+      if (response.conversationId) history.bindSession(provider, response.conversationId);
       setConnectionStatus(
         provider === 'chatgpt' && response.bridgeConnected === false ? 'ChatGPT Bridge offline' : `${providerLabel(provider)} connected`,
         provider === 'codex' || response.bridgeConnected !== false,
@@ -543,6 +544,7 @@ function mountAssistant(): void {
         contextBadge.textContent = `${context.symbol} · ${context.timeframe} · ${context.candleCount} nến · + ${extras}`;
       }
       const answer = await runAssistantTurn({
+        onSessionId: id => history.bindSession(provider, id),
         client,
         bridge: window.__L2CHART_ASSISTANT__!,
         context,

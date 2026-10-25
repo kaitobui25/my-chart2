@@ -82,6 +82,7 @@ export interface AssistantDataResult {
 
 export interface AssistantResponse {
   message: string;
+  conversationId?: string | null;
   requests?: AssistantDataRequest[];
 }
 

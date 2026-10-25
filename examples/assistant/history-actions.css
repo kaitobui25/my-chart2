@@ -1,0 +1,6 @@
+.assistant-history-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 4px; flex: none; }
+.assistant-history-row > .assistant-history-entry { min-width: 0; }
+.assistant-history-more { align-self: start; padding: 4px; font-size: 18px; }
+.assistant-history-session { grid-column: 1 / -1; display: grid; gap: 5px; padding: 6px; }
+.assistant-history-session[hidden] { display: none; }
+.assistant-history-session button { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: left; user-select: text; }

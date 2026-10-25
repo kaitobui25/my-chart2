@@ -18,6 +18,7 @@ export interface AssistantHistoryEntry {
   provider: AssistantProvider;
   updatedAt: number;
   messages: AssistantConversationMessage[];
+  nativeSessionId?: string;
 }
 
 function validMessages(value: unknown): AssistantConversationMessage[] {
@@ -37,12 +38,13 @@ function validEntries(value: unknown): AssistantHistoryEntry[] {
       || !Number.isFinite(entry.updatedAt)) return [];
     const messages = validMessages(entry.messages);
     return messages.some(message => message.role === 'user')
-      ? [{ id: entry.id, provider: entry.provider, updatedAt: entry.updatedAt, messages }]
+      ? [{ id: entry.id, provider: entry.provider, updatedAt: entry.updatedAt, messages,
+          ...(typeof entry.nativeSessionId === 'string' && ID_PATTERN.test(entry.nativeSessionId) ? { nativeSessionId: entry.nativeSessionId } : {}) }]
       : [];
   });
 }
 
-/** Browsable local transcript snapshots; never used as native AI session IDs or model context. */
+/** Local transcripts; native session IDs are archive metadata, never used to resume a session. */
 export class AssistantChatHistory {
   private readonly fallbackIds: Partial<Record<AssistantProvider, string>> = {};
 
@@ -94,11 +96,20 @@ export class AssistantChatHistory {
     this.save(id, provider, [...(previous?.messages ?? []), { role, content }], entries);
   }
 
-  private save(id: string, provider: AssistantProvider, source: AssistantConversationMessage[], previous: AssistantHistoryEntry[]): void {
+  bindSession(provider: AssistantProvider, nativeSessionId: string): void {
+    if (!ID_PATTERN.test(nativeSessionId)) return;
+    const id = this.activeId(provider);
+    const entries = this.list();
+    const entry = entries.find(item => item.id === id);
+    if (entry) this.save(id, provider, entry.messages, entries, nativeSessionId);
+  }
+
+  private save(id: string, provider: AssistantProvider, source: AssistantConversationMessage[], previous: AssistantHistoryEntry[], sessionId?: string): void {
     const messages = validMessages(source);
     if (!messages.some(message => message.role === 'user')) return;
     const entries = previous.filter(entry => entry.id !== id);
-    entries.unshift({ id, provider, updatedAt: Date.now(), messages });
+    const nativeSessionId = sessionId ?? previous.find(entry => entry.id === id)?.nativeSessionId;
+    entries.unshift({ id, provider, updatedAt: Date.now(), messages, ...(nativeSessionId ? { nativeSessionId } : {}) });
     entries.length = Math.min(entries.length, MAX_CHATS);
     let serialized = JSON.stringify({ version: 1, entries });
     while (serialized.length > MAX_STORAGE_CHARS && entries.length > 1) {
